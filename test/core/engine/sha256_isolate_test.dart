@@ -53,6 +53,15 @@ void main() {
     await expectLater(h.close(), throwsA(anything));
   });
 
+  test('add after abort is ignored, close after abort fails', () async {
+    final h = await Sha256Isolate.spawn();
+    await h.add(Uint8List(10));
+    h.abort();
+    await h.add(Uint8List(10));
+    await h.addFilePrefix(path, 10);
+    expect(h.close, throwsStateError);
+  });
+
   test('readFileChunks honors start, end and chunk size', () async {
     final chunks = await readFileChunks(
       path,

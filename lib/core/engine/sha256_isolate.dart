@@ -33,6 +33,7 @@ class Sha256Isolate {
   Completer<String>? _digest;
   Object? _error;
   bool _closed = false;
+  bool _aborted = false;
 
   static Future<Sha256Isolate> spawn({int maxInFlight = 4}) async {
     final fromWorker = ReceivePort();
@@ -97,9 +98,11 @@ class Sha256Isolate {
   }
 
   Future<void> _send(Object message) async {
+    if (_aborted) return;
     _checkUsable();
     while (_inFlight >= maxInFlight) {
       await (_slot ??= Completer<void>()).future;
+      if (_aborted) return;
       _checkUsable();
     }
     _inFlight++;
@@ -115,9 +118,16 @@ class Sha256Isolate {
     return digest.future;
   }
 
-  /// Stops the worker without a digest.
+  /// Stops the worker without a digest. Later [add] and [addFilePrefix]
+  /// calls are ignored, so a producer that is still running when its
+  /// transfer is cancelled does not fail.
   void abort() {
+    if (_aborted) return;
+    _aborted = true;
     _closed = true;
+    final slot = _slot;
+    _slot = null;
+    slot?.complete();
     _dispose();
   }
 
