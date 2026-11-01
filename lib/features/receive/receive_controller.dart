@@ -174,9 +174,11 @@ class ReceiveController extends Notifier<ReceiveState> {
     final interfaces = await NetworkInterface.list(
       type: InternetAddressType.IPv4,
     );
+    // Interface names help pick the Wi-Fi address (e.g. wlan0, en0) over
+    // mobile data or VPN interfaces.
     return [
       for (final i in interfaces)
-        for (final a in i.addresses) a.address,
+        for (final a in i.addresses) '${a.address}  (${i.name})',
     ];
   }
 }

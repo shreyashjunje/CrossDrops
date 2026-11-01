@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
@@ -11,6 +10,7 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 
 import '../engine/chunked_reader.dart';
+import '../log.dart';
 import '../engine/sha256_isolate.dart';
 import '../protocol/models.dart';
 import '../storage/file_name_sanitizer.dart';
@@ -385,6 +385,5 @@ class ReceiveServer {
   static Response _notFound() =>
       _error(404, ErrorCodes.notFound, 'unknown session, file or route');
 
-  static void _log(String message) =>
-      developer.log(message, name: 'crossdrop.server');
+  static void _log(String message) => logEvent('server', message);
 }
