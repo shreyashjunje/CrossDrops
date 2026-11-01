@@ -1,12 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:developer' as developer;
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 
 import '../engine/chunked_reader.dart';
+import '../log.dart';
 import '../engine/sha256_isolate.dart';
 import '../engine/speed_meter.dart';
 import '../protocol/models.dart';
@@ -62,22 +61,33 @@ class UploadClient {
   UploadClient({
     required this.host,
     required this.port,
-    Duration connectTimeout = const Duration(seconds: 10),
-  }) : _http = _insecureHttpClient()..connectionTimeout = connectTimeout;
+    this.connectTimeout = const Duration(seconds: 10),
+    this.stallTimeout = const Duration(seconds: 15),
+  }) {
+    _http = _newHttpClient();
+  }
 
   final String host;
   final int port;
-  final HttpClient _http;
+
+  /// An upload that makes no progress for this long is aborted
+  /// (ARCHITECTURE.md, "Wi-Fi drops mid-transfer"). Also the response
+  /// timeout for control requests.
+  final Duration stallTimeout;
+  final Duration connectTimeout;
+  late HttpClient _http;
   HttpClientRequest? _active;
+  Completer<Never>? _abort;
   bool _cancelled = false;
 
   // TODO(phase4): remove. This accepts ANY server certificate (no pinning,
   // no client certificate), so it gives encryption but no protection from a
   // man in the middle. Phase 4 replaces it with mutual TLS pinned to the
   // receiver's fingerprint, with no fallback (CLAUDE.md hard rule 4).
-  static HttpClient _insecureHttpClient() =>
+  HttpClient _newHttpClient() =>
       HttpClient(context: SecurityContext(withTrustedRoots: false))
-        ..badCertificateCallback = (_, _, _) => true;
+        ..connectionTimeout = connectTimeout
+        ..badCertificateCallback = ((_, _, _) => true);
 
   Uri _url(String path, [Map<String, String>? query]) => Uri(
     scheme: 'https',
@@ -150,7 +160,10 @@ class UploadClient {
       'POST',
       '${_filePath(t)}/complete',
       CompleteRequest(sha256: sha).toJson(),
+      // The receiver may have to hash the whole file from disk.
+      const Duration(minutes: 2),
     );
+    _log('file ${t.fileId}: verified and saved by receiver');
     return sha;
   }
 
@@ -163,18 +176,40 @@ class UploadClient {
     final hasher = await Sha256Isolate.spawn();
     final meter = SpeedMeter()..add(offset);
     var sent = offset;
+    // Completes with an error on stall or cancel. Every wait on the socket
+    // races against it: a blocked flush on a dead peer never completes.
+    final abort = _abort = Completer<Never>();
+    Timer? watchdog;
+    void kick() {
+      watchdog?.cancel();
+      watchdog = Timer(stallTimeout, () => _stop(_stalledError()));
+    }
+
+    Future<T> guarded<T>(Future<T> f) => Future.any([f, abort.future]);
+
     try {
+      _checkCancelled();
       // Rebuild the hash of bytes the receiver already has, from disk.
       await hasher.addFilePrefix(t.path, offset);
-
-      Stream<Uint8List> body() async* {
+      final HttpClientResponse res;
+      try {
+        kick();
+        final req = await guarded(
+          _http.openUrl('PUT', _url(_filePath(t), {'offset': '$offset'})),
+        );
+        _active = req;
+        req.contentLength = t.size - offset;
+        req.headers.contentType = ContentType.binary;
         await for (final chunk in readFileChunks(
           t.path,
           start: offset,
           end: t.size,
         )) {
-          await hasher.add(chunk);
-          yield chunk;
+          await guarded(hasher.add(chunk));
+          req.add(chunk);
+          // At most one chunk waits in the socket buffer.
+          await guarded(req.flush());
+          kick();
           sent += chunk.length;
           meter.add(sent);
           onProgress?.call(
@@ -185,26 +220,17 @@ class UploadClient {
             ),
           );
         }
-      }
-
-      final HttpClientResponse res;
-      try {
-        _checkCancelled();
-        final req = _active = await _http.openUrl(
-          'PUT',
-          _url(_filePath(t), {'offset': '$offset'}),
-        );
-        req.contentLength = t.size - offset;
-        req.headers.contentType = ContentType.binary;
-        await req.addStream(body());
-        res = await req.close();
+        // Waits for the receiver's response headers, still guarded.
+        res = await guarded(req.close());
       } on UploadException {
         rethrow;
       } on Exception catch (e) {
         _checkCancelled();
         throw UploadException('network', e.toString());
       } finally {
+        watchdog?.cancel();
         _active = null;
+        _abort = null;
       }
       final json = await _decode(res);
       final status = FileStatus.fromJson(json);
@@ -215,8 +241,11 @@ class UploadClient {
         );
       }
       return await hasher.close();
-    } catch (_) {
+    } catch (e) {
       hasher.abort();
+      // Error code or type only: messages can contain file paths.
+      final reason = e is UploadException ? e.code : e.runtimeType;
+      _log('file ${t.fileId}: stopped at $sent bytes ($reason)');
       rethrow;
     }
   }
@@ -225,10 +254,24 @@ class UploadClient {
   /// receiver; call [transfer] again to resume.
   void cancel() {
     _cancelled = true;
-    _active?.abort(const UploadException('cancelled', 'cancelled by user'));
+    _stop(const UploadException('cancelled', 'cancelled by user'));
+  }
+
+  /// Fails the running upload with [reason] and destroys its socket.
+  /// The HttpClient is replaced because aborting a request does not free a
+  /// socket whose peer is gone.
+  void _stop(UploadException reason) {
+    final abort = _abort;
+    if (abort != null && !abort.isCompleted) abort.completeError(reason);
+    _active?.abort(reason);
+    _http.close(force: true);
+    _http = _newHttpClient();
   }
 
   void close() => _http.close(force: true);
+
+  UploadException _stalledError() =>
+      UploadException('stalled', 'no progress for ${stallTimeout.inSeconds} s');
 
   void _checkCancelled() {
     if (_cancelled) {
@@ -243,16 +286,23 @@ class UploadClient {
     String method,
     String path, [
     Object? body,
+    Duration? timeout,
   ]) async {
-    try {
+    Future<Map<String, Object?>> run() async {
       final req = await _http.openUrl(method, _url(path));
       if (body != null) {
         req.headers.contentType = ContentType.json;
         req.add(utf8.encode(jsonEncode(body)));
       }
-      return await _decode(await req.close());
+      return _decode(await req.close());
+    }
+
+    try {
+      return await run().timeout(timeout ?? stallTimeout);
     } on UploadException {
       rethrow;
+    } on TimeoutException {
+      throw const UploadException('network', 'no response from receiver');
     } on Exception catch (e) {
       throw UploadException('network', e.toString());
     }
@@ -283,6 +333,5 @@ class UploadClient {
     return json;
   }
 
-  static void _log(String message) =>
-      developer.log(message, name: 'crossdrop.client');
+  static void _log(String message) => logEvent('client', message);
 }
