@@ -31,7 +31,28 @@ CrossDrop v1 is a Flutter app in which each phone runs a small encrypted HTTPS s
 
 ## System overview
 
-&#91;embedded content: system layers · shared Dart core over two native modules\]
+```mermaid
+flowchart TB
+  subgraph Dart["Shared Dart core (same code on both phones)"]
+    UI["UI: features<br/>home, nearby, send, receive, transfer, hotspot, history, settings"]
+    State["State: Riverpod providers"]
+    Engine["Transfer engine<br/>chunking, resume, hashing isolate, queue"]
+    Net["HTTPS server and client<br/>protocol, versioning, retry and backoff"]
+    Sec["Security<br/>identity, certificates, pinning, 6-digit code"]
+    Disc["Discovery<br/>bonsoir wrapper, TXT parsing"]
+    Store["Storage<br/>database, temp files, cleanup"]
+    UI --> State --> Engine
+    Engine --> Net
+    Engine --> Store
+    Net --> Sec
+    UI --> Disc
+  end
+  Dart --> PC["Platform channels (paths and file descriptors only, never file bytes)"]
+  PC --> IOS["iOS module (Swift)<br/>PhotoKit export and save, hotspot join, background task, Bonjour, Share Extension"]
+  PC --> AND["Android module (Kotlin)<br/>MediaStore save, fd streaming, LocalOnlyHotspot, foreground service, NSD, multicast lock, network binding, share intents"]
+```
+
+> Diagram drafted from the prose and the Platform modules and Code structure sections. Please review.
 
 Everything above the platform channels is shared Dart code that runs the same on both phones. The two native modules only handle what the OS requires: photo library, hotspot, background behavior, Bonjour/NSD and sharing from other apps.
 
@@ -56,13 +77,49 @@ Three scenarios are supported in v1: shared Wi-Fi, an Android hotspot, and an iP
 
 ## Connection flow
 
-&#91;embedded content: connection flow · 3 modes, 2 decisions\]
+```mermaid
+flowchart TD
+  Start([User opens CrossDrop]) --> Wifi["Mode 1: same Wi-Fi<br/>Bonjour/mDNS discovery"]
+  Wifi --> D1{"Device found<br/>within about 5 s?"}
+  D1 -- Yes --> Code["Tap device in nearby list<br/>6-digit code check if untrusted"]
+  D1 -- No --> QR["Mode 2: QR code<br/>receiver shows IP, port, fingerprint; sender scans"]
+  QR --> D2{"Connect succeeds<br/>within 5-10 s?"}
+  D2 -- Yes --> TLS
+  D2 -- No --> Hot["Mode 3: hotspot<br/>Android LocalOnlyHotspot with Wi-Fi QR,<br/>or iPhone Personal Hotspot enabled manually"]
+  Hot --> TLS
+  Code --> TLS["Mutual-TLS session with pinned certificates"]
+  TLS --> Engine([Transfer session])
+```
+
+> Diagram drafted from the Connectivity scenarios and Failure handling sections. Please review.
 
 The app tries the easiest mode first and moves to the next only when one fails. Every path ends in the same mutual-TLS session, so the transfer engine never cares how the phones are connected.
 
 ## Transfer session
 
-&#91;embedded content: transfer session · offer, accept, stream, resume, verify\]
+```mermaid
+sequenceDiagram
+  participant S as Sender (client)
+  participant R as Receiver (server)
+  S->>R: GET /v1/info
+  R-->>S: id, name, platform, versions
+  S->>R: POST /v1/sessions (manifest)
+  R-->>S: sessionId, status pending
+  S->>R: WS /v1/sessions/{id}/events
+  Note over R: Free-space check, user taps Accept
+  R-->>S: event accepted (or rejected)
+  S->>R: PUT /files/{fileId}?offset=0 (streamed body)
+  R-->>S: event progress
+  Note over S,R: Connection interrupted
+  S->>R: GET /files/{fileId}
+  R-->>S: receivedBytes = N
+  S->>R: PUT /files/{fileId}?offset=N
+  S->>R: POST /files/{fileId}/complete (SHA-256)
+  Note over R: Verify hash, save, remove .part
+  R-->>S: event file_done
+```
+
+> Diagram drafted from the Protocol spec and Transfer rules sections. Please review.
 
 Solid arrows are sender requests; dashed arrows are receiver replies and events. After an interruption, the sender asks how much arrived and continues from that byte, so nothing is sent twice.
 
