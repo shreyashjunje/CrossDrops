@@ -7,3 +7,4 @@
 - [BENCHMARKS.md](BENCHMARKS.md): measured transfer speeds on real devices.
 - [features/](features/): one doc per feature, written from [features/_TEMPLATE.md](features/_TEMPLATE.md).
   - [file-transfer-poc.md](features/file-transfer-poc.md): Phase 1 proof of concept, HTTPS server and streaming client with resume and SHA-256 check.
+- [TODAY-2026-11-02.md](TODAY-2026-11-02.md): short list of what was built, tested and left open on day one.
