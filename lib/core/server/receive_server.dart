@@ -675,6 +675,12 @@ class ReceiveServer {
         unawaited(oldest.close());
       }
       s.sockets.add(socket);
+      // Writes to a sender that vanished fail here, not at add(); without a
+      // handler they would surface as uncaught errors.
+      ws.sink.done.then(
+        (_) => s.sockets.remove(socket),
+        onError: (Object _) => s.sockets.remove(socket),
+      );
       ws.stream.listen(
         (_) {}, // The sender has nothing to say on this socket.
         onDone: () => s.sockets.remove(socket),

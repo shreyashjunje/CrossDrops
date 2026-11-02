@@ -120,6 +120,7 @@ class UploadClient {
   HttpClientRequest? _active;
   Completer<Never>? _abort;
   bool _cancelled = false;
+  bool _pauseRequested = false;
 
   // TODO(phase4): remove. This accepts ANY server certificate (no pinning,
   // no client certificate), so it gives encryption but no protection from a
@@ -175,10 +176,9 @@ class UploadClient {
       throw const UploadException('network', 'event socket timed out');
     } on WebSocketException catch (e) {
       throw UploadException('network', e.message);
-    } on SocketException catch (e) {
-      throw UploadException('network', e.message);
-    } on HttpException catch (e) {
-      throw UploadException('network', e.message);
+    } on Exception catch (e) {
+      // Socket, TLS handshake and HTTP errors.
+      throw UploadException('network', e.runtimeType.toString());
     }
   }
 
@@ -337,6 +337,13 @@ class UploadClient {
           // At most one chunk waits in the socket buffer.
           await guarded(req.flush());
           kick();
+          if (_pauseRequested) {
+            // The current chunk is out; the receiver keeps every byte.
+            _pauseRequested = false;
+            const paused = UploadException('paused', 'paused by app');
+            req.abort(paused);
+            throw paused;
+          }
           sent += chunk.length;
           meter.add(sent);
           onProgress?.call(
@@ -357,6 +364,11 @@ class UploadClient {
       } on Exception catch (e) {
         _checkCancelled();
         throw UploadException('network', e.toString());
+      } on StateError {
+        // The socket closed between two chunks: "Cannot add event after
+        // closing".
+        _checkCancelled();
+        throw const UploadException('network', 'connection closed');
       } finally {
         watchdog?.cancel();
         _active = null;
@@ -377,6 +389,12 @@ class UploadClient {
       _log('file ${t.fileId}: stopped at $sent bytes ($reason)');
       rethrow;
     }
+  }
+
+  /// Stops the running upload after its current chunk with code `paused`
+  /// (app going to the background). The next [put] runs normally.
+  void requestPause() {
+    if (_active != null) _pauseRequested = true;
   }
 
   /// Aborts the running upload. Bytes already received stay on the
