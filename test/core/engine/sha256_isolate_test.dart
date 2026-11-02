@@ -44,6 +44,7 @@ void main() {
       final digest = hasher.close();
       hasher.abort();
       await expectLater(digest, throwsA(isA<StateError>()));
+      await hasher.exited;
     });
   });
 

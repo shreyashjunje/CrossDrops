@@ -16,6 +16,7 @@ class Sha256Isolate {
   Sha256Isolate._(
     this._isolate,
     this._toWorker,
+    this._control,
     this._fromWorker,
     Stream<Object?> messages,
     this.maxInFlight,
@@ -26,6 +27,11 @@ class Sha256Isolate {
 
   final Isolate _isolate;
   final SendPort _toWorker;
+
+  /// Read by the worker between file chunks, so a long file read stops
+  /// quickly and closes its file (killing the isolate would leave the file
+  /// open until garbage collection).
+  final SendPort _control;
   final ReceivePort _fromWorker;
   final int maxInFlight;
 
@@ -49,13 +55,14 @@ class Sha256Isolate {
       onExit: exitPort.sendPort,
     );
     final exited = exitPort.first.then((_) => exitPort.close());
-    // The first message is the worker's SendPort; the rest go to _onMessage.
+    // The first message is the worker's ports; the rest go to _onMessage.
     // The worker sends nothing else until it receives work.
     final messages = fromWorker.asBroadcastStream();
-    final toWorker = await messages.first as SendPort;
+    final ports = await messages.first as List<Object?>;
     return Sha256Isolate._(
       isolate,
-      toWorker,
+      ports[0]! as SendPort,
+      ports[1]! as SendPort,
       fromWorker,
       messages,
       maxInFlight,
@@ -154,7 +161,14 @@ class Sha256Isolate {
 
   void _dispose() {
     _fromWorker.close();
-    _isolate.kill(priority: Isolate.immediate);
+    _control.send(true);
+    _toWorker.send(const ['stop']);
+    // The worker exits by itself once it sees the stop; kill it only if it
+    // is stuck.
+    exited.timeout(
+      const Duration(seconds: 2),
+      onTimeout: () => _isolate.kill(priority: Isolate.immediate),
+    );
   }
 }
 
@@ -218,12 +232,17 @@ class _DigestSink implements Sink<Digest> {
 
 Future<void> _workerMain(SendPort toMain) async {
   final inbox = ReceivePort();
-  toMain.send(inbox.sendPort);
+  final control = ReceivePort();
+  var stopped = false;
+  control.listen((_) => stopped = true);
+  toMain.send([inbox.sendPort, control.sendPort]);
   final out = _DigestSink();
   final input = sha256.startChunkedConversion(out);
   try {
     // Messages are processed strictly in order.
+    loop:
     await for (final msg in inbox) {
+      if (stopped) break;
       final list = msg as List;
       switch (list[0]) {
         case 'chunk':
@@ -232,21 +251,27 @@ Future<void> _workerMain(SendPort toMain) async {
           );
           toMain.send('ack');
         case 'file':
+          // Breaking out closes the file.
           await for (final chunk in readFileChunks(
             list[1] as String,
             end: list[2] as int,
           )) {
+            if (stopped) break loop;
             input.add(chunk);
           }
           toMain.send('ack');
         case 'close':
           input.close();
           toMain.send(['digest', out.value.toString()]);
-          inbox.close();
+          break loop;
+        case 'stop':
+          break loop;
       }
     }
   } catch (e) {
     toMain.send(['error', e.toString()]);
+  } finally {
     inbox.close();
+    control.close();
   }
 }
