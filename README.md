@@ -6,6 +6,7 @@ CrossDrop is a Flutter app that sends photos, videos and files directly between 
 - **Phase 1, file transfer proof of concept:** built and tested on devices.
 - **Phase 2, discovery and QR connect:** built and tested on devices.
 - **Phase 3, transfer engine:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 3) are pending.
+- **Phase 4, security:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 4) are pending.
 
 What works in the code today:
 
@@ -14,8 +15,11 @@ What works in the code today:
 - Cancel from either side, with progress, speed and time left on both.
 - The screen stays on during transfers. Android keeps going with the screen off (foreground service). iPhone saves and pauses in the background, then continues.
 - Phones on the same Wi-Fi find each other through Bonjour while the receiver has Receive open. A QR code and a typed IP and port are the fallbacks.
+- Each phone has its own key; its certificate fingerprint is its identity. Every connection is TLS 1.3, pinned to the receiver, and the sender proves its key with a signed challenge (`dart:io` cannot do mutual TLS with unknown certificates, D-027).
+- New devices are checked with a 6-digit code shown on both phones. Trusted devices skip the code, can be set to auto-accept, and a trusted name with another key is flagged.
+- A Receiving switch, rate limits and request size limits keep strangers on the Wi-Fi out.
 
-Not yet built: pinned mutual TLS (the client currently accepts any certificate, see D-011), saving to Photos or the gallery, hotspot mode, and the final transfer UI.
+Not yet built: saving to Photos or the gallery, hotspot mode, and the final transfer UI.
 
 ## Build and test
 
@@ -24,6 +28,7 @@ flutter pub get
 flutter analyze
 flutter test                      # unit tests, no phones needed
 flutter test --run-skipped --tags large  # 2 GB test, needs ~4 GB disk
+dart run tool/crossdrop_cli.dart        # dev tool: send to / receive from a phone, fake-qr
 flutter run --release -d <device> # Android from any PC; iPhone needs a Mac with Xcode
 ```
 

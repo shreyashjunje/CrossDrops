@@ -2,6 +2,48 @@
 
 All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Keep a Changelog](https://keepachangelog.com): group entries under Added, Changed, Fixed or Removed, under a heading of the date (`## YYYY-MM-DD`) or version once releases exist.
 
+## 2026-11-03
+
+### Added (Phase 4)
+- Device identity ([features/device-identity.md](features/device-identity.md)):
+  - An ECDSA P-256 key and self-signed certificate are made on first launch. The certificate's SHA-256 is the device identity.
+  - The key is in the iOS Keychain (this device only) or Android Keystore-protected storage. A reinstall or a lost key gives a new identity.
+  - Settings shows the first 16 characters ("Security key").
+- Pairing and trust ([features/pairing-and-trust.md](features/pairing-and-trust.md)):
+  - Every connection uses TLS 1.3, pinned to the receiver's fingerprint (from the QR, the trusted record, or the first contact checked against the TXT hint).
+  - The sender proves its key with a signed challenge (`/v1/auth/challenge`, `/v1/auth`) and gets a token. Sessions belong to that fingerprint.
+  - A 6-digit pairing code from both fingerprints and committed nonces, shown on both phones for untrusted senders.
+  - "Trust this device" in the Accept prompt and after a send. Trusted devices in Settings, with auto-accept per device and forget.
+  - A clear warning when a trusted name or id comes with another key.
+- Abuse limits ([features/abuse-limits.md](features/abuse-limits.md)):
+  - A Receiving switch (Receive screen and Settings).
+  - Rate limits per IP for offers and auth (429).
+  - Header (431) and body (413) limits.
+  - Capped auth tables, and a 30 s idle timeout.
+- Database schema 3: `trusted_devices`, `settings`, `sessions.peerFingerprint`. The v2 → v3 migration is tested.
+- Dev CLI: prints the pairing code; `fake-qr` writes a QR with a wrong fingerprint for the tampered-QR check.
+- Tests without phones:
+  - Fingerprint and code derivation (same on both sides, different per peer, known answer).
+  - Pinning failure, including a chain-substitution attack.
+  - Forged, relayed and replayed authentication.
+  - Session isolation between senders, and an unknown fingerprint trying to send.
+  - The Receiving switch, auto-accept, rate and size limits.
+  - Reinstall and lost-key identity changes.
+- Docs: Security model rewritten in ARCHITECTURE.md (with what dart:io can and cannot do), decisions D-027 to D-033, Phase 4 device checks.
+- Packages: `flutter_secure_storage` (key storage, D-030); `qr` as a dev dependency for the CLI.
+
+### Changed (Phase 4)
+- "One unfinished session per sender" now uses the proven fingerprint, not the claimed id.
+- `POST /v1/sessions` replies with `trusted`. Offers refused because receiving is off end as "rejected" on the sender.
+- Unfinished transfers stored before Phase 4 cannot be resumed (they have no fingerprint to pin): received ones are marked failed, and sent ones ask to send again.
+- Android app backup and device-to-device transfer are off.
+
+### Removed (Phase 4)
+- The Phase 1 client that accepted any server certificate (D-011), and the per-launch certificate.
+
+### Fixed
+- The dev CLI compiles again under plain `dart`: the core database no longer imports Flutter.
+
 ## 2026-11-02
 
 ### Added (Phase 3)

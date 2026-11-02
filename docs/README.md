@@ -12,4 +12,7 @@
   - [transfer-engine.md](features/transfer-engine.md): Phase 3 session flow, Accept prompt, send queue, events, cancel, safety limits.
   - [resume.md](features/resume.md): Phase 3 resume after drops and restarts, checkpoints, backoff, 24-hour cleanup.
   - [keep-alive.md](features/keep-alive.md): Phase 3 screen on, Android foreground service, iOS background task.
+  - [device-identity.md](features/device-identity.md): Phase 4 key pair and certificate, Keychain / Keystore storage, fingerprint as identity, reinstall.
+  - [pairing-and-trust.md](features/pairing-and-trust.md): Phase 4 pinned TLS, sender authentication, 6-digit code, trusted devices, auto-accept, lookalike warnings.
+  - [abuse-limits.md](features/abuse-limits.md): Phase 4 Receiving switch, rate limits, request limits, server lifetime.
 - [TODAY-2026-11-02.md](TODAY-2026-11-02.md): short list of what was built, tested and left open on day one.

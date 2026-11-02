@@ -522,3 +522,146 @@ The 24-hour cleanup of partial files, hostile names, wrong sizes, hash mismatche
 | P3-6 Android → iPhone | | | | | | |
 | P3-7 iPhone → Android | | | | | | |
 | P3-7 Android → iPhone | | | | | | |
+
+## Phase 4: security, pairing and trust
+
+Feature docs: [features/device-identity.md](features/device-identity.md), [features/pairing-and-trust.md](features/pairing-and-trust.md), [features/abuse-limits.md](features/abuse-limits.md).
+
+### Preparation (once)
+
+1. **Build both phones from the same commit** and install over the Phase 3 app, without deleting it first ([Installing the CI builds](#installing-the-ci-builds-no-mac-needed)). This is the first build with `flutter_secure_storage`. If the iPhone or Android job fails, paste the red lines and stop.
+2. **Upgrade check:** open the app on both phones. The database moves to schema 3, and a new identity is created. Expected: the app opens normally. Settings shows a line "Security key xxxx xxxx xxxx xxxx". An unfinished Phase 3 transfer, if any, cannot resume: sending says "started by an older version … send the files again". Write down each phone's security key.
+3. **The PC as a third device:** on the PC, in the repo, on the same Wi-Fi, check that `dart run tool/crossdrop_cli.dart` prints its usage. Each run of this tool is a new unknown device. A third phone works too, if you have one.
+4. A small test file on each phone (any photo) and `small.bin` on the PC (any file of a few MB).
+5. Names in Settings: "Test iPhone" and "Test Android". Both phones on the same home Wi-Fi, VPN off. Receiving on (the default).
+6. **Logs:** as in Phase 3. New lines:
+   - `[crossdrop.identity] created, fingerprint 1a2b3c4d`
+   - `[crossdrop.server] sender 1a2b3c4d authenticated`
+   - `authentication refused: …`
+   - `rate limited …`
+   - `session …: auto-accepted (trusted device)`
+   Logs show only the first 8 characters of a fingerprint; never a key or a file name.
+
+### P4-1: Pairing from the nearby list, both directions
+
+For each direction (iPhone → Android, then Android → iPhone):
+
+1. Receiver: **Receive**.
+2. Sender: **Send** > tap the receiver in the list > **Add files** > one photo > **Send**.
+3. Expected on the sender, under "Waiting for the other phone to accept…": "Check that the other phone shows this code:" and a 6-digit code such as `482 913`.
+4. Expected on the receiver: the Accept prompt with "Check that the other phone shows this code:", **the same 6 digits**, and a "Trust this device" checkbox. The button says **Codes match, accept**.
+5. Tick **Trust this device**, tap **Codes match, accept**. The file arrives as in Phase 3.
+6. On the sender, after "Done": tap **Trust Test …** (the button under the status).
+7. Both phones: Settings > Trusted devices lists the other phone, with the first 16 characters of its security key, matching the key you noted in preparation step 2.
+8. Send another photo the same way. Expected: **no code** on either phone. The receiver still shows the Accept prompt (plain **Accept** button).
+
+**Paste back:** a photo or screenshots of both screens at step 3–4 (the two codes side by side), screenshots of both Trusted devices lists, and the receiver log line `sender xxxxxxxx authenticated`.
+
+### P4-2: QR pairing, then a tampered QR
+
+1. Forget each other first: on both phones, Settings > Trusted devices > delete icon > **Forget**.
+2. Android: **Receive**. iPhone: **Send** > **Scan QR code** > scan the Android QR > add a photo > **Send**. Expected: it connects, and both phones show the same code (the receiver cannot tell that the sender scanned a QR). Accept; the file arrives.
+3. **Tampered QR:** on the Android Receive screen, note the IP and port. On the PC run:
+   `dart run tool/crossdrop_cli.dart fake-qr <android-ip> <port>`
+   This writes `fake-qr.svg`: the real IP and port, a wrong fingerprint. Open it in a browser on the PC.
+4. iPhone: **Send** > **Scan QR code** > scan the QR on the PC screen.
+5. Expected on the iPhone: "This isn't the device you scanned: its security key is different. Nothing was sent." No Send screen opens.
+6. Expected on Android: no Accept prompt, nothing received.
+7. Repeat steps 3–6 the other way: iPhone Receive, Android scans a fake QR made with the iPhone's IP and port.
+
+**Paste back:** screenshots of the error on both phones, and the receiver's log around that time: there must be **no** `authenticated` line from the scan.
+
+### P4-3: A third device on the same Wi-Fi tries to send without pairing
+
+The PC CLI is the third device (or a third phone, if you have one; then use its Send screen with a typed address).
+
+1. **Receiving on.** Android: **Receive**. On the PC:
+   `dart run tool/crossdrop_cli.dart send <android-ip> <port> small.bin`
+   Expected:
+   - The PC prints `Pairing code: 123 456`.
+   - Android shows an Accept prompt from "CrossDrop" with the **same code**, and no lookalike warning.
+   - Tap **Decline**. The PC reports that the receiver answered `rejected`. Nothing is saved.
+2. **Receiving off.** On the Android Receive screen, switch **Receiving** off. Expected: the QR code disappears, and the screen says it is off once nothing is running. On the iPhone, the Android phone leaves the nearby list within about 10 s (pull to refresh).
+   Run the PC command again (with the same port; if the server already stopped, you get a connection error, which also passes). Expected:
+   - With the server still up: the PC gets `receiving_off` (403), and Android shows "Refused a transfer from an untrusted device: receiving is off."
+   - No Accept prompt.
+3. **Trusted device while off.** Switch Receiving on, then off again while the iPhone (trusted since P4-2, if you trusted it there; otherwise trust it first) sends a photo from its still-open Send screen within a few seconds. Expected: the offer goes through. This is optional; the timing is tight.
+4. **Rate limit.** Switch Receiving on. On the PC, run the send command 4 times within a minute, declining each prompt on Android. Expected: the 4th run fails with `rate_limited`. Android shows at most 3 prompts.
+5. Repeat 1–2 with the iPhone as receiver.
+
+**Paste back:** the PC output for each run, screenshots of the prompt with the code and of the "receiving is off" notice, and the receiver log lines `rate limited`.
+
+### P4-4: Trusted device with and without auto-accept
+
+The phones trust each other (P4-1 or P4-2).
+
+1. **Without auto-accept** (the default): iPhone sends a photo to Android. Expected: no code, Accept prompt shown. Accept; it arrives.
+2. **With auto-accept:** Android > Settings > Trusted devices > switch on auto-accept for Test iPhone. iPhone sends a photo. Expected: **no prompt**, the file arrives by itself. Android log: `auto-accepted (trusted device)`.
+3. **Auto-accept is per key, not per name:** on the PC, run `dart run tool/crossdrop_cli.dart send …` to Android. Expected: a prompt with a code; the PC is not auto-accepted.
+4. Switch auto-accept off again and send once more. Expected: the prompt is back.
+5. Repeat 1–4 with the iPhone as receiver.
+
+**Paste back:** screenshots of the Trusted devices list with the switch, and the receiver log for step 2.
+
+### P4-5: Lookalike warning (same name, different key)
+
+Needs P4-6 first (a reinstalled phone with a new key), or a third phone. With the PC:
+
+1. Android trusts the iPhone ("Test iPhone").
+2. A device with another key uses that name: after P4-6, on the reinstalled iPhone, set the name back to "Test iPhone" in Settings.
+3. iPhone sends a photo to Android. Expected on Android: the Accept prompt has a red box: "Warning: this is not the "Test iPhone" you trusted. Its security key is different…". The code is shown. Decline.
+4. The other way: Android trusts "Test iPhone" and opens Send > taps "Test iPhone" in the nearby list. Expected: a dialog "Not the "Test iPhone" you trusted" with **Stop** and **Continue anyway**. **Continue anyway** opens Send with a red warning, and the code check runs as for a new device.
+
+**Paste back:** screenshots of the red box and of the dialog.
+
+### P4-6: Reinstall changes the identity and loses trust
+
+Do this on the iPhone first. iOS keeps Keychain items after an app is deleted, so this is the important case.
+
+1. Note the iPhone's security key (Settings). The Android phone trusts the iPhone.
+2. Delete CrossDrop from the iPhone (long press > Remove App > Delete App). Install it again with Sideloadly.
+3. Open it. Expected:
+   - Settings shows a **different** security key and an empty Trusted devices list.
+   - The name is back to "iPhone".
+   - Log: `identity created, fingerprint …` with a new value.
+4. iPhone sends a photo to Android. Expected: Android shows a code (it does not trust this new key). If you renamed the iPhone to "Test iPhone", also the lookalike warning (P4-5).
+5. On Android, Settings > Trusted devices still lists the old "Test iPhone" (old key). Forget it, then pair again (P4-1) to trust the new key.
+6. Repeat 1–5 with Android (uninstall from Settings > Apps, then install the APK again). Android backup is off, so nothing is restored.
+
+**Paste back:** screenshots of Settings before and after on each phone (security key line and Trusted devices list).
+
+### P4-7: Receiving switch and new port
+
+1. Receive screen: switch **Receiving** off. Expected: "Receiving is off. Turn it on to receive files." and no QR. The other phone's nearby list drops this phone.
+2. Close and reopen Receive. Expected: still off (the switch is saved). Settings shows the same switch, off.
+3. Switch it on. Expected: Starting…, then a QR code and a **new port number**. The other phone finds it again.
+
+**Paste back:** the two port numbers, and screenshots of the off state.
+
+### Not checked on devices
+
+Covered by unit tests, hard to do by hand:
+- A forged or relayed signature, a reused challenge, a commitment mismatch.
+- The chain-substitution attack on pinning.
+- Another sender reading or feeding someone else's session.
+- Oversized headers and bodies.
+- Expiry of challenges and tokens.
+
+### Results
+
+| Check | Date | iPhone, iOS | Android, version | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Upgrade from Phase 3 (prep step 2) | | | | | | |
+| P4-1 iPhone → Android | | | | | | |
+| P4-1 Android → iPhone | | | | | | |
+| P4-2 QR | | | | | | |
+| P4-2 tampered QR, iPhone scans | | | | | | |
+| P4-2 tampered QR, Android scans | | | | | | |
+| P4-3 Android receiver (on, off, rate limit) | | | | | | |
+| P4-3 iPhone receiver (on, off) | | | | | | |
+| P4-4 Android receiver | | | | | | |
+| P4-4 iPhone receiver | | | | | | |
+| P4-5 | | | | | | |
+| P4-6 iPhone reinstall | | | | | | |
+| P4-6 Android reinstall | | | | | | |
+| P4-7 | | | | | | |
