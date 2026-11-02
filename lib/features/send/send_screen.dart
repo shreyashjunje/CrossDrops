@@ -211,6 +211,9 @@ class _SendScreenState extends ConsumerState<SendScreen> {
         'The other phone does not have enough space '
             '(${formatSize(s.neededBytes ?? 0)} needed).',
       RejectReasons.timeout => 'The other phone did not answer in time.',
+      ErrorCodes.receivingOff =>
+        'The other phone is not receiving from new devices. Ask its owner '
+            'to turn Receiving on.',
       RejectReasons.senderBusy =>
         'The other phone still has an unfinished transfer from you. '
             'Resume it from the start screen, or cancel it there.',
@@ -236,6 +239,8 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       ErrorCodes.noSpace =>
         'The other phone ran out of space. Free some space there, then tap '
             'Resume.',
+      ErrorCodes.rateLimited =>
+        'Too many attempts. Wait a minute, then send again.',
       _ => 'Failed (${s.reason}).',
     },
   };

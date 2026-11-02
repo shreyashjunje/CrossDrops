@@ -466,6 +466,10 @@ class SendSession {
           SendPhase.failed,
           SendReasons.version,
         ),
+        ErrorCodes.receivingOff => const _Stop(
+          SendPhase.rejected,
+          ErrorCodes.receivingOff,
+        ),
         _ => _Stop(SendPhase.failed, e.code),
       };
     }

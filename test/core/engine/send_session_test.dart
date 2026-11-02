@@ -252,6 +252,57 @@ void main() {
     expect(proxy.connections, lessThan(10));
   }, timeout: const Timeout(Duration(minutes: 2)));
 
+  group('security', () {
+    test(
+      'receiving off: an untrusted sender is rejected, nothing sent',
+      () async {
+        r.acceptsUntrusted = false;
+        final (item, _) = await makeFile('a.bin', mb);
+        final result = await session([item]).run();
+        expect(result.phase, SendPhase.rejected);
+        expect(result.reason, ErrorCodes.receivingOff);
+        expect(r.server.sessions, isEmpty);
+      },
+    );
+
+    test('an untrusted sender sees the same code as the receiver', () async {
+      String? shown;
+      r.decider = (o) async {
+        shown = o.pairingCode;
+        return true;
+      };
+      final (item, _) = await makeFile('a.bin', 1000);
+      final s = session([item]);
+      String? code;
+      final sub = s.updates.listen((u) {
+        if (u.phase == SendPhase.waitingForAccept) code ??= u.pairingCode;
+      });
+      final result = await s.run();
+      await sub.cancel();
+      expect(result.phase, SendPhase.done);
+      expect(code, isNotNull);
+      expect(code, shown);
+    });
+
+    test('a receiver with another key stops the send, never retried', () async {
+      final other = await DeviceCredentials.generate();
+      final (item, _) = await makeFile('a.bin', 1000);
+      final s = SendSession(
+        host: '127.0.0.1',
+        port: proxy.port,
+        sender: sender,
+        items: [item],
+        receiverFingerprint: other.fingerprint,
+        credentials: me,
+        backoff: fastBackoff,
+      );
+      final result = await s.run();
+      expect(result.phase, SendPhase.failed);
+      expect(result.reason, SendReasons.pinMismatch);
+      expect(r.server.sessions, isEmpty);
+    });
+  });
+
   group('integrity', () {
     test('hash mismatch restarts the file once and then it succeeds', () async {
       final (item, sha) = await makeFile('a.bin', 3 * mb);
