@@ -145,7 +145,14 @@ Future<void> _send(List<String> args) async {
   }
   // First contact: pin whatever certificate answers, then compare the
   // pairing code with the phone's Accept prompt.
-  final fingerprint = await probeFingerprint(host, port);
+  final String fingerprint;
+  try {
+    fingerprint = await probeFingerprint(host, port);
+  } on IOException catch (e) {
+    stderr.writeln('Could not connect: $e');
+    exitCode = 69;
+    return;
+  }
   final client = UploadClient(
     host: host,
     port: port,
