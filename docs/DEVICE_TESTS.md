@@ -326,3 +326,199 @@ Needs Wi-Fi A and Wi-Fi B (see Preparation).
 | P2-6 | | | | | | |
 | P2-7 | | | | | | |
 
+
+## Phase 3: transfer engine, resume, keep-alive
+
+Feature docs: [features/transfer-engine.md](features/transfer-engine.md), [features/resume.md](features/resume.md), [features/keep-alive.md](features/keep-alive.md). Speeds go in [BENCHMARKS.md](BENCHMARKS.md).
+
+### Preparation (once)
+
+1. **Build both phones from the same commit:** run the Build workflow and install both artifacts ([Installing the CI builds](#installing-the-ci-builds-no-mac-needed)). This is the first iPhone build with the `crossdrop/storage` and `crossdrop/background` Swift channels. If the iPhone job fails in `AppDelegate.swift`, paste the red lines back and stop.
+2. **Phases 1 and 2 data:** the database moves to schema version 2 on first launch. Nothing to do, but if the app crashes on launch, paste the logs.
+3. **Test files:** make `crossdrop-1GB.bin` and `crossdrop-2GB.bin` on the PC with the `New-RandomFile` function from Phase 1, preparation step 2 (`New-RandomFile "crossdrop-2GB.bin" 2GB`). Keep their SHA-256 values. Copy both to both phones (Phase 1, step 3). For P3-7 you also need 10 photos and short videos in the Android Downloads folder or Gallery, and in the iPhone Files app.
+4. **Free space:** about 6 GB free on each phone. On iPhone, picked files are copied by the file picker before sending, and the receiver needs room for the file.
+5. Both phones on the same home Wi-Fi, VPN off. Give them distinct names in Settings ("Test iPhone", "Test Android").
+6. **Logs:**
+   - Android: `adb logcat -s flutter`. New areas: `[crossdrop.send]`, `[crossdrop.server]`, `[crossdrop.keepalive]`, `[crossdrop.storage]`.
+   - iPhone: logs need a Mac (`flutter logs`) or `idevicesyslog` from libimobiledevice on Windows, filtered on `crossdrop`. If you have neither, screenshots are enough.
+   - Logs contain session and file ids, byte counts and states; never names or contents.
+
+Wording below:
+- "**Receive**" means CrossDrop > Receive, left open.
+- "**Send to X**" means CrossDrop > Send > tap X in the list > **Add files** > pick > **Send**.
+
+To check a received file's hash on Android:
+- `adb shell sha256sum /sdcard/Android/data/com.example.crossdrop/files/CrossDrop/<name>`
+- Or send it back to the PC with `adb pull` and use `Get-FileHash`.
+
+On iPhone, received files are in Files > On My iPhone > crossdrop > CrossDrop.
+
+### P3-1: 1 GB and 2 GB, both directions
+
+Four runs: 1 GB iPhone → Android, 1 GB Android → iPhone, 2 GB iPhone → Android, 2 GB Android → iPhone. For each run:
+
+1. Receiver: **Receive**.
+2. Sender: **Send to** the receiver with the file. Start a stopwatch.
+3. Receiver: the Accept prompt shows "Test iPhone wants to send you", "1 file · 1073.7 MB" (or 2147.5 MB) and the file name. Tap **Accept**.
+4. Android, the first time on Android 13 or later: the system asks to allow notifications. Tap **Allow**. Then pull down the notification shade during the transfer.
+5. Watch both screens until the end. Stop the stopwatch.
+
+**Expected**
+- **Sender:** "Waiting for the other phone to accept…", then "Sending" with size, MB/s and time left, all moving. The file row ends with a check mark, then "Done, SHA-256 verified by the receiver".
+- **Receiver:** a card "From Test iPhone · 1 file" with a progress bar, speed and time left. It ends "Done, SHA-256 verified".
+- **Android:** a notification "Sending to …" or "Receiving from …" whose percentage moves, at most once per second. It disappears at the end.
+- **Both:** neither screen locks during the transfer, and both apps stay responsive (scrolling, no freezes).
+- The received file's SHA-256 equals the PC value (Android: `sha256sum`; iPhone: send it back to Android, then `sha256sum`).
+- 2 GB is about twice the 1 GB time.
+
+**Paste back:**
+- For each run: time, average MB/s, and the hash comparison.
+- A screenshot of the Android notification.
+- Sender logs from `offered` to `done`.
+- Roughly how warm each phone got.
+
+### P3-2: Accept prompt
+
+1. Android: **Receive**. iPhone: **Send to** Android with a small file. On Android tap **Decline**.
+2. Repeat, but do not answer on Android for 70 s.
+3. Repeat, and on iPhone tap **Cancel** while Android still shows the prompt.
+4. Send one more small file and tap **Accept**.
+
+**Expected**
+1. iPhone: "The other phone declined." Android card: "Declined".
+2. After 60 s the Android prompt closes by itself. iPhone: "The other phone did not answer in time." Android: "Not answered in time".
+3. The Android prompt closes. Android: "Cancelled by the sender". iPhone: "Cancelled".
+4. It sends normally: steps 1 to 3 left no open session behind, so there is no "unfinished transfer" refusal.
+
+**Paste back:** what each step showed (screenshots welcome), and logs from both phones.
+
+### P3-3: Wi-Fi off and on mid-transfer
+
+Use 1 GB. Run it for both directions, and for each direction turn off Wi-Fi first on the **sender**, then (a second run) on the **receiver**.
+
+1. Start the send and accept it. At about 30%, turn Wi-Fi **off** on the chosen phone (Control Center or quick settings, so the phone stays on the screen).
+2. Within about 15 s, the sender shows "Connection lost. Trying again in N s…" and the receiver card shows "Paused at …".
+3. After 20 s, turn Wi-Fi back **on** (same network). Do not tap anything.
+4. **Long outage:** repeat once with Wi-Fi off for **3 minutes**. After about 2 minutes, the sender should show "Lost the connection for 2 minutes… tap Resume". Turn Wi-Fi on and tap **Resume**.
+
+**Expected**
+- Step 3: within about 10 s of Wi-Fi coming back, the sender continues by itself from about 30%, not from 0. Both sides end verified, and the hash matches.
+- Step 4: Resume continues from where it stopped and ends verified.
+- If the receiver's IP changed (watch Receive), the sender log shows `receiver moved, trying the new address` and continues.
+
+**Paste back:**
+- For each run: seconds from Wi-Fi on to bytes moving again.
+- The sender's `sending from N of 1073741824` lines (N must grow, never go back to 0).
+- Screenshots of the "Trying again" and "Paused" states.
+- Logs from both phones.
+
+### P3-4: Lock the screen mid-transfer
+
+Use 1 GB.
+
+**A. iPhone sends, Android receives**
+1. At about 30%, press the iPhone side button to lock it. Wait 30 s. Unlock and return to CrossDrop.
+
+**B. Android sends, iPhone receives**
+2. At about 30%, lock the iPhone (the receiver). Wait 30 s, unlock and return to CrossDrop with **Receive** still open.
+
+**C. Android with the screen off**
+3. Android sends to the iPhone. Lock the **Android** phone for 60 s.
+4. Then the reverse: Android receives, and its screen is locked for 60 s.
+
+**Expected**
+- **A:** while locked, the Android card shows "Paused". On unlock the iPhone shows "Paused while CrossDrop is in the background" for a moment, then continues from about where it stopped, and ends verified.
+- **B:** the Android sender shows "Connection lost. Trying again…" while the iPhone is locked, then continues within about 10 s of unlocking, and ends verified.
+- **C:** the transfer **keeps going** with the Android screen off. The progress on the other phone keeps moving, and the Android notification stays.
+
+**Paste back:**
+- For A and B: seconds from unlock to bytes moving.
+- iPhone logs if you have them (`background: saving 1 transfer(s)`).
+- For C: whether progress kept moving with the screen off.
+- The Android brand and model. Some brands kill background work; if the transfer stopped in C, also say whether CrossDrop is set to "No restrictions" in battery settings.
+
+### P3-5: Force-close the receiving app and resume
+
+Use 1 GB. Run it once with Android receiving and once with the iPhone receiving.
+
+1. Start the send and accept it. At about 40%, force-close CrossDrop on the **receiver**:
+   - iPhone: swipe up from the bottom, then swipe CrossDrop away.
+   - Android: Recents, then swipe it away. Or Settings > Apps > CrossDrop > **Force stop**.
+2. The sender shows "Connection lost. Trying again…".
+3. Within 1 minute, open CrossDrop again on the receiver.
+4. Expected: the dialog "Unfinished transfers" with "Receiving 1 file from Test …, about 40% of 1.07 GB done". Tap **Resume**. Receive opens.
+5. Do nothing on the sender.
+6. **Sender side variant** (once, either direction): force-close the **sender** at about 40%, reopen it, and in "Unfinished transfers" tap **Resume** on "Sending 1 file to …".
+
+**Expected**
+- Step 5: within about 15 s the sender finds the receiver at its new port (log: `receiver moved, trying the new address`). It continues from about 40% and ends verified, and the hash matches.
+- If you were slower than 2 minutes, the sender shows "Lost the connection…". Tapping Resume works once Receive is open.
+- Step 6: Send opens, continues from about 40% and ends verified.
+- No duplicate file: Files or Downloads has one copy, not `name (1).bin`.
+
+**Paste back:**
+- Screenshots of the "Unfinished transfers" dialog.
+- Seconds from Receive opening to bytes moving.
+- Receiver logs (`restored, paused`).
+- Sender logs (`receiver moved`, `sending from`).
+
+### P3-6: Cancel from each side
+
+Use 1 GB, iPhone → Android, then repeat Android → iPhone.
+
+1. At about 30%, tap **Cancel** on the **sender**.
+2. New send: at about 30%, tap **Cancel** on the **receiver's** card.
+3. New send: tap Cancel on the sender while the receiver still shows the Accept prompt (as P3-2 step 3, other direction).
+4. After each cancel, start a fresh small send between the same phones.
+
+**Expected**
+- Steps 1 and 2: both phones show a cancelled state within about 2 s:
+  - Sender: "Cancelled" (step 1) or "Cancelled by the other phone" (step 2).
+  - Receiver: "Cancelled by the sender" (step 1) or "Cancelled" (step 2).
+  - The receiver's free space returns (Android: Settings > Storage; iPhone: Settings > General > iPhone Storage > CrossDrop does not keep growing by 300 MB per run).
+- Step 4: the small send works every time (no "unfinished transfer" refusal).
+- Nothing partial appears in Files, Downloads or the CrossDrop folder.
+
+**Paste back:** screenshots of both phones after each cancel, and logs (`cancelled by sender` / `cancelled by receiver`).
+
+### P3-7: Ten files at once
+
+Both directions.
+
+1. Sender: **Add files**, pick 10 files at once: photos, a few short videos, and one document. Add them in two rounds if the picker allows only one selection.
+2. Send. The receiver gets **one** Accept prompt listing 5 names and "and 5 more".
+
+**Expected**
+- One prompt; the total size matches the sum.
+- Files go one after another (each row reaches 100% before the next starts). The total bar and time left move steadily.
+- The receiver card ends "Done, SHA-256 verified" with 10 check marks. All 10 files are in the save folder with their original names. Files with the same name get " (1)".
+- Optional: turn Wi-Fi off and on once in the middle (as P3-3). The transfer continues with the current file, and no file is sent twice.
+
+**Paste back:** screenshots of both cards at the end, total time, and the sender log (`file f0: saved` … `file f9: saved`).
+
+### Not checked on devices
+
+The 24-hour cleanup of partial files, hostile names, wrong sizes, hash mismatches and many-small-file runs are covered by unit tests. They are hard to trigger by hand.
+
+### Results
+
+| Check | Date | iPhone, iOS | Android, version | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| P3-1 1 GB iPhone → Android | | | | | | |
+| P3-1 1 GB Android → iPhone | | | | | | |
+| P3-1 2 GB iPhone → Android | | | | | | |
+| P3-1 2 GB Android → iPhone | | | | | | |
+| P3-2 | | | | | | |
+| P3-3 sender Wi-Fi, both directions | | | | | | |
+| P3-3 receiver Wi-Fi, both directions | | | | | | |
+| P3-3 3-minute outage | | | | | | |
+| P3-4 A | | | | | | |
+| P3-4 B | | | | | | |
+| P3-4 C | | | | | | |
+| P3-5 Android receiver killed | | | | | | |
+| P3-5 iPhone receiver killed | | | | | | |
+| P3-5 sender killed | | | | | | |
+| P3-6 iPhone → Android | | | | | | |
+| P3-6 Android → iPhone | | | | | | |
+| P3-7 iPhone → Android | | | | | | |
+| P3-7 Android → iPhone | | | | | | |

@@ -104,9 +104,10 @@ sequenceDiagram
   S->>R: GET /v1/info
   R-->>S: id, name, platform, versions
   S->>R: POST /v1/sessions (manifest)
-  R-->>S: sessionId, status pending
+  Note over R: Version, sender limit, free-space check
+  R-->>S: sessionId, status offered
   S->>R: WS /v1/sessions/{id}/events
-  Note over R: Free-space check, user taps Accept
+  Note over R: User taps Accept (60 s), space checked again
   R-->>S: event accepted (or rejected)
   S->>R: PUT /files/{fileId}?offset=0 (streamed body)
   R-->>S: event progress
@@ -157,12 +158,32 @@ Payloads over 1024 characters, or with control characters or stray `%` escapes, 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/v1/info` | `{"id", "name", "platform", "versions": [1]}`. The sender calls it before every connect to check the protocol version and, from the list or a QR code, the device id |
-| POST | `/v1/sessions` | Sender offers a session with a file manifest; returns `sessionId`, status `pending` |
-| WS | `/v1/sessions/{id}/events` | Live events: `accepted`, `rejected`, `progress`, `file_done`, `cancelled`, `error` |
-| PUT | `/v1/sessions/{id}/files/{fileId}?offset=N` | Streams file bytes starting at byte N |
-| GET | `/v1/sessions/{id}/files/{fileId}` | Returns `receivedBytes` so the sender knows where to resume |
-| POST | `/v1/sessions/{id}/files/{fileId}/complete` | Sender sends the SHA-256; receiver verifies and saves |
-| DELETE | `/v1/sessions/{id}` | Cancel from either side |
+| POST | `/v1/sessions` | Sender offers a session with a file manifest; returns `sessionId`, status `offered` (D-018). Refusals: 400 `unsupported_version` (with `versions`), 409 `sender_busy`, 503 `busy` (8 sessions open), 507 `no_space` (with `neededBytes`) |
+| GET | `/v1/sessions/{id}` | `{"sessionId", "status", "reason"?, "files": [file status]}`, so a sender that reconnects knows where the session stands |
+| WS | `/v1/sessions/{id}/events` | Live events: `accepted`, `rejected`, `progress`, `file_done`, `cancelled`, `error`. A new socket first gets the current state replayed |
+| PUT | `/v1/sessions/{id}/files/{fileId}?offset=N` | Streams file bytes starting at byte N. 403 `not_accepted` before Accept, 409 `offset_mismatch` (with `receivedBytes`), 410 `session_closed` or `file_failed`, 413 `too_many_bytes`, 507 on a write failure |
+| GET | `/v1/sessions/{id}/files/{fileId}` | `{"fileId", "size", "receivedBytes", "status"}`, status `pending`, `receiving`, `verifying`, `saved` or `failed`, so the sender knows where to resume |
+| POST | `/v1/sessions/{id}/files/{fileId}/complete` | Sender sends the SHA-256; receiver verifies and saves. 422 `hash_mismatch` with `retry: true` (file restarted from zero) or `file_failed` with `retry: false` |
+| DELETE | `/v1/sessions/{id}` | Cancel from the sender's side; idempotent. The receiver's own cancel reaches the sender as the `cancelled` event or a 410 |
+
+Errors are JSON: `{"error": code, "message": text, ...details}`.
+
+**Events (WebSocket, receiver to sender)**
+
+One JSON text frame per event, with a `type` field. Unknown types are ignored, so later versions can add some.
+
+| Type | Fields | When |
+| --- | --- | --- |
+| `accepted` | none | The user tapped Accept |
+| `rejected` | `reason` (`declined`, `timeout`, `no_space`), `neededBytes`? | The offer was refused |
+| `progress` | `fileId`, `receivedBytes` | At each 4 MB checkpoint, so these bytes are on disk |
+| `file_done` | `fileId` | The file was verified and saved |
+| `cancelled` | `by` (`sender` or `receiver`) | Either side cancelled |
+| `error` | `code`, `fileId`? | A file failed (`too_many_bytes`, `hash_mismatch`, `file_failed`), or the disk filled up (`no_space`) |
+
+The events are a convenience. Every fact they carry is also in the HTTP replies, so a lost socket never stops a transfer.
+
+**Limits on an offer:** at most 10,000 files, names at most 1,024 characters before sanitizing, one unfinished session per sender, 8 open sessions in total (D-023).
 
 **Offer manifest (POST /v1/sessions)**
 
@@ -177,19 +198,56 @@ Payloads over 1024 characters, or with control characters or stray `%` escapes, 
 }
 ```
 
-The SHA-256 is not in the offer, so the sender can start sending before hashing finishes. It hashes while streaming and sends the hash in `complete`.
+The SHA-256 is not in the offer, so the sender can start sending before hashing finishes. It hashes in a background isolate alongside the upload and sends the hash in `complete`. `kind` is `photo`, `video` or `file`; an unknown kind from a newer peer reads as `file`. `created` and `livePhotoGroup` are optional.
 
 **Transfer rules**
 
-1. The receiver checks free space against the total size before accepting.
-2. Data is written to `<temp>/<sessionId>/<fileId>.part`. Received byte count is saved every 4 MB.
-3. On reconnect, the sender calls GET on the file, then PUT with `offset = receivedBytes`.
+1. The receiver checks free space before accepting. The free space must cover the offer, the bytes other open sessions still expect, and a 64 MB reserve, on both the temp and the save volume. It checks again when the user taps Accept.
+2. Data is written to `<app support>/crossdrop_incoming/<sessionId>/<fileId>.part` (D-025). Every 4 MB, and whenever an upload stops, the part file is fsynced and then the received byte count is saved. After a crash the part file is cut back to that count (D-022).
+3. On reconnect, the sender calls GET on the file, then PUT with `offset = receivedBytes`. Retries wait 1, 2, 4, 8 s, then 8 s, and stop after about 2 minutes without progress (D-019).
 4. Files go one at a time on one connection in v1. Parallel streams (2–4) are added only if benchmarks show a gain.
 5. Read and write buffers start at 1 MB; tune after benchmarks.
-6. On `complete`, the receiver compares SHA-256 (computed incrementally while writing). On mismatch, the file restarts from zero once, then fails.
+6. On `complete`, the receiver compares SHA-256 (computed incrementally while writing, kept across drops; hashed from disk after an app restart, D-021). On mismatch, the file restarts from zero once, then fails.
 7. After verification the file is moved into the gallery or Files (see Platform modules) and the `.part` is removed.
+8. More bytes than declared, by Content-Length or by count, fails that file and deletes its partial file. The other files continue.
+9. A session ends `done` when every file is saved or failed and at least one was saved, and `failed` when none was.
 
-**Versioning:** each side sends the versions it supports; they use the highest common one. If there is none, the app says "Update CrossDrop on the other phone."
+**Versioning:** `GET /v1/info` lists the versions the receiver supports, and the sender picks the highest common one. If there is none, the app says "Update CrossDrop on the other phone". The offer carries the chosen version in `protocol`; the receiver refuses others with 400 `unsupported_version` and its own list.
+
+## Session state machine
+
+The receiver's state for one session (`SessionStatus`, `lib/core/engine/session_state_machine.dart`). The wire `status` is the state name.
+
+```mermaid
+stateDiagram-v2
+  [*] --> offered: POST /v1/sessions
+  offered --> accepted: user taps Accept
+  offered --> rejected: Decline, 60 s timeout, or no space at Accept
+  accepted --> transferring: first PUT
+  transferring --> paused: drop, stall, app backgrounded, disk full
+  paused --> transferring: sender resumes (PUT)
+  transferring --> verifying: POST complete
+  paused --> verifying: POST complete
+  verifying --> transferring: more files left, or hash mismatch restart
+  verifying --> done: last file ended, at least one saved
+  verifying --> failed: last file ended, none saved
+  offered --> cancelled: DELETE or receiver cancels
+  accepted --> cancelled
+  transferring --> cancelled
+  paused --> cancelled
+  verifying --> cancelled
+  paused --> failed: expired after 24 h
+  done --> [*]
+  rejected --> [*]
+  cancelled --> [*]
+  failed --> [*]
+```
+
+- After an app restart, a stored session in any non-final state comes back as `paused`, except `offered`, which becomes `rejected` (`timeout`).
+- Every state can move to `failed` for an unrecoverable error. The diagram shows the common causes only.
+- Each file has its own status: `pending → receiving → verifying → saved`, or `failed`.
+
+The sender has its own view (`SendPhase`): `connecting → waitingForAccept → sending ⇄ retrying / paused → done`, or `rejected`, `cancelled`, `failed`. A `failed` caused by the network or a full disk on the receiver stays resumable.
 
 ## Security model
 
@@ -266,13 +324,16 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | QR connect times out | TCP connect fails within 5–10 s | Likely client isolation or different networks; suggest hotspot mode |
 | Certificate fingerprint mismatch | TLS handshake fails pinning check | Stop; warn "This isn't the device you scanned"; never fall back to unpinned |
 | Receiver rejects or doesn't answer | `rejected` event, or no answer within 60 s | Tell the sender; nothing is sent |
-| Not enough space on receiver | Free-space check before accept, and write errors during transfer | Reject the offer with the needed size; if it runs out mid-transfer, pause and keep the partial file |
-| Wi-Fi drops mid-transfer | Socket error or no progress for 15 s | Retry with backoff (1, 2, 4, 8 s, up to about 2 min); resume from `receivedBytes` |
-| iPhone screen locks or app backgrounded | App lifecycle events | Finish the current chunk, save progress, pause; on return, auto-resume if the peer is still reachable |
+| Not enough space on receiver | Free-space check before the prompt and again at Accept, and write errors during transfer | Reject the offer with the needed size; if it runs out mid-transfer, pause and keep the partial file; the sender stops with "free some space, then Resume" |
+| Wi-Fi drops mid-transfer | Socket error or no progress for 15 s | Retry with backoff (1, 2, 4, 8 s, then 8 s, up to about 2 min without progress, D-019); resume from `receivedBytes`. After that, the Send screen offers Resume |
+| iPhone screen locks or app backgrounded | App lifecycle events (hidden) | Inside a background task: the sender finishes the current chunk and pauses, the receiver saves progress. On return the sender continues; time in the background does not use up the retry deadline |
 | Android app killed by battery saver | Session lost; partial file remains | On next launch, show "Resume unfinished transfer?"; resume if the sender reconnects |
-| App crash or phone restart | Partial files and session rows in the database | Same resume prompt; delete partial files older than 24 hours |
-| Hash mismatch | `complete` verification fails | Restart that file from zero once; then mark it failed |
+| App crash or phone restart | Partial files and session rows in the database | Part files cut back to the last checkpoint; same resume prompt; delete partial files older than 24 hours |
+| Receiver app restarts | The server listens on a new random port | The sender finds it again by device id over mDNS after 3 failed tries, once Receive is open |
+| Hash mismatch | `complete` verification fails | Restart that file from zero once; then mark it failed; the other files continue |
+| More bytes than declared | Content-Length or counting on the receiver | That file fails and its partial file is deleted; the other files continue |
 | Peer IP changes (DHCP, reconnect) | Connection refused at the old address | Rediscover by device id via mDNS and continue |
+| Source file gone or changed | Size check before offering and before each file | Cancel the session (v1 cannot skip a file) and say which problem it was |
 | VPN blocks local traffic | Connect fails while a VPN is active | Suggest pausing the VPN |
 | iCloud original won't download | Export fails or times out on iPhone | Skip the file or send the local version, if one exists, with a note |
 | Unsupported format on the receiver | Gallery insert fails | Save to Files or Downloads instead and tell the user |
@@ -287,11 +348,11 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | --- | --- |
 | `identity` | deviceId, deviceName, certificate (private key stays in Keychain/Keystore) |
 | `trusted_devices` | deviceId, name, platform, certFingerprint, autoAccept, firstSeen, lastSeen |
-| `sessions` | sessionId, peerDeviceId, direction (send/receive), status, totalBytes, createdAt, finishedAt |
-| `session_files` | fileId, sessionId, name, size, mime, kind, sha256, transferredBytes, tempPath, finalLocation, status |
-| `settings` | receivingEnabled, convertHeicToJpeg, sendLivePhotoVideo, saveLocation |
+| `sessions` | sessionId + direction (unique), peerDeviceId, peerName, peerPlatform, peerHost and peerPort (send), status, reason, totalBytes, createdAt, updatedAt, finishedAt |
+| `session_files` | session row + fileId, position, name, size, mime, kind, created, livePhotoGroup, sha256, transferredBytes, tempPath, sourcePath (send), finalLocation, status, hashAttempts, errorCode |
+| `settings` | receivingEnabled, convertHeicToJpeg, sendLivePhotoVideo, saveLocation (not built yet) |
 
-Session status: `offered → accepted → transferring ⇄ paused → verifying → done` or `rejected / cancelled / failed`.
+Session status: see [Session state machine](#session-state-machine). Both directions are stored. A sent session that gave up on the network stays `paused`, so the launch prompt can offer to resume it.
 
 **Code structure**
 

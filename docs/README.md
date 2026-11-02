@@ -9,4 +9,7 @@
   - [file-transfer-poc.md](features/file-transfer-poc.md): Phase 1 proof of concept, HTTPS server and streaming client with resume and SHA-256 check.
   - [discovery.md](features/discovery.md): Phase 2 Bonjour discovery, nearby list, device identity, iOS Local Network permission, network changes.
   - [qr-connect.md](features/qr-connect.md): Phase 2 QR code and manual address fallback, strict payload parsing.
+  - [transfer-engine.md](features/transfer-engine.md): Phase 3 session flow, Accept prompt, send queue, events, cancel, safety limits.
+  - [resume.md](features/resume.md): Phase 3 resume after drops and restarts, checkpoints, backoff, 24-hour cleanup.
+  - [keep-alive.md](features/keep-alive.md): Phase 3 screen on, Android foreground service, iOS background task.
 - [TODAY-2026-11-02.md](TODAY-2026-11-02.md): short list of what was built, tested and left open on day one.

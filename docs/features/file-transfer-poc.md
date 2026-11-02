@@ -1,7 +1,7 @@
 # Feature: File transfer proof of concept
 
 - Phase: 1
-- Status: Built, awaiting device tests
+- Status: Done (tested on devices). Superseded in Phase 3 by [transfer-engine.md](transfer-engine.md) and [resume.md](resume.md): offers now wait for Accept, and Phase 1's limits below are lifted.
 - Last updated: 2026-11-02
 
 ## Summary

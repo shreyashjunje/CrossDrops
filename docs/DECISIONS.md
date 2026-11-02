@@ -146,3 +146,73 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - The free-account app expires after 7 days, and only a few sideloaded apps can be active at once.
   - Capabilities that need a paid account, such as Hotspot Configuration for joining a hotspot in-app, will not work in these builds. The hotspot phase must plan for that, for example by joining the hotspot manually in iOS Settings.
   - On a private repository, macOS minutes count 10×, which is why the device builds are manual only.
+
+## D-018: Sessions start as "offered"; status endpoint and event replay
+- Date: 2026-11-02
+- Status: Accepted
+- Context: ARCHITECTURE.md had `POST /v1/sessions` return `pending`, while the state machine starts at `offered`. A sender whose event socket connects after the user tapped Accept, or that reconnects after a drop, would miss the answer.
+- Decision: The wire status is the state name, so `POST` returns `offered`. A new `GET /v1/sessions/{id}` returns the session status, reason and per-file status. A newly connected event socket first replays the current state. The sender also polls the status every 2 s while it waits for Accept.
+- Consequences: One status vocabulary everywhere. The answer is never lost to a late or broken socket. One extra endpoint.
+
+## D-019: Retry backoff 1, 2, 4, 8 s, then 8 s, for about 2 minutes
+- Date: 2026-11-02
+- Status: Accepted
+- Context: "Retry with backoff (1, 2, 4, 8 s, up to about 2 minutes)" can mean capping at 8 s or doubling on.
+- Decision: The delays are 1, 2, 4 and 8 s, then 8 s repeating, each ±20 % jitter. The sender gives up after 2 minutes without progress. Progress, meaning the receiver confirmed more bytes, resets both the delay and the deadline. Time in the iOS background does not count. After 3 failures in a row, the sender looks the receiver up again by device id.
+- Consequences: A phone that comes back within 2 minutes resumes within at most about 10 s. Doubling to 32 or 64 s would leave users waiting with nothing visibly happening. After giving up, the session stays resumable from the Send screen and from the launch prompt.
+
+## D-020: Free space through a small platform channel, not a package
+- Date: 2026-11-02
+- Status: Accepted
+- Context: Dart has no free-space API, and the receiver must check space before accepting.
+- Decision: The `crossdrop/storage` channel has one method, `freeBytes(path)`. Android uses StatFs. iOS uses `volumeAvailableCapacityForImportantUsage`, which counts purgeable space, like Files and Photos do. It sits behind the `FreeSpace` interface.
+- Consequences: About 30 lines of native code, no new dependency, and the iOS figure is the right one. Unknown free space (desktop, tests) does not block an offer.
+
+## D-021: Resume without re-hashing what was already sent
+- Date: 2026-11-02
+- Status: Accepted
+- Context: Phase 1 rebuilt the hash of the bytes already transferred before every resumed PUT, on both sides. With pure-Dart SHA-256 on a phone, a 2 GB prefix can take longer than the 15 s stall timeout, so a large resume could never finish.
+- Decision: The sender hashes each source file in its own isolate, in parallel with sending and independent of drops. The receiver keeps each file's incremental hash alive across drops, in step with the bytes on disk. After a receiver restart there is no hash in memory, so `complete` hashes the file from disk, and the sender allows 2 minutes plus 1 s per 20 MB for that.
+- Consequences: A drop costs nothing extra. The sender reads each file twice, which is cheap next to Wi-Fi. Only the rare receiver-restart case pays for a full hash, at the end, where no stall timer runs.
+
+## D-022: Checkpoint = fsync, then store receivedBytes; restore cuts back
+- Date: 2026-11-02
+- Status: Accepted
+- Context: After a crash, a part file may be longer than what really reached the disk, and the tail may hold garbage.
+- Decision: Every 4 MB, and whenever an upload stops, the receiver fsyncs the part file and then stores `receivedBytes`. On restart the part file is truncated to that value.
+- Consequences: A crash never turns into a silently corrupt resume; the hash check would catch it, but only at the very end. At most 4 MB is sent again. Some fsync cost, to be measured in benchmarks.
+
+## D-023: Receiver limits and what "too many bytes" does
+- Date: 2026-11-02
+- Status: Accepted
+- Context: The receiver must not trust offers or bodies. Phase 1 discarded an oversized upload but kept the file resumable.
+- Decision:
+  - More bytes than declared **fails that file**: its partial file is deleted and the other files continue.
+  - One unfinished session per sender id (409 `sender_busy`) and at most 8 open sessions in total (503).
+  - At most 10,000 files and 1,024-character names per offer.
+  - Free space must cover the offer, the bytes still expected by other open sessions, and 64 MB, and is checked again at Accept.
+- Consequences: A misbehaving sender cannot loop on the same file or fill the disk. Until Phase 4 proves sender identity, the per-sender limit only stops honest mistakes.
+
+## D-024: Keep-alive with flutter_foreground_task and an iOS background task
+- Date: 2026-11-02
+- Status: Accepted
+- Context: Android needs a foreground service of type data sync for a transfer to continue with the screen off. iOS suspends apps shortly after they are hidden.
+- Decision:
+  - **Android:** `flutter_foreground_task` runs the service, shows the notification and takes the Wi-Fi and wake locks. The transfer itself stays in the app's isolate; the service has no task of its own.
+  - **iOS:** a small Swift channel calls `beginBackgroundTask`, inside which every transfer saves its progress and pauses. Transfers resume on return.
+  - **Both:** the screen stays on during transfers (`wakelock_plus`). The send controller is app-wide, so leaving the Send screen does not stop a transfer.
+- Consequences: A maintained plugin instead of hand-written Kotlin service code. Behaviour is not verified on devices yet. Android 15 caps `dataSync` at 6 hours a day.
+
+## D-025: Partial files in the app support folder
+- Date: 2026-11-02
+- Status: Accepted
+- Context: Phase 1 kept `.part` files in the OS temp folder. iOS and Android may purge temp and cache folders while the app is closed, which breaks resume after a restart.
+- Decision: Partial files go to `<application support>/crossdrop_incoming/<sessionId>/`. They are deleted when a session ends, and by the 24-hour cleanup at launch.
+- Consequences: Resume after restart works. Leftovers are our job to clean, which the cleanup does.
+
+## D-026: Multi-gigabyte tests are tagged and skipped by default
+- Date: 2026-11-02
+- Status: Accepted
+- Context: The 2 GB test needs about 4 GB of disk and two to three minutes. Running it on every `flutter test` and CI push would be slow.
+- Decision: The test is tagged `large` and skipped in `dart_test.yaml`. Run it with `flutter test --run-skipped --tags large` before a phase is called done. A 50 MB memory test stays in the default run.
+- Consequences: Fast default runs. The 2 GB check only happens when someone runs it.

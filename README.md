@@ -3,17 +3,19 @@ CrossDrop is a Flutter app that sends photos, videos and files directly between 
 
 ## Status
 
-- **Phase 1, file transfer proof of concept:** built and unit-tested. Device checks are pending.
-- **Phase 2, discovery and QR connect:** built and unit-tested. Device checks are pending.
+- **Phase 1, file transfer proof of concept:** built and tested on devices.
+- **Phase 2, discovery and QR connect:** built and tested on devices.
+- **Phase 3, transfer engine:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 3) are pending.
 
 What works in the code today:
 
-- The receiver runs an HTTPS server; the sender streams files with resume and SHA-256 verification.
-- Phones on the same Wi-Fi find each other through Bonjour while the receiver has Receive open.
-- The receiver shows a QR code for networks that block discovery; a typed IP and port also works.
-- On iPhone, the app detects when Local Network access is off and links to Settings.
+- The receiver runs an HTTPS server. The sender offers several files, the receiver taps Accept, and the files go one after another with SHA-256 verification.
+- Transfers resume by themselves after Wi-Fi drops and after either app restarts. Unfinished transfers are offered at launch.
+- Cancel from either side, with progress, speed and time left on both.
+- The screen stays on during transfers. Android keeps going with the screen off (foreground service). iPhone saves and pauses in the background, then continues.
+- Phones on the same Wi-Fi find each other through Bonjour while the receiver has Receive open. A QR code and a typed IP and port are the fallbacks.
 
-Not yet built: the Accept prompt, pinned mutual TLS (the client currently accepts any certificate, see D-011), saving to Photos or the gallery, and hotspot mode.
+Not yet built: pinned mutual TLS (the client currently accepts any certificate, see D-011), saving to Photos or the gallery, hotspot mode, and the final transfer UI.
 
 ## Build and test
 
@@ -21,6 +23,7 @@ Not yet built: the Accept prompt, pinned mutual TLS (the client currently accept
 flutter pub get
 flutter analyze
 flutter test                      # unit tests, no phones needed
+flutter test --run-skipped --tags large  # 2 GB test, needs ~4 GB disk
 flutter run --release -d <device> # Android from any PC; iPhone needs a Mac with Xcode
 ```
 
