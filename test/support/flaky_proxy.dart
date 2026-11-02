@@ -126,17 +126,21 @@ class _Pipe {
       (data) async {
         if (_dead) return;
         if (proxy.blackhole) return; // swallowed, like a dead link
-        if (proxy.latency > Duration.zero) {
-          sub.pause();
-          await Future<void>.delayed(proxy.latency);
-          sub.resume();
-          if (_dead) return;
-        }
-        if (up && !proxy._countUp(data.length)) return;
+        // Backpressure: read no more until this chunk is written, like a
+        // real link. Without it the proxy itself would buffer gigabytes.
+        sub.pause();
         try {
+          if (proxy.latency > Duration.zero) {
+            await Future<void>.delayed(proxy.latency);
+            if (_dead) return;
+          }
+          if (up && !proxy._countUp(data.length)) return;
           to.add(data);
+          await to.flush();
         } on Object {
           destroy();
+        } finally {
+          if (!_dead) sub.resume();
         }
       },
       onDone: destroy,
