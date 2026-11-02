@@ -3,8 +3,11 @@ import 'dart:math';
 
 import 'package:drift/drift.dart';
 
+import '../log.dart';
 import '../protocol/device_name.dart';
 import '../storage/database.dart';
+import 'device_credentials.dart';
+import 'secret_store.dart';
 
 /// Values allowed for the `p` TXT key and `platform` fields.
 enum DevicePlatform {
@@ -24,11 +27,11 @@ enum DevicePlatform {
       Platform.isIOS ? DevicePlatform.ios : DevicePlatform.android;
 }
 
-/// The persistent part of this device's identity.
+/// This device's id and display name.
 ///
-/// The certificate fingerprint is the real identity (ARCHITECTURE.md,
-/// "Security model"); until Phase 4 the certificate is created at each
-/// launch, so its fingerprint is not stored here.
+/// Neither is the identity: that is the certificate fingerprint in
+/// [DeviceCredentials] (ARCHITECTURE.md, "Device identity"). The id is
+/// used to find a device again on the network; the name is only a label.
 class DeviceIdentity {
   const DeviceIdentity({required this.deviceId, required this.deviceName});
 
@@ -100,5 +103,56 @@ class IdentityRepository {
         .update(_db.identity)
         .write(IdentityCompanion(deviceName: Value(clean)));
     return DeviceIdentity(deviceId: current.deviceId, deviceName: clean);
+  }
+}
+
+/// Loads this device's key and certificate, creating them on first launch.
+///
+/// The certificate is in the `identity` row; the private key is in the
+/// [SecretStore]. The identity row is the source of truth: when it has no
+/// certificate (first launch, or a reinstall that wiped the database but
+/// left an old key in the iOS Keychain), a new key pair replaces whatever
+/// the store holds. A missing or broken key also gets a new identity, so
+/// peers see a new device and must pair again.
+class CredentialRepository {
+  CredentialRepository(this._db, this._secrets, {DevicePlatform? platform})
+    : _identity = IdentityRepository(_db, platform: platform);
+
+  final AppDatabase _db;
+  final SecretStore _secrets;
+  final IdentityRepository _identity;
+
+  static const String privateKeyName = 'crossdrop.identity.private_key.v1';
+
+  Future<DeviceCredentials> loadOrCreate() async {
+    await _identity.loadOrCreate();
+    final row = await _db.select(_db.identity).getSingle();
+    final cert = row.certificate;
+    if (cert != null) {
+      final key = await _secrets.read(privateKeyName);
+      if (key != null) {
+        try {
+          return DeviceCredentials.fromPem(
+            certificatePem: cert,
+            privateKeyPem: key,
+          );
+        } on FormatException {
+          // Falls through to a new identity.
+        }
+      }
+      logEvent('identity', 'private key missing or invalid; new identity');
+    }
+    final fresh = await DeviceCredentials.generate();
+    // Key first: if the app dies in between, the next launch still sees no
+    // certificate and starts over.
+    await _secrets.write(privateKeyName, fresh.privateKeyPem);
+    await _db
+        .update(_db.identity)
+        .write(IdentityCompanion(certificate: Value(fresh.certificatePem)));
+    logEvent(
+      'identity',
+      'created, fingerprint ${fresh.fingerprint.substring(0, 8)}',
+    );
+    return fresh;
   }
 }

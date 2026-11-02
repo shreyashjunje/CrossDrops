@@ -247,21 +247,38 @@ class SessionOffer {
 
 /// Reply to `POST /v1/sessions`.
 class SessionCreated {
-  const SessionCreated({required this.sessionId, required this.status});
+  const SessionCreated({
+    required this.sessionId,
+    required this.status,
+    this.trusted = false,
+  });
 
   final String sessionId;
   final String status;
 
-  Map<String, Object?> toJson() => {'sessionId': sessionId, 'status': status};
+  /// The receiver already trusts this sender, so it shows no pairing code.
+  /// When false the sender shows its code until the offer is answered.
+  final bool trusted;
+
+  Map<String, Object?> toJson() => {
+    'sessionId': sessionId,
+    'status': status,
+    'trusted': trusted,
+  };
 
   factory SessionCreated.fromJson(Object? json) {
     if (json is! Map<String, Object?>) throw FormatError('not an object');
     final sessionId = json['sessionId'];
     final status = json['status'];
+    final trusted = json['trusted'];
     if (sessionId is! String || status is! String) {
       throw FormatError('invalid session reply');
     }
-    return SessionCreated(sessionId: sessionId, status: status);
+    return SessionCreated(
+      sessionId: sessionId,
+      status: status,
+      trusted: trusted == true,
+    );
   }
 }
 
@@ -463,4 +480,22 @@ abstract final class ErrorCodes {
 
   /// Too many offers: one unfinished session per sender.
   static const senderBusy = 'sender_busy';
+
+  /// 401: no valid token. Authenticate (`/v1/auth`) and retry once.
+  static const authRequired = 'auth_required';
+
+  /// 401: the challenge or the signature did not check out.
+  static const authFailed = 'auth_failed';
+
+  /// 429: too many requests from this address; see `retryAfter` (seconds).
+  static const rateLimited = 'rate_limited';
+
+  /// 403: receiving is turned off and the sender is not trusted.
+  static const receivingOff = 'receiving_off';
+
+  /// 431: request headers over the limit.
+  static const headersTooLarge = 'headers_too_large';
+
+  /// 413: a JSON body over the limit for its route.
+  static const bodyTooLarge = 'body_too_large';
 }
