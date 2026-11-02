@@ -97,6 +97,10 @@ class UploadClient {
     queryParameters: query,
   );
 
+  /// `GET /v1/info`: who is listening at [host]:[port].
+  Future<DeviceInfo> info() async =>
+      DeviceInfo.fromJson(await _requestJson('GET', '/v1/info'));
+
   /// Offers one file and returns its upload target.
   Future<UploadTarget> offerFile(
     String path, {
