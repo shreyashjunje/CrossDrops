@@ -3,14 +3,19 @@
 //
 //   dart run tool/crossdrop_cli.dart receive [--port 8443] [--dir received]
 //   dart run tool/crossdrop_cli.dart send <ip> <port> <file>
+//   dart run tool/crossdrop_cli.dart fake-qr <ip> <port> [out.svg]
 //
-// The client accepts any certificate until Phase 4 (see D-011), and the
-// receiver accepts every offer without asking.
+// Each run has a new identity, so a phone sees it as an unknown device:
+// sending from here is the "stranger on the same Wi-Fi" test, and the
+// pairing code is printed to compare with the phone. The receiver here
+// accepts every offer without asking. fake-qr writes a QR code with a
+// phone's real address and a wrong fingerprint, for the tampered-QR test.
 import 'dart:async';
 import 'dart:io';
 
 import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/engine/chunked_reader.dart';
+import 'package:crossdrop/core/protocol/connect_payload.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_identity.dart';
 import 'package:crossdrop/core/security/device_credentials.dart';
@@ -22,6 +27,7 @@ import 'package:crossdrop/core/storage/transfer_repository.dart';
 import 'package:crypto/crypto.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
+import 'package:qr/qr.dart';
 
 Future<void> main(List<String> args) async {
   if (args.isEmpty) return _usage();
@@ -30,6 +36,8 @@ Future<void> main(List<String> args) async {
       await _receive(args.skip(1).toList());
     case 'send':
       await _send(args.skip(1).toList());
+    case 'fake-qr':
+      await _fakeQr(args.skip(1).toList());
     default:
       _usage();
   }
@@ -39,7 +47,8 @@ void _usage() {
   stdout.writeln('''
 Usage:
   dart run tool/crossdrop_cli.dart receive [--port 8443] [--dir received]
-  dart run tool/crossdrop_cli.dart send <ip> <port> <file>''');
+  dart run tool/crossdrop_cli.dart send <ip> <port> <file>
+  dart run tool/crossdrop_cli.dart fake-qr <ip> <port> [out.svg]''');
   exitCode = 64;
 }
 
@@ -202,4 +211,46 @@ class _Sink implements Sink<Digest> {
   void add(Digest data) => value = data;
   @override
   void close() {}
+}
+
+/// Writes a CrossDrop QR code for `ip:port` with a random fingerprint
+/// and device id, as an SVG to open on this computer's screen. Scanning it
+/// must fail with "This isn't the device you scanned" and send nothing.
+Future<void> _fakeQr(List<String> args) async {
+  if (args.length < 2 || args.length > 3) return _usage();
+  final payload = ConnectPayload(
+    ip: args[0],
+    port: int.parse(args[1]),
+    fingerprint: (await DeviceCredentials.generate()).fingerprint,
+    deviceId: newDeviceId(),
+    name: 'Tampered',
+  ).toUri();
+  // Checks the address the same way the app does.
+  ConnectPayload.parse(payload);
+  final qr = QrImage(
+    QrCode.fromData(data: payload, errorCorrectLevel: QrErrorCorrectLevel.M),
+  );
+  const cell = 8;
+  const margin = 4;
+  final size = (qr.moduleCount + 2 * margin) * cell;
+  final svg = StringBuffer(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="$size" height="$size" '
+    'viewBox="0 0 $size $size"><rect width="100%" height="100%" '
+    'fill="white"/>',
+  );
+  for (var r = 0; r < qr.moduleCount; r++) {
+    for (var c = 0; c < qr.moduleCount; c++) {
+      if (!qr.isDark(r, c)) continue;
+      svg.write(
+        '<rect x="${(c + margin) * cell}" y="${(r + margin) * cell}" '
+        'width="$cell" height="$cell"/>',
+      );
+    }
+  }
+  svg.write('</svg>');
+  final out = File(args.length == 3 ? args[2] : 'fake-qr.svg');
+  await out.writeAsString(svg.toString());
+  stdout.writeln(
+    'Wrote ${out.absolute.path}. Open it in a browser and scan it.',
+  );
 }
