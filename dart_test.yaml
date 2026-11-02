@@ -1,0 +1,6 @@
+tags:
+  # Multi-gigabyte tests: minutes and disk space. Skipped by default.
+  # Run: flutter test --run-skipped --tags large
+  large:
+    skip: "large file test; run with --run-skipped --tags large"
+    timeout: 20m
