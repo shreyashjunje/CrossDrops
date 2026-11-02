@@ -82,6 +82,7 @@ class StoredSession {
     required this.files,
     this.peerHost,
     this.peerPort,
+    this.peerFingerprint,
     this.reason,
     this.finishedAt,
   });
@@ -92,6 +93,9 @@ class StoredSession {
   final SenderInfo peer;
   final String? peerHost;
   final int? peerPort;
+
+  /// Null for sessions stored before Phase 4.
+  final String? peerFingerprint;
   final SessionStatus status;
   final String? reason;
   final int totalBytes;
@@ -123,6 +127,7 @@ class TransferRepository {
     required List<StoredFile> files,
     String? peerHost,
     int? peerPort,
+    String? peerFingerprint,
   }) {
     final now = _clock();
     return _db.transaction(() async {
@@ -137,6 +142,7 @@ class TransferRepository {
               peerPlatform: peer.platform,
               peerHost: Value(peerHost),
               peerPort: Value(peerPort),
+              peerFingerprint: Value(peerFingerprint),
               status: status.name,
               totalBytes: files.fold(0, (sum, f) => sum + f.size),
               createdAt: now,
@@ -274,6 +280,7 @@ class TransferRepository {
       ),
       peerHost: row.peerHost,
       peerPort: row.peerPort,
+      peerFingerprint: row.peerFingerprint,
       status: SessionStatus.tryParse(row.status) ?? SessionStatus.failed,
       reason: row.reason,
       totalBytes: row.totalBytes,

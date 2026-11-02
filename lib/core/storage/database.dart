@@ -6,13 +6,14 @@ part 'database.g.dart';
 /// This device's identity. Holds one row (`slot` = 1).
 ///
 /// See ARCHITECTURE.md, "Data model". The private key never goes here; it
-/// will live in the Keychain / Keystore (Phase 4).
+/// lives in the Keychain / Keystore-backed storage (`CredentialRepository`).
 class Identity extends Table {
   IntColumn get slot => integer().withDefault(const Constant(1))();
   TextColumn get deviceId => text()();
   TextColumn get deviceName => text()();
 
-  /// PEM certificate. Null until the persistent identity lands in Phase 4.
+  /// PEM certificate; its SHA-256 is the device identity. Null until the
+  /// first launch creates it.
   TextColumn get certificate => text().nullable()();
 
   @override
@@ -38,6 +39,11 @@ class TransferSessions extends Table {
   /// Last known address of the receiver (send direction only).
   TextColumn get peerHost => text().nullable()();
   IntColumn get peerPort => integer().nullable()();
+
+  /// The peer's certificate fingerprint: who may continue a received
+  /// session, and the pin when a sent session resumes. Null for sessions
+  /// stored before Phase 4; those cannot resume.
+  TextColumn get peerFingerprint => text().nullable()();
 
   /// A [SessionStatus] name.
   TextColumn get status => text()();
@@ -98,13 +104,49 @@ class SessionFiles extends Table {
   Set<Column<Object>> get primaryKey => {sessionRowId, fileId};
 }
 
-@DriftDatabase(tables: [Identity, TransferSessions, SessionFiles])
+/// Devices the user chose to trust (ARCHITECTURE.md, "Pairing"). The
+/// fingerprint is the key; the name and id are labels and are never used
+/// to decide trust.
+@DataClassName('TrustedDeviceRow')
+class TrustedDevices extends Table {
+  TextColumn get fingerprint => text()();
+
+  /// Last device id seen with this fingerprint, to find it on the network.
+  TextColumn get deviceId => text()();
+  TextColumn get name => text()();
+  TextColumn get platform => text()();
+
+  /// Skip the Accept prompt for offers from this device.
+  BoolColumn get autoAccept => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get firstSeen => dateTime()();
+  DateTimeColumn get lastSeen => dateTime()();
+
+  @override
+  Set<Column<Object>> get primaryKey => {fingerprint};
+}
+
+/// App settings. Holds one row (`slot` = 1).
+@DataClassName('SettingsRow')
+class Settings extends Table {
+  IntColumn get slot => integer().withDefault(const Constant(1))();
+
+  /// The global "Receiving" switch (D-031).
+  BoolColumn get receivingEnabled =>
+      boolean().withDefault(const Constant(true))();
+
+  @override
+  Set<Column<Object>> get primaryKey => {slot};
+}
+
+@DriftDatabase(
+  tables: [Identity, TransferSessions, SessionFiles, TrustedDevices, Settings],
+)
 class AppDatabase extends _$AppDatabase {
   AppDatabase([QueryExecutor? executor])
     : super(executor ?? driftDatabase(name: 'crossdrop'));
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -112,6 +154,13 @@ class AppDatabase extends _$AppDatabase {
       if (from < 2) {
         await m.createTable(transferSessions);
         await m.createTable(sessionFiles);
+      }
+      if (from < 3) {
+        if (from >= 2) {
+          await m.addColumn(transferSessions, transferSessions.peerFingerprint);
+        }
+        await m.createTable(trustedDevices);
+        await m.createTable(settings);
       }
     },
     beforeOpen: (details) async {

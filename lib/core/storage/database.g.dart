@@ -141,7 +141,8 @@ class IdentityData extends DataClass implements Insertable<IdentityData> {
   final String deviceId;
   final String deviceName;
 
-  /// PEM certificate. Null until the persistent identity lands in Phase 4.
+  /// PEM certificate; its SHA-256 is the device identity. Null until the
+  /// first launch creates it.
   final String? certificate;
   const IdentityData({
     required this.slot,
@@ -414,6 +415,17 @@ class $TransferSessionsTable extends TransferSessions
     type: DriftSqlType.int,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _peerFingerprintMeta = const VerificationMeta(
+    'peerFingerprint',
+  );
+  @override
+  late final GeneratedColumn<String> peerFingerprint = GeneratedColumn<String>(
+    'peer_fingerprint',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _statusMeta = const VerificationMeta('status');
   @override
   late final GeneratedColumn<String> status = GeneratedColumn<String>(
@@ -486,6 +498,7 @@ class $TransferSessionsTable extends TransferSessions
     peerPlatform,
     peerHost,
     peerPort,
+    peerFingerprint,
     status,
     reason,
     totalBytes,
@@ -564,6 +577,15 @@ class $TransferSessionsTable extends TransferSessions
       context.handle(
         _peerPortMeta,
         peerPort.isAcceptableOrUnknown(data['peer_port']!, _peerPortMeta),
+      );
+    }
+    if (data.containsKey('peer_fingerprint')) {
+      context.handle(
+        _peerFingerprintMeta,
+        peerFingerprint.isAcceptableOrUnknown(
+          data['peer_fingerprint']!,
+          _peerFingerprintMeta,
+        ),
       );
     }
     if (data.containsKey('status')) {
@@ -655,6 +677,10 @@ class $TransferSessionsTable extends TransferSessions
         DriftSqlType.int,
         data['${effectivePrefix}peer_port'],
       ),
+      peerFingerprint: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}peer_fingerprint'],
+      ),
       status: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}status'],
@@ -702,6 +728,11 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
   final String? peerHost;
   final int? peerPort;
 
+  /// The peer's certificate fingerprint: who may continue a received
+  /// session, and the pin when a sent session resumes. Null for sessions
+  /// stored before Phase 4; those cannot resume.
+  final String? peerFingerprint;
+
   /// A [SessionStatus] name.
   final String status;
 
@@ -720,6 +751,7 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
     required this.peerPlatform,
     this.peerHost,
     this.peerPort,
+    this.peerFingerprint,
     required this.status,
     this.reason,
     required this.totalBytes,
@@ -741,6 +773,9 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
     }
     if (!nullToAbsent || peerPort != null) {
       map['peer_port'] = Variable<int>(peerPort);
+    }
+    if (!nullToAbsent || peerFingerprint != null) {
+      map['peer_fingerprint'] = Variable<String>(peerFingerprint);
     }
     map['status'] = Variable<String>(status);
     if (!nullToAbsent || reason != null) {
@@ -769,6 +804,9 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
       peerPort: peerPort == null && nullToAbsent
           ? const Value.absent()
           : Value(peerPort),
+      peerFingerprint: peerFingerprint == null && nullToAbsent
+          ? const Value.absent()
+          : Value(peerFingerprint),
       status: Value(status),
       reason: reason == null && nullToAbsent
           ? const Value.absent()
@@ -796,6 +834,7 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
       peerPlatform: serializer.fromJson<String>(json['peerPlatform']),
       peerHost: serializer.fromJson<String?>(json['peerHost']),
       peerPort: serializer.fromJson<int?>(json['peerPort']),
+      peerFingerprint: serializer.fromJson<String?>(json['peerFingerprint']),
       status: serializer.fromJson<String>(json['status']),
       reason: serializer.fromJson<String?>(json['reason']),
       totalBytes: serializer.fromJson<int>(json['totalBytes']),
@@ -816,6 +855,7 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
       'peerPlatform': serializer.toJson<String>(peerPlatform),
       'peerHost': serializer.toJson<String?>(peerHost),
       'peerPort': serializer.toJson<int?>(peerPort),
+      'peerFingerprint': serializer.toJson<String?>(peerFingerprint),
       'status': serializer.toJson<String>(status),
       'reason': serializer.toJson<String?>(reason),
       'totalBytes': serializer.toJson<int>(totalBytes),
@@ -834,6 +874,7 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
     String? peerPlatform,
     Value<String?> peerHost = const Value.absent(),
     Value<int?> peerPort = const Value.absent(),
+    Value<String?> peerFingerprint = const Value.absent(),
     String? status,
     Value<String?> reason = const Value.absent(),
     int? totalBytes,
@@ -849,6 +890,9 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
     peerPlatform: peerPlatform ?? this.peerPlatform,
     peerHost: peerHost.present ? peerHost.value : this.peerHost,
     peerPort: peerPort.present ? peerPort.value : this.peerPort,
+    peerFingerprint: peerFingerprint.present
+        ? peerFingerprint.value
+        : this.peerFingerprint,
     status: status ?? this.status,
     reason: reason.present ? reason.value : this.reason,
     totalBytes: totalBytes ?? this.totalBytes,
@@ -870,6 +914,9 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
           : this.peerPlatform,
       peerHost: data.peerHost.present ? data.peerHost.value : this.peerHost,
       peerPort: data.peerPort.present ? data.peerPort.value : this.peerPort,
+      peerFingerprint: data.peerFingerprint.present
+          ? data.peerFingerprint.value
+          : this.peerFingerprint,
       status: data.status.present ? data.status.value : this.status,
       reason: data.reason.present ? data.reason.value : this.reason,
       totalBytes: data.totalBytes.present
@@ -894,6 +941,7 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
           ..write('peerPlatform: $peerPlatform, ')
           ..write('peerHost: $peerHost, ')
           ..write('peerPort: $peerPort, ')
+          ..write('peerFingerprint: $peerFingerprint, ')
           ..write('status: $status, ')
           ..write('reason: $reason, ')
           ..write('totalBytes: $totalBytes, ')
@@ -914,6 +962,7 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
     peerPlatform,
     peerHost,
     peerPort,
+    peerFingerprint,
     status,
     reason,
     totalBytes,
@@ -933,6 +982,7 @@ class SessionRow extends DataClass implements Insertable<SessionRow> {
           other.peerPlatform == this.peerPlatform &&
           other.peerHost == this.peerHost &&
           other.peerPort == this.peerPort &&
+          other.peerFingerprint == this.peerFingerprint &&
           other.status == this.status &&
           other.reason == this.reason &&
           other.totalBytes == this.totalBytes &&
@@ -950,6 +1000,7 @@ class TransferSessionsCompanion extends UpdateCompanion<SessionRow> {
   final Value<String> peerPlatform;
   final Value<String?> peerHost;
   final Value<int?> peerPort;
+  final Value<String?> peerFingerprint;
   final Value<String> status;
   final Value<String?> reason;
   final Value<int> totalBytes;
@@ -965,6 +1016,7 @@ class TransferSessionsCompanion extends UpdateCompanion<SessionRow> {
     this.peerPlatform = const Value.absent(),
     this.peerHost = const Value.absent(),
     this.peerPort = const Value.absent(),
+    this.peerFingerprint = const Value.absent(),
     this.status = const Value.absent(),
     this.reason = const Value.absent(),
     this.totalBytes = const Value.absent(),
@@ -981,6 +1033,7 @@ class TransferSessionsCompanion extends UpdateCompanion<SessionRow> {
     required String peerPlatform,
     this.peerHost = const Value.absent(),
     this.peerPort = const Value.absent(),
+    this.peerFingerprint = const Value.absent(),
     required String status,
     this.reason = const Value.absent(),
     required int totalBytes,
@@ -1005,6 +1058,7 @@ class TransferSessionsCompanion extends UpdateCompanion<SessionRow> {
     Expression<String>? peerPlatform,
     Expression<String>? peerHost,
     Expression<int>? peerPort,
+    Expression<String>? peerFingerprint,
     Expression<String>? status,
     Expression<String>? reason,
     Expression<int>? totalBytes,
@@ -1021,6 +1075,7 @@ class TransferSessionsCompanion extends UpdateCompanion<SessionRow> {
       if (peerPlatform != null) 'peer_platform': peerPlatform,
       if (peerHost != null) 'peer_host': peerHost,
       if (peerPort != null) 'peer_port': peerPort,
+      if (peerFingerprint != null) 'peer_fingerprint': peerFingerprint,
       if (status != null) 'status': status,
       if (reason != null) 'reason': reason,
       if (totalBytes != null) 'total_bytes': totalBytes,
@@ -1039,6 +1094,7 @@ class TransferSessionsCompanion extends UpdateCompanion<SessionRow> {
     Value<String>? peerPlatform,
     Value<String?>? peerHost,
     Value<int?>? peerPort,
+    Value<String?>? peerFingerprint,
     Value<String>? status,
     Value<String?>? reason,
     Value<int>? totalBytes,
@@ -1055,6 +1111,7 @@ class TransferSessionsCompanion extends UpdateCompanion<SessionRow> {
       peerPlatform: peerPlatform ?? this.peerPlatform,
       peerHost: peerHost ?? this.peerHost,
       peerPort: peerPort ?? this.peerPort,
+      peerFingerprint: peerFingerprint ?? this.peerFingerprint,
       status: status ?? this.status,
       reason: reason ?? this.reason,
       totalBytes: totalBytes ?? this.totalBytes,
@@ -1091,6 +1148,9 @@ class TransferSessionsCompanion extends UpdateCompanion<SessionRow> {
     if (peerPort.present) {
       map['peer_port'] = Variable<int>(peerPort.value);
     }
+    if (peerFingerprint.present) {
+      map['peer_fingerprint'] = Variable<String>(peerFingerprint.value);
+    }
     if (status.present) {
       map['status'] = Variable<String>(status.value);
     }
@@ -1123,6 +1183,7 @@ class TransferSessionsCompanion extends UpdateCompanion<SessionRow> {
           ..write('peerPlatform: $peerPlatform, ')
           ..write('peerHost: $peerHost, ')
           ..write('peerPort: $peerPort, ')
+          ..write('peerFingerprint: $peerFingerprint, ')
           ..write('status: $status, ')
           ..write('reason: $reason, ')
           ..write('totalBytes: $totalBytes, ')
@@ -2116,6 +2177,697 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
   }
 }
 
+class $TrustedDevicesTable extends TrustedDevices
+    with TableInfo<$TrustedDevicesTable, TrustedDeviceRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $TrustedDevicesTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _fingerprintMeta = const VerificationMeta(
+    'fingerprint',
+  );
+  @override
+  late final GeneratedColumn<String> fingerprint = GeneratedColumn<String>(
+    'fingerprint',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _deviceIdMeta = const VerificationMeta(
+    'deviceId',
+  );
+  @override
+  late final GeneratedColumn<String> deviceId = GeneratedColumn<String>(
+    'device_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _nameMeta = const VerificationMeta('name');
+  @override
+  late final GeneratedColumn<String> name = GeneratedColumn<String>(
+    'name',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _platformMeta = const VerificationMeta(
+    'platform',
+  );
+  @override
+  late final GeneratedColumn<String> platform = GeneratedColumn<String>(
+    'platform',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _autoAcceptMeta = const VerificationMeta(
+    'autoAccept',
+  );
+  @override
+  late final GeneratedColumn<bool> autoAccept = GeneratedColumn<bool>(
+    'auto_accept',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("auto_accept" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _firstSeenMeta = const VerificationMeta(
+    'firstSeen',
+  );
+  @override
+  late final GeneratedColumn<DateTime> firstSeen = GeneratedColumn<DateTime>(
+    'first_seen',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lastSeenMeta = const VerificationMeta(
+    'lastSeen',
+  );
+  @override
+  late final GeneratedColumn<DateTime> lastSeen = GeneratedColumn<DateTime>(
+    'last_seen',
+    aliasedName,
+    false,
+    type: DriftSqlType.dateTime,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    fingerprint,
+    deviceId,
+    name,
+    platform,
+    autoAccept,
+    firstSeen,
+    lastSeen,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'trusted_devices';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<TrustedDeviceRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('fingerprint')) {
+      context.handle(
+        _fingerprintMeta,
+        fingerprint.isAcceptableOrUnknown(
+          data['fingerprint']!,
+          _fingerprintMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_fingerprintMeta);
+    }
+    if (data.containsKey('device_id')) {
+      context.handle(
+        _deviceIdMeta,
+        deviceId.isAcceptableOrUnknown(data['device_id']!, _deviceIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_deviceIdMeta);
+    }
+    if (data.containsKey('name')) {
+      context.handle(
+        _nameMeta,
+        name.isAcceptableOrUnknown(data['name']!, _nameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nameMeta);
+    }
+    if (data.containsKey('platform')) {
+      context.handle(
+        _platformMeta,
+        platform.isAcceptableOrUnknown(data['platform']!, _platformMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_platformMeta);
+    }
+    if (data.containsKey('auto_accept')) {
+      context.handle(
+        _autoAcceptMeta,
+        autoAccept.isAcceptableOrUnknown(data['auto_accept']!, _autoAcceptMeta),
+      );
+    }
+    if (data.containsKey('first_seen')) {
+      context.handle(
+        _firstSeenMeta,
+        firstSeen.isAcceptableOrUnknown(data['first_seen']!, _firstSeenMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_firstSeenMeta);
+    }
+    if (data.containsKey('last_seen')) {
+      context.handle(
+        _lastSeenMeta,
+        lastSeen.isAcceptableOrUnknown(data['last_seen']!, _lastSeenMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_lastSeenMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {fingerprint};
+  @override
+  TrustedDeviceRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return TrustedDeviceRow(
+      fingerprint: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}fingerprint'],
+      )!,
+      deviceId: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}device_id'],
+      )!,
+      name: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}name'],
+      )!,
+      platform: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}platform'],
+      )!,
+      autoAccept: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}auto_accept'],
+      )!,
+      firstSeen: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}first_seen'],
+      )!,
+      lastSeen: attachedDatabase.typeMapping.read(
+        DriftSqlType.dateTime,
+        data['${effectivePrefix}last_seen'],
+      )!,
+    );
+  }
+
+  @override
+  $TrustedDevicesTable createAlias(String alias) {
+    return $TrustedDevicesTable(attachedDatabase, alias);
+  }
+}
+
+class TrustedDeviceRow extends DataClass
+    implements Insertable<TrustedDeviceRow> {
+  final String fingerprint;
+
+  /// Last device id seen with this fingerprint, to find it on the network.
+  final String deviceId;
+  final String name;
+  final String platform;
+
+  /// Skip the Accept prompt for offers from this device.
+  final bool autoAccept;
+  final DateTime firstSeen;
+  final DateTime lastSeen;
+  const TrustedDeviceRow({
+    required this.fingerprint,
+    required this.deviceId,
+    required this.name,
+    required this.platform,
+    required this.autoAccept,
+    required this.firstSeen,
+    required this.lastSeen,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['fingerprint'] = Variable<String>(fingerprint);
+    map['device_id'] = Variable<String>(deviceId);
+    map['name'] = Variable<String>(name);
+    map['platform'] = Variable<String>(platform);
+    map['auto_accept'] = Variable<bool>(autoAccept);
+    map['first_seen'] = Variable<DateTime>(firstSeen);
+    map['last_seen'] = Variable<DateTime>(lastSeen);
+    return map;
+  }
+
+  TrustedDevicesCompanion toCompanion(bool nullToAbsent) {
+    return TrustedDevicesCompanion(
+      fingerprint: Value(fingerprint),
+      deviceId: Value(deviceId),
+      name: Value(name),
+      platform: Value(platform),
+      autoAccept: Value(autoAccept),
+      firstSeen: Value(firstSeen),
+      lastSeen: Value(lastSeen),
+    );
+  }
+
+  factory TrustedDeviceRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return TrustedDeviceRow(
+      fingerprint: serializer.fromJson<String>(json['fingerprint']),
+      deviceId: serializer.fromJson<String>(json['deviceId']),
+      name: serializer.fromJson<String>(json['name']),
+      platform: serializer.fromJson<String>(json['platform']),
+      autoAccept: serializer.fromJson<bool>(json['autoAccept']),
+      firstSeen: serializer.fromJson<DateTime>(json['firstSeen']),
+      lastSeen: serializer.fromJson<DateTime>(json['lastSeen']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'fingerprint': serializer.toJson<String>(fingerprint),
+      'deviceId': serializer.toJson<String>(deviceId),
+      'name': serializer.toJson<String>(name),
+      'platform': serializer.toJson<String>(platform),
+      'autoAccept': serializer.toJson<bool>(autoAccept),
+      'firstSeen': serializer.toJson<DateTime>(firstSeen),
+      'lastSeen': serializer.toJson<DateTime>(lastSeen),
+    };
+  }
+
+  TrustedDeviceRow copyWith({
+    String? fingerprint,
+    String? deviceId,
+    String? name,
+    String? platform,
+    bool? autoAccept,
+    DateTime? firstSeen,
+    DateTime? lastSeen,
+  }) => TrustedDeviceRow(
+    fingerprint: fingerprint ?? this.fingerprint,
+    deviceId: deviceId ?? this.deviceId,
+    name: name ?? this.name,
+    platform: platform ?? this.platform,
+    autoAccept: autoAccept ?? this.autoAccept,
+    firstSeen: firstSeen ?? this.firstSeen,
+    lastSeen: lastSeen ?? this.lastSeen,
+  );
+  TrustedDeviceRow copyWithCompanion(TrustedDevicesCompanion data) {
+    return TrustedDeviceRow(
+      fingerprint: data.fingerprint.present
+          ? data.fingerprint.value
+          : this.fingerprint,
+      deviceId: data.deviceId.present ? data.deviceId.value : this.deviceId,
+      name: data.name.present ? data.name.value : this.name,
+      platform: data.platform.present ? data.platform.value : this.platform,
+      autoAccept: data.autoAccept.present
+          ? data.autoAccept.value
+          : this.autoAccept,
+      firstSeen: data.firstSeen.present ? data.firstSeen.value : this.firstSeen,
+      lastSeen: data.lastSeen.present ? data.lastSeen.value : this.lastSeen,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TrustedDeviceRow(')
+          ..write('fingerprint: $fingerprint, ')
+          ..write('deviceId: $deviceId, ')
+          ..write('name: $name, ')
+          ..write('platform: $platform, ')
+          ..write('autoAccept: $autoAccept, ')
+          ..write('firstSeen: $firstSeen, ')
+          ..write('lastSeen: $lastSeen')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    fingerprint,
+    deviceId,
+    name,
+    platform,
+    autoAccept,
+    firstSeen,
+    lastSeen,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is TrustedDeviceRow &&
+          other.fingerprint == this.fingerprint &&
+          other.deviceId == this.deviceId &&
+          other.name == this.name &&
+          other.platform == this.platform &&
+          other.autoAccept == this.autoAccept &&
+          other.firstSeen == this.firstSeen &&
+          other.lastSeen == this.lastSeen);
+}
+
+class TrustedDevicesCompanion extends UpdateCompanion<TrustedDeviceRow> {
+  final Value<String> fingerprint;
+  final Value<String> deviceId;
+  final Value<String> name;
+  final Value<String> platform;
+  final Value<bool> autoAccept;
+  final Value<DateTime> firstSeen;
+  final Value<DateTime> lastSeen;
+  final Value<int> rowid;
+  const TrustedDevicesCompanion({
+    this.fingerprint = const Value.absent(),
+    this.deviceId = const Value.absent(),
+    this.name = const Value.absent(),
+    this.platform = const Value.absent(),
+    this.autoAccept = const Value.absent(),
+    this.firstSeen = const Value.absent(),
+    this.lastSeen = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  TrustedDevicesCompanion.insert({
+    required String fingerprint,
+    required String deviceId,
+    required String name,
+    required String platform,
+    this.autoAccept = const Value.absent(),
+    required DateTime firstSeen,
+    required DateTime lastSeen,
+    this.rowid = const Value.absent(),
+  }) : fingerprint = Value(fingerprint),
+       deviceId = Value(deviceId),
+       name = Value(name),
+       platform = Value(platform),
+       firstSeen = Value(firstSeen),
+       lastSeen = Value(lastSeen);
+  static Insertable<TrustedDeviceRow> custom({
+    Expression<String>? fingerprint,
+    Expression<String>? deviceId,
+    Expression<String>? name,
+    Expression<String>? platform,
+    Expression<bool>? autoAccept,
+    Expression<DateTime>? firstSeen,
+    Expression<DateTime>? lastSeen,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (fingerprint != null) 'fingerprint': fingerprint,
+      if (deviceId != null) 'device_id': deviceId,
+      if (name != null) 'name': name,
+      if (platform != null) 'platform': platform,
+      if (autoAccept != null) 'auto_accept': autoAccept,
+      if (firstSeen != null) 'first_seen': firstSeen,
+      if (lastSeen != null) 'last_seen': lastSeen,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  TrustedDevicesCompanion copyWith({
+    Value<String>? fingerprint,
+    Value<String>? deviceId,
+    Value<String>? name,
+    Value<String>? platform,
+    Value<bool>? autoAccept,
+    Value<DateTime>? firstSeen,
+    Value<DateTime>? lastSeen,
+    Value<int>? rowid,
+  }) {
+    return TrustedDevicesCompanion(
+      fingerprint: fingerprint ?? this.fingerprint,
+      deviceId: deviceId ?? this.deviceId,
+      name: name ?? this.name,
+      platform: platform ?? this.platform,
+      autoAccept: autoAccept ?? this.autoAccept,
+      firstSeen: firstSeen ?? this.firstSeen,
+      lastSeen: lastSeen ?? this.lastSeen,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (fingerprint.present) {
+      map['fingerprint'] = Variable<String>(fingerprint.value);
+    }
+    if (deviceId.present) {
+      map['device_id'] = Variable<String>(deviceId.value);
+    }
+    if (name.present) {
+      map['name'] = Variable<String>(name.value);
+    }
+    if (platform.present) {
+      map['platform'] = Variable<String>(platform.value);
+    }
+    if (autoAccept.present) {
+      map['auto_accept'] = Variable<bool>(autoAccept.value);
+    }
+    if (firstSeen.present) {
+      map['first_seen'] = Variable<DateTime>(firstSeen.value);
+    }
+    if (lastSeen.present) {
+      map['last_seen'] = Variable<DateTime>(lastSeen.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('TrustedDevicesCompanion(')
+          ..write('fingerprint: $fingerprint, ')
+          ..write('deviceId: $deviceId, ')
+          ..write('name: $name, ')
+          ..write('platform: $platform, ')
+          ..write('autoAccept: $autoAccept, ')
+          ..write('firstSeen: $firstSeen, ')
+          ..write('lastSeen: $lastSeen, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
+class $SettingsTable extends Settings
+    with TableInfo<$SettingsTable, SettingsRow> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $SettingsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _slotMeta = const VerificationMeta('slot');
+  @override
+  late final GeneratedColumn<int> slot = GeneratedColumn<int>(
+    'slot',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _receivingEnabledMeta = const VerificationMeta(
+    'receivingEnabled',
+  );
+  @override
+  late final GeneratedColumn<bool> receivingEnabled = GeneratedColumn<bool>(
+    'receiving_enabled',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("receiving_enabled" IN (0, 1))',
+    ),
+    defaultValue: const Constant(true),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [slot, receivingEnabled];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'settings';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<SettingsRow> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('slot')) {
+      context.handle(
+        _slotMeta,
+        slot.isAcceptableOrUnknown(data['slot']!, _slotMeta),
+      );
+    }
+    if (data.containsKey('receiving_enabled')) {
+      context.handle(
+        _receivingEnabledMeta,
+        receivingEnabled.isAcceptableOrUnknown(
+          data['receiving_enabled']!,
+          _receivingEnabledMeta,
+        ),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {slot};
+  @override
+  SettingsRow map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return SettingsRow(
+      slot: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}slot'],
+      )!,
+      receivingEnabled: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}receiving_enabled'],
+      )!,
+    );
+  }
+
+  @override
+  $SettingsTable createAlias(String alias) {
+    return $SettingsTable(attachedDatabase, alias);
+  }
+}
+
+class SettingsRow extends DataClass implements Insertable<SettingsRow> {
+  final int slot;
+
+  /// The global "Receiving" switch (D-031).
+  final bool receivingEnabled;
+  const SettingsRow({required this.slot, required this.receivingEnabled});
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['slot'] = Variable<int>(slot);
+    map['receiving_enabled'] = Variable<bool>(receivingEnabled);
+    return map;
+  }
+
+  SettingsCompanion toCompanion(bool nullToAbsent) {
+    return SettingsCompanion(
+      slot: Value(slot),
+      receivingEnabled: Value(receivingEnabled),
+    );
+  }
+
+  factory SettingsRow.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return SettingsRow(
+      slot: serializer.fromJson<int>(json['slot']),
+      receivingEnabled: serializer.fromJson<bool>(json['receivingEnabled']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'slot': serializer.toJson<int>(slot),
+      'receivingEnabled': serializer.toJson<bool>(receivingEnabled),
+    };
+  }
+
+  SettingsRow copyWith({int? slot, bool? receivingEnabled}) => SettingsRow(
+    slot: slot ?? this.slot,
+    receivingEnabled: receivingEnabled ?? this.receivingEnabled,
+  );
+  SettingsRow copyWithCompanion(SettingsCompanion data) {
+    return SettingsRow(
+      slot: data.slot.present ? data.slot.value : this.slot,
+      receivingEnabled: data.receivingEnabled.present
+          ? data.receivingEnabled.value
+          : this.receivingEnabled,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SettingsRow(')
+          ..write('slot: $slot, ')
+          ..write('receivingEnabled: $receivingEnabled')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(slot, receivingEnabled);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is SettingsRow &&
+          other.slot == this.slot &&
+          other.receivingEnabled == this.receivingEnabled);
+}
+
+class SettingsCompanion extends UpdateCompanion<SettingsRow> {
+  final Value<int> slot;
+  final Value<bool> receivingEnabled;
+  const SettingsCompanion({
+    this.slot = const Value.absent(),
+    this.receivingEnabled = const Value.absent(),
+  });
+  SettingsCompanion.insert({
+    this.slot = const Value.absent(),
+    this.receivingEnabled = const Value.absent(),
+  });
+  static Insertable<SettingsRow> custom({
+    Expression<int>? slot,
+    Expression<bool>? receivingEnabled,
+  }) {
+    return RawValuesInsertable({
+      if (slot != null) 'slot': slot,
+      if (receivingEnabled != null) 'receiving_enabled': receivingEnabled,
+    });
+  }
+
+  SettingsCompanion copyWith({
+    Value<int>? slot,
+    Value<bool>? receivingEnabled,
+  }) {
+    return SettingsCompanion(
+      slot: slot ?? this.slot,
+      receivingEnabled: receivingEnabled ?? this.receivingEnabled,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (slot.present) {
+      map['slot'] = Variable<int>(slot.value);
+    }
+    if (receivingEnabled.present) {
+      map['receiving_enabled'] = Variable<bool>(receivingEnabled.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('SettingsCompanion(')
+          ..write('slot: $slot, ')
+          ..write('receivingEnabled: $receivingEnabled')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2124,6 +2876,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     this,
   );
   late final $SessionFilesTable sessionFiles = $SessionFilesTable(this);
+  late final $TrustedDevicesTable trustedDevices = $TrustedDevicesTable(this);
+  late final $SettingsTable settings = $SettingsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2132,6 +2886,8 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     identity,
     transferSessions,
     sessionFiles,
+    trustedDevices,
+    settings,
   ];
   @override
   StreamQueryUpdateRules get streamUpdateRules => const StreamQueryUpdateRules([
@@ -2341,6 +3097,7 @@ typedef $$TransferSessionsTableCreateCompanionBuilder =
       required String peerPlatform,
       Value<String?> peerHost,
       Value<int?> peerPort,
+      Value<String?> peerFingerprint,
       required String status,
       Value<String?> reason,
       required int totalBytes,
@@ -2358,6 +3115,7 @@ typedef $$TransferSessionsTableUpdateCompanionBuilder =
       Value<String> peerPlatform,
       Value<String?> peerHost,
       Value<int?> peerPort,
+      Value<String?> peerFingerprint,
       Value<String> status,
       Value<String?> reason,
       Value<int> totalBytes,
@@ -2439,6 +3197,11 @@ class $$TransferSessionsTableFilterComposer
 
   ColumnFilters<int> get peerPort => $composableBuilder(
     column: $table.peerPort,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get peerFingerprint => $composableBuilder(
+    column: $table.peerFingerprint,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -2547,6 +3310,11 @@ class $$TransferSessionsTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get peerFingerprint => $composableBuilder(
+    column: $table.peerFingerprint,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get status => $composableBuilder(
     column: $table.status,
     builder: (column) => ColumnOrderings(column),
@@ -2614,6 +3382,11 @@ class $$TransferSessionsTableAnnotationComposer
 
   GeneratedColumn<int> get peerPort =>
       $composableBuilder(column: $table.peerPort, builder: (column) => column);
+
+  GeneratedColumn<String> get peerFingerprint => $composableBuilder(
+    column: $table.peerFingerprint,
+    builder: (column) => column,
+  );
 
   GeneratedColumn<String> get status =>
       $composableBuilder(column: $table.status, builder: (column) => column);
@@ -2701,6 +3474,7 @@ class $$TransferSessionsTableTableManager
                 Value<String> peerPlatform = const Value.absent(),
                 Value<String?> peerHost = const Value.absent(),
                 Value<int?> peerPort = const Value.absent(),
+                Value<String?> peerFingerprint = const Value.absent(),
                 Value<String> status = const Value.absent(),
                 Value<String?> reason = const Value.absent(),
                 Value<int> totalBytes = const Value.absent(),
@@ -2716,6 +3490,7 @@ class $$TransferSessionsTableTableManager
                 peerPlatform: peerPlatform,
                 peerHost: peerHost,
                 peerPort: peerPort,
+                peerFingerprint: peerFingerprint,
                 status: status,
                 reason: reason,
                 totalBytes: totalBytes,
@@ -2733,6 +3508,7 @@ class $$TransferSessionsTableTableManager
                 required String peerPlatform,
                 Value<String?> peerHost = const Value.absent(),
                 Value<int?> peerPort = const Value.absent(),
+                Value<String?> peerFingerprint = const Value.absent(),
                 required String status,
                 Value<String?> reason = const Value.absent(),
                 required int totalBytes,
@@ -2748,6 +3524,7 @@ class $$TransferSessionsTableTableManager
                 peerPlatform: peerPlatform,
                 peerHost: peerHost,
                 peerPort: peerPort,
+                peerFingerprint: peerFingerprint,
                 status: status,
                 reason: reason,
                 totalBytes: totalBytes,
@@ -3366,6 +4143,406 @@ typedef $$SessionFilesTableProcessedTableManager =
       SessionFileRow,
       PrefetchHooks Function({bool sessionRowId})
     >;
+typedef $$TrustedDevicesTableCreateCompanionBuilder =
+    TrustedDevicesCompanion Function({
+      required String fingerprint,
+      required String deviceId,
+      required String name,
+      required String platform,
+      Value<bool> autoAccept,
+      required DateTime firstSeen,
+      required DateTime lastSeen,
+      Value<int> rowid,
+    });
+typedef $$TrustedDevicesTableUpdateCompanionBuilder =
+    TrustedDevicesCompanion Function({
+      Value<String> fingerprint,
+      Value<String> deviceId,
+      Value<String> name,
+      Value<String> platform,
+      Value<bool> autoAccept,
+      Value<DateTime> firstSeen,
+      Value<DateTime> lastSeen,
+      Value<int> rowid,
+    });
+
+class $$TrustedDevicesTableFilterComposer
+    extends Composer<_$AppDatabase, $TrustedDevicesTable> {
+  $$TrustedDevicesTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<String> get fingerprint => $composableBuilder(
+    column: $table.fingerprint,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get deviceId => $composableBuilder(
+    column: $table.deviceId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get platform => $composableBuilder(
+    column: $table.platform,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get autoAccept => $composableBuilder(
+    column: $table.autoAccept,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get firstSeen => $composableBuilder(
+    column: $table.firstSeen,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<DateTime> get lastSeen => $composableBuilder(
+    column: $table.lastSeen,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$TrustedDevicesTableOrderingComposer
+    extends Composer<_$AppDatabase, $TrustedDevicesTable> {
+  $$TrustedDevicesTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<String> get fingerprint => $composableBuilder(
+    column: $table.fingerprint,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get deviceId => $composableBuilder(
+    column: $table.deviceId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get name => $composableBuilder(
+    column: $table.name,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get platform => $composableBuilder(
+    column: $table.platform,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get autoAccept => $composableBuilder(
+    column: $table.autoAccept,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get firstSeen => $composableBuilder(
+    column: $table.firstSeen,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<DateTime> get lastSeen => $composableBuilder(
+    column: $table.lastSeen,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$TrustedDevicesTableAnnotationComposer
+    extends Composer<_$AppDatabase, $TrustedDevicesTable> {
+  $$TrustedDevicesTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<String> get fingerprint => $composableBuilder(
+    column: $table.fingerprint,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get deviceId =>
+      $composableBuilder(column: $table.deviceId, builder: (column) => column);
+
+  GeneratedColumn<String> get name =>
+      $composableBuilder(column: $table.name, builder: (column) => column);
+
+  GeneratedColumn<String> get platform =>
+      $composableBuilder(column: $table.platform, builder: (column) => column);
+
+  GeneratedColumn<bool> get autoAccept => $composableBuilder(
+    column: $table.autoAccept,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<DateTime> get firstSeen =>
+      $composableBuilder(column: $table.firstSeen, builder: (column) => column);
+
+  GeneratedColumn<DateTime> get lastSeen =>
+      $composableBuilder(column: $table.lastSeen, builder: (column) => column);
+}
+
+class $$TrustedDevicesTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $TrustedDevicesTable,
+          TrustedDeviceRow,
+          $$TrustedDevicesTableFilterComposer,
+          $$TrustedDevicesTableOrderingComposer,
+          $$TrustedDevicesTableAnnotationComposer,
+          $$TrustedDevicesTableCreateCompanionBuilder,
+          $$TrustedDevicesTableUpdateCompanionBuilder,
+          (
+            TrustedDeviceRow,
+            BaseReferences<
+              _$AppDatabase,
+              $TrustedDevicesTable,
+              TrustedDeviceRow
+            >,
+          ),
+          TrustedDeviceRow,
+          PrefetchHooks Function()
+        > {
+  $$TrustedDevicesTableTableManager(
+    _$AppDatabase db,
+    $TrustedDevicesTable table,
+  ) : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$TrustedDevicesTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$TrustedDevicesTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$TrustedDevicesTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<String> fingerprint = const Value.absent(),
+                Value<String> deviceId = const Value.absent(),
+                Value<String> name = const Value.absent(),
+                Value<String> platform = const Value.absent(),
+                Value<bool> autoAccept = const Value.absent(),
+                Value<DateTime> firstSeen = const Value.absent(),
+                Value<DateTime> lastSeen = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => TrustedDevicesCompanion(
+                fingerprint: fingerprint,
+                deviceId: deviceId,
+                name: name,
+                platform: platform,
+                autoAccept: autoAccept,
+                firstSeen: firstSeen,
+                lastSeen: lastSeen,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required String fingerprint,
+                required String deviceId,
+                required String name,
+                required String platform,
+                Value<bool> autoAccept = const Value.absent(),
+                required DateTime firstSeen,
+                required DateTime lastSeen,
+                Value<int> rowid = const Value.absent(),
+              }) => TrustedDevicesCompanion.insert(
+                fingerprint: fingerprint,
+                deviceId: deviceId,
+                name: name,
+                platform: platform,
+                autoAccept: autoAccept,
+                firstSeen: firstSeen,
+                lastSeen: lastSeen,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$TrustedDevicesTable, TrustedDeviceRow>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $TrustedDevicesTable,
+                    TrustedDeviceRow
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$TrustedDevicesTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $TrustedDevicesTable,
+      TrustedDeviceRow,
+      $$TrustedDevicesTableFilterComposer,
+      $$TrustedDevicesTableOrderingComposer,
+      $$TrustedDevicesTableAnnotationComposer,
+      $$TrustedDevicesTableCreateCompanionBuilder,
+      $$TrustedDevicesTableUpdateCompanionBuilder,
+      (
+        TrustedDeviceRow,
+        BaseReferences<_$AppDatabase, $TrustedDevicesTable, TrustedDeviceRow>,
+      ),
+      TrustedDeviceRow,
+      PrefetchHooks Function()
+    >;
+typedef $$SettingsTableCreateCompanionBuilder = SettingsCompanion Function({
+  Value<int> slot,
+  Value<bool> receivingEnabled,
+});
+typedef $$SettingsTableUpdateCompanionBuilder = SettingsCompanion Function({
+  Value<int> slot,
+  Value<bool> receivingEnabled,
+});
+
+class $$SettingsTableFilterComposer
+    extends Composer<_$AppDatabase, $SettingsTable> {
+  $$SettingsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get slot => $composableBuilder(
+    column: $table.slot,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get receivingEnabled => $composableBuilder(
+    column: $table.receivingEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$SettingsTableOrderingComposer
+    extends Composer<_$AppDatabase, $SettingsTable> {
+  $$SettingsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get slot => $composableBuilder(
+    column: $table.slot,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get receivingEnabled => $composableBuilder(
+    column: $table.receivingEnabled,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$SettingsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $SettingsTable> {
+  $$SettingsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get slot =>
+      $composableBuilder(column: $table.slot, builder: (column) => column);
+
+  GeneratedColumn<bool> get receivingEnabled => $composableBuilder(
+    column: $table.receivingEnabled,
+    builder: (column) => column,
+  );
+}
+
+class $$SettingsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $SettingsTable,
+          SettingsRow,
+          $$SettingsTableFilterComposer,
+          $$SettingsTableOrderingComposer,
+          $$SettingsTableAnnotationComposer,
+          $$SettingsTableCreateCompanionBuilder,
+          $$SettingsTableUpdateCompanionBuilder,
+          (
+            SettingsRow,
+            BaseReferences<_$AppDatabase, $SettingsTable, SettingsRow>,
+          ),
+          SettingsRow,
+          PrefetchHooks Function()
+        > {
+  $$SettingsTableTableManager(_$AppDatabase db, $SettingsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$SettingsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$SettingsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$SettingsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> slot = const Value.absent(),
+                Value<bool> receivingEnabled = const Value.absent(),
+              }) => SettingsCompanion(
+                slot: slot,
+                receivingEnabled: receivingEnabled,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> slot = const Value.absent(),
+                Value<bool> receivingEnabled = const Value.absent(),
+              }) => SettingsCompanion.insert(
+                slot: slot,
+                receivingEnabled: receivingEnabled,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$SettingsTable, SettingsRow>(table),
+                  BaseReferences<_$AppDatabase, $SettingsTable, SettingsRow>(
+                    db,
+                    table,
+                    e,
+                  ),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$SettingsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $SettingsTable,
+      SettingsRow,
+      $$SettingsTableFilterComposer,
+      $$SettingsTableOrderingComposer,
+      $$SettingsTableAnnotationComposer,
+      $$SettingsTableCreateCompanionBuilder,
+      $$SettingsTableUpdateCompanionBuilder,
+      (SettingsRow, BaseReferences<_$AppDatabase, $SettingsTable, SettingsRow>),
+      SettingsRow,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -3376,4 +4553,8 @@ class $AppDatabaseManager {
       $$TransferSessionsTableTableManager(_db, _db.transferSessions);
   $$SessionFilesTableTableManager get sessionFiles =>
       $$SessionFilesTableTableManager(_db, _db.sessionFiles);
+  $$TrustedDevicesTableTableManager get trustedDevices =>
+      $$TrustedDevicesTableTableManager(_db, _db.trustedDevices);
+  $$SettingsTableTableManager get settings =>
+      $$SettingsTableTableManager(_db, _db.settings);
 }
