@@ -46,6 +46,7 @@ dependencies:
   drift: ^2.35.3
   drift_flutter: ^0.3.1
   bonsoir: ^7.1.6
+  connectivity_plus: ^7.3.2
 
 dev_dependencies:
   flutter_test:
