@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/client/peer_check.dart';
+import '../../core/engine/send_session.dart';
+import '../../core/protocol/models.dart';
 import '../transfer/transfer_format.dart';
 import 'send_controller.dart';
 
@@ -37,110 +39,200 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       );
       return;
     }
-    ref.read(sendControllerProvider.notifier).send(host, port);
+    final t = widget.target;
+    // A typed address that differs from the nearby entry has no known id.
+    final same = t != null && t.host == host && t.port == port;
+    ref
+        .read(sendControllerProvider.notifier)
+        .send(same ? t : ConnectTarget(host: host, port: port, name: host));
   }
 
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(sendControllerProvider);
     final controller = ref.read(sendControllerProvider.notifier);
-    final sending = state.phase == SendPhase.sending;
+    final running = state.isRunning;
     final theme = Theme.of(context);
-    final progress = state.progress;
+    final snap = state.snapshot;
 
     return Scaffold(
       appBar: AppBar(title: const Text('Send')),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          if (widget.target?.name case final name?)
-            Text('To $name', style: theme.textTheme.titleLarge),
-          TextField(
-            controller: _host,
-            enabled: !sending,
-            decoration: const InputDecoration(labelText: 'Receiver IP'),
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          ),
-          TextField(
-            controller: _port,
-            enabled: !sending,
-            decoration: const InputDecoration(labelText: 'Port'),
-            keyboardType: TextInputType.number,
-          ),
-          const SizedBox(height: 16),
-          OutlinedButton(
-            onPressed: sending ? null : controller.pickFile,
-            child: const Text('Pick file'),
-          ),
-          if (state.name != null) ...[
-            const SizedBox(height: 8),
+          if (running || snap != null)
             Text(
-              '${state.name} · ${formatMegabytes(state.size ?? 0)}',
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
+              'To ${state.receiverName ?? ''}',
+              style: theme.textTheme.titleLarge,
+            )
+          else if (widget.target?.name case final name?)
+            Text('To $name', style: theme.textTheme.titleLarge),
+          if (!running) ...[
+            TextField(
+              controller: _host,
+              decoration: const InputDecoration(labelText: 'Receiver IP'),
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+            ),
+            TextField(
+              controller: _port,
+              decoration: const InputDecoration(labelText: 'Port'),
+              keyboardType: TextInputType.number,
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: controller.pickFiles,
+                    child: const Text('Add files'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                if (state.items.isNotEmpty)
+                  TextButton(
+                    onPressed: controller.clearFiles,
+                    child: const Text('Clear'),
+                  ),
+              ],
             ),
           ],
+          if (state.items.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              '${state.items.length} '
+              '${state.items.length == 1 ? 'file' : 'files'} · '
+              '${formatSize(state.totalBytes)}',
+            ),
+          ],
+          if (state.error != null)
+            Text(
+              state.error!,
+              style: TextStyle(color: theme.colorScheme.error),
+            ),
           const SizedBox(height: 16),
           Row(
             children: [
               Expanded(
                 child: FilledButton(
-                  onPressed: sending || state.path == null ? null : _send,
+                  onPressed: running || state.items.isEmpty ? null : _send,
                   child: const Text('Send'),
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: OutlinedButton(
-                  onPressed: sending ? controller.cancel : null,
-                  child: const Text('Stop'),
+                  onPressed: running ? controller.cancel : null,
+                  child: const Text('Cancel'),
                 ),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: state.canResume ? controller.resume : null,
-                  child: const Text('Resume'),
+              if (state.canResume) ...[
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: controller.resume,
+                    child: const Text('Resume'),
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
-          const SizedBox(height: 24),
-          if (progress != null) ...[
-            LinearProgressIndicator(value: progress.fraction),
+          if (snap != null) ...[
+            const SizedBox(height: 24),
+            LinearProgressIndicator(value: snap.fraction),
             const SizedBox(height: 8),
-            Text(
-              '${formatMegabytes(progress.sentBytes)} of '
-              '${formatMegabytes(progress.totalBytes)}',
-            ),
-            if (sending)
+            Text(_status(snap), style: theme.textTheme.titleMedium),
+            if (snap.phase == SendPhase.sending)
               Text(
-                formatSpeed(progress.bytesPerSecond),
-                style: theme.textTheme.headlineMedium,
+                '${formatSize(snap.sentBytes)} of '
+                '${formatSize(snap.totalBytes)} · '
+                '${formatSpeed(snap.bytesPerSecond)} · '
+                '${formatTimeLeft(snap.eta)}',
               ),
+            const SizedBox(height: 8),
+            for (final f in snap.files) _FileRow(file: f),
           ],
-          const SizedBox(height: 8),
-          switch (state.phase) {
-            SendPhase.done => Text(
-              'Done, SHA-256 verified by receiver.\n'
-              'Time ${formatDuration(state.elapsed!)} · average '
-              '${state.averageMegabytesPerSecond!.toStringAsFixed(1)} MB/s',
-              style: theme.textTheme.titleMedium,
+        ],
+      ),
+    );
+  }
+
+  static String _status(SendSnapshot s) => switch (s.phase) {
+    SendPhase.connecting => 'Connecting…',
+    SendPhase.waitingForAccept => 'Waiting for the other phone to accept…',
+    SendPhase.sending => 'Sending',
+    SendPhase.retrying =>
+      'Connection lost. Trying again in '
+          '${(s.retryIn?.inMilliseconds ?? 0) ~/ 1000 + 1} s…',
+    SendPhase.paused => 'Paused while CrossDrop is in the background',
+    SendPhase.done =>
+      s.failedCount == 0
+          ? 'Done, SHA-256 verified by the receiver'
+          : 'Done: ${s.savedCount} sent, ${s.failedCount} failed',
+    SendPhase.rejected => switch (s.reason) {
+      RejectReasons.noSpace =>
+        'The other phone does not have enough space '
+            '(${formatSize(s.neededBytes ?? 0)} needed).',
+      RejectReasons.timeout => 'The other phone did not answer in time.',
+      RejectReasons.senderBusy =>
+        'The other phone still has an unfinished transfer from you. '
+            'Resume it from the start screen, or cancel it there.',
+      _ => 'The other phone declined.',
+    },
+    SendPhase.cancelled =>
+      s.reason == 'receiver' ? 'Cancelled by the other phone' : 'Cancelled',
+    SendPhase.failed => switch (s.reason) {
+      SendReasons.network =>
+        'Lost the connection for 2 minutes. Check that both phones are on '
+            'the same Wi-Fi, then tap Resume.',
+      SendReasons.version => 'Update CrossDrop on the other phone.',
+      SendReasons.identityMismatch =>
+        'A different device answered at this address.',
+      SendReasons.timeout => 'The other phone did not answer.',
+      SendReasons.sourceUnreadable =>
+        'A file could not be read any more, so the transfer stopped.',
+      SendReasons.sessionLost =>
+        'The other phone no longer has this transfer. Send again.',
+      ErrorCodes.noSpace =>
+        'The other phone ran out of space. Free some space there, then tap '
+            'Resume.',
+      _ => 'Failed (${s.reason}).',
+    },
+  };
+}
+
+class _FileRow extends StatelessWidget {
+  const _FileRow({required this.file});
+
+  final SendFileProgress file;
+
+  @override
+  Widget build(BuildContext context) {
+    final fraction = file.size == 0 ? 1.0 : file.sentBytes / file.size;
+    final trailing = switch (file.status) {
+      FileTransferStatus.saved => const Icon(Icons.check, size: 18),
+      FileTransferStatus.failed => Icon(
+        Icons.error_outline,
+        size: 18,
+        color: Theme.of(context).colorScheme.error,
+      ),
+      FileTransferStatus.verifying => const Text('verifying'),
+      _ => Text('${(fraction * 100).floor()}%'),
+    };
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              file.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
-            SendPhase.cancelled => const Text(
-              'Stopped. Tap Resume to continue.',
-            ),
-            SendPhase.failed => Text(
-              'Failed: ${state.error}',
-              style: TextStyle(color: theme.colorScheme.error),
-            ),
-            _ => const SizedBox.shrink(),
-          },
-          if (state.phase == SendPhase.idle && state.error != null)
-            Text(
-              state.error!,
-              style: TextStyle(color: theme.colorScheme.error),
-            ),
+          ),
+          const SizedBox(width: 8),
+          trailing,
         ],
       ),
     );

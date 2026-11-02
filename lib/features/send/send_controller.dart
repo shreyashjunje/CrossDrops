@@ -1,197 +1,224 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../app/keep_alive.dart';
 import '../../app/providers.dart';
-import '../../core/client/upload_client.dart';
+import '../../core/client/peer_check.dart';
+import '../../core/discovery/peer_locator.dart';
+import '../../core/engine/send_session.dart';
+import '../../core/protocol/file_type.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
-
-enum SendPhase { idle, sending, done, failed, cancelled }
+import '../../core/storage/transfer_repository.dart';
+import '../transfer/transfer_format.dart';
 
 class SendState {
   const SendState({
-    this.path,
-    this.name,
-    this.size,
-    this.phase = SendPhase.idle,
-    this.progress,
+    this.items = const [],
+    this.snapshot,
     this.error,
-    this.target,
-    this.elapsed,
-    this.sentThisRun,
+    this.receiverName,
   });
 
-  final String? path;
-  final String? name;
-  final int? size;
-  final SendPhase phase;
-  final TransferProgress? progress;
+  /// Files picked, in sending order.
+  final List<SendItem> items;
+
+  /// Null until a send starts.
+  final SendSnapshot? snapshot;
   final String? error;
+  final String? receiverName;
 
-  /// Set once the receiver accepted the offer; needed to resume.
-  final UploadTarget? target;
+  bool get isRunning => snapshot != null && !snapshot!.phase.isFinished;
 
-  /// Duration and bytes of the last run, for the average speed.
-  final Duration? elapsed;
-  final int? sentThisRun;
+  bool get canResume => snapshot?.canResume ?? false;
 
-  bool get canResume =>
-      target != null &&
-      (phase == SendPhase.failed || phase == SendPhase.cancelled);
+  int get totalBytes => items.fold(0, (sum, i) => sum + i.size);
 
-  /// Average MB/s (10^6 bytes) of the last finished run.
-  double? get averageMegabytesPerSecond {
-    final e = elapsed;
-    final sent = sentThisRun;
-    if (e == null || sent == null || e.inMicroseconds == 0) return null;
-    return sent / e.inMicroseconds;
-  }
+  SendState copyWith({
+    List<SendItem>? items,
+    SendSnapshot? Function()? snapshot,
+    String? Function()? error,
+    String? receiverName,
+  }) => SendState(
+    items: items ?? this.items,
+    snapshot: snapshot != null ? snapshot() : this.snapshot,
+    error: error != null ? error() : this.error,
+    receiverName: receiverName ?? this.receiverName,
+  );
 }
 
-final sendControllerProvider =
-    NotifierProvider.autoDispose<SendController, SendState>(SendController.new);
+/// App-wide, not tied to the Send screen: a transfer keeps running while
+/// the user moves around the app.
+final sendControllerProvider = NotifierProvider<SendController, SendState>(
+  SendController.new,
+);
 
-class SendController extends Notifier<SendState> {
-  UploadClient? _client;
-  String? _host;
-  int? _port;
+/// Picks files and runs one [SendSession] at a time.
+class SendController extends Notifier<SendState> implements BackgroundAware {
+  SendSession? _session;
+  StreamSubscription<SendSnapshot>? _sub;
+  final Object _keepAliveKey = Object();
 
   @override
   SendState build() {
+    final keepAlive = ref.read(keepAliveProvider);
     ref.onDispose(() {
-      _client?.cancel();
-      _client?.close();
-      WakelockPlus.disable();
+      _sub?.cancel();
+      unawaited(keepAlive.end(_keepAliveKey));
     });
     return const SendState();
   }
 
-  Future<void> pickFile() async {
+  Future<void> pickFiles() async {
     final picked = await FilePicker.pickFiles();
     if (picked.isEmpty || !ref.mounted) return;
-    final file = picked.first;
-    final path = file.path;
-    if (path == null) {
-      state = const SendState(error: 'This file cannot be read directly.');
-      return;
-    }
-    final size = await File(path).length();
-    if (!ref.mounted) return;
-    state = SendState(path: path, name: file.name, size: size);
-  }
-
-  /// Offers the picked file to [host]:[port] and sends it from the start.
-  Future<void> send(String host, int port) async {
-    final path = state.path;
-    if (path == null || state.phase == SendPhase.sending) return;
-    _client?.close();
-    final client = _client = UploadClient(host: host, port: port);
-    _host = host;
-    _port = port;
-    _setPhase(SendPhase.sending);
-    try {
-      final device = await ref.read(identityProvider.future);
-      final target = await client.offerFile(
-        path,
-        name: state.name,
-        sender: SenderInfo(
-          id: device.deviceId,
-          name: device.deviceName,
-          platform: DevicePlatform.current.name,
+    final items = <SendItem>[];
+    var unreadable = 0;
+    for (final f in picked) {
+      final path = f.path;
+      if (path == null) {
+        unreadable++;
+        continue;
+      }
+      final type = guessFileType(f.name);
+      items.add(
+        SendItem(
+          path: path,
+          name: f.name,
+          size: await File(path).length(),
+          mime: type.mime,
+          kind: type.kind,
         ),
       );
-      state = _copy(target: target);
-      await _run(client, target);
-    } on UploadException catch (e) {
-      _fail(e);
-    } on Exception catch (e) {
-      _fail(UploadException('error', '$e'));
     }
-  }
-
-  /// Continues an interrupted transfer from the receiver's receivedBytes.
-  Future<void> resume() async {
-    final target = state.target;
-    if (target == null || !state.canResume) return;
-    _client?.close();
-    final client = _client = UploadClient(host: _host!, port: _port!);
-    _setPhase(SendPhase.sending);
-    try {
-      await _run(client, target);
-    } on UploadException catch (e) {
-      _fail(e);
-    } on Exception catch (e) {
-      _fail(UploadException('error', '$e'));
-    }
-  }
-
-  void cancel() => _client?.cancel();
-
-  Future<void> _run(UploadClient client, UploadTarget target) async {
-    await WakelockPlus.enable();
-    try {
-      final start = (await client.fileStatus(target)).receivedBytes;
-      final watch = Stopwatch()..start();
-      var lastUi = Duration.zero;
-      await client.transfer(
-        target,
-        onProgress: (pr) {
-          // Limit rebuilds to about 10 per second.
-          final now = watch.elapsed;
-          if (pr.sentBytes != pr.totalBytes &&
-              now - lastUi < const Duration(milliseconds: 100)) {
-            return;
-          }
-          lastUi = now;
-          if (ref.mounted) state = _copy(progress: pr);
-        },
-      );
-      watch.stop();
-      if (!ref.mounted) return;
-      state = _copy(
-        phase: SendPhase.done,
-        elapsed: watch.elapsed,
-        sentThisRun: target.size - start,
-      );
-    } finally {
-      await WakelockPlus.disable();
-    }
-  }
-
-  void _setPhase(SendPhase phase) =>
-      state = _copy(phase: phase, clearError: true);
-
-  void _fail(UploadException e) {
     if (!ref.mounted) return;
-    state = _copy(
-      phase: e.isCancelled ? SendPhase.cancelled : SendPhase.failed,
-      error: e.isCancelled ? null : '${e.code}: ${e.message}',
+    state = SendState(
+      items: [...state.items, ...items],
+      error: unreadable == 0
+          ? null
+          : '$unreadable file(s) cannot be read directly and were skipped.',
     );
   }
 
-  SendState _copy({
-    SendPhase? phase,
-    TransferProgress? progress,
-    String? error,
-    bool clearError = false,
-    UploadTarget? target,
-    Duration? elapsed,
-    int? sentThisRun,
-  }) {
-    final s = state;
-    return SendState(
-      path: s.path,
-      name: s.name,
-      size: s.size,
-      phase: phase ?? s.phase,
-      progress: progress ?? s.progress,
-      error: clearError ? null : (error ?? s.error),
-      target: target ?? s.target,
-      elapsed: elapsed ?? s.elapsed,
-      sentThisRun: sentThisRun ?? s.sentThisRun,
-    );
+  void clearFiles() {
+    if (state.isRunning) return;
+    state = const SendState();
   }
+
+  /// Offers the picked files to [target] and sends them.
+  Future<void> send(ConnectTarget target) async {
+    if (state.isRunning || state.items.isEmpty) return;
+    final device = await ref.read(identityProvider.future);
+    final deviceId = target.deviceId;
+    final session = SendSession(
+      host: target.host,
+      port: target.port,
+      sender: _senderInfo(device),
+      items: state.items,
+      expectedDeviceId: deviceId,
+      repository: ref.read(transferRepositoryProvider),
+      locate: deviceId == null ? null : _locator(deviceId, device.deviceId),
+    );
+    state = state.copyWith(receiverName: target.name ?? target.host);
+    await _run(session);
+  }
+
+  /// Continues the last session after it gave up (network) or the
+  /// receiver ran out of space.
+  Future<void> resume() async {
+    final sid = state.snapshot?.sessionId;
+    if (!state.canResume || sid == null) return;
+    final stored = await ref
+        .read(transferRepositoryProvider)
+        .find(sid, TransferDirection.send);
+    if (stored != null) await resumeStored(stored);
+  }
+
+  /// Continues a session stored by an earlier app run.
+  Future<void> resumeStored(StoredSession stored) async {
+    if (state.isRunning) return;
+    final device = await ref.read(identityProvider.future);
+    final session = SendSession.resume(
+      stored,
+      sender: _senderInfo(device),
+      repository: ref.read(transferRepositoryProvider),
+      locate: _locator(stored.peer.id, device.deviceId),
+    );
+    state = SendState(
+      items: [
+        for (final f in stored.files)
+          SendItem(
+            path: f.sourcePath ?? '',
+            name: f.name,
+            size: f.size,
+            mime: f.mime,
+            kind: f.kind,
+          ),
+      ],
+      receiverName: stored.peer.name,
+    );
+    await _run(session);
+  }
+
+  Future<void> cancel() async => _session?.cancel();
+
+  @override
+  Future<void> onBackground() async {
+    final s = _session;
+    if (s == null || s.snapshot.phase.isFinished) return;
+    s.pause();
+    // Wait until the current chunk is out and the upload stopped.
+    await s.updates
+        .firstWhere((u) => u.phase == SendPhase.paused || u.phase.isFinished)
+        .timeout(const Duration(seconds: 10), onTimeout: () => s.snapshot);
+  }
+
+  @override
+  void onForeground() => _session?.resume();
+
+  Future<void> _run(SendSession session) async {
+    _session = session;
+    final keepAlive = ref.read(keepAliveProvider);
+    final count = state.items.length;
+    await keepAlive.begin(
+      _keepAliveKey,
+      this,
+      title: 'Sending to ${state.receiverName}',
+      text: '$count ${count == 1 ? 'file' : 'files'}',
+    );
+    await _sub?.cancel();
+    _sub = session.updates.listen((u) {
+      if (!ref.mounted) return;
+      state = state.copyWith(snapshot: () => u, error: () => null);
+      unawaited(
+        keepAlive.progress(
+          _keepAliveKey,
+          '${(u.fraction * 100).floor()}% · ${formatTimeLeft(u.eta)}',
+        ),
+      );
+    });
+    try {
+      final result = await session.run();
+      if (ref.mounted) state = state.copyWith(snapshot: () => result);
+    } finally {
+      await keepAlive.end(_keepAliveKey);
+      if (_session == session) _session = null;
+    }
+  }
+
+  PeerLocator _locator(String deviceId, String ownDeviceId) =>
+      () => locatePeer(
+        ref.read(mdnsBackendFactoryProvider)(),
+        deviceId: deviceId,
+        ownDeviceId: ownDeviceId,
+      );
+
+  static SenderInfo _senderInfo(DeviceIdentity device) => SenderInfo(
+    id: device.deviceId,
+    name: device.deviceName,
+    platform: DevicePlatform.current.name,
+  );
 }

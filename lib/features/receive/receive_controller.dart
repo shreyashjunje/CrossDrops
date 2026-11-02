@@ -2,9 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../app/app_dirs.dart';
+import '../../app/keep_alive.dart';
 import '../../app/providers.dart';
 import '../../core/discovery/discovery_service.dart';
 import '../../core/discovery/network_monitor.dart';
@@ -16,6 +16,7 @@ import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/ephemeral_identity.dart';
 import '../../core/server/receive_server.dart';
+import '../transfer/transfer_format.dart';
 
 class IncomingFile {
   const IncomingFile({
@@ -189,9 +190,14 @@ class ReceiveController extends Notifier<ReceiveState> {
   final Map<String, ProgressTracker> _trackers = {};
   final Map<String, Completer<bool>> _decisions = {};
   DateTime _lastUiUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+  late KeepAliveCoordinator _keepAlive;
+
+  /// Sessions registered with [_keepAlive].
+  final Set<String> _kept = {};
 
   @override
   ReceiveState build() {
+    _keepAlive = ref.read(keepAliveProvider);
     ref.onDispose(_stop);
     unawaited(_start());
     return const ReceiveState();
@@ -237,7 +243,8 @@ class ReceiveController extends Notifier<ReceiveState> {
       _server = server;
       _sub = server.events.listen(_onEvent);
       _restoreSessions(server.sessions);
-      await WakelockPlus.enable();
+      // Stay discoverable: iOS stops advertising when the screen locks.
+      await _keepAlive.holdScreen(this);
 
       _payloadFor = (a) => ConnectPayload(
         ip: a.ip,
@@ -252,10 +259,7 @@ class ReceiveController extends Notifier<ReceiveState> {
       await monitor.start();
       if (!ref.mounted) return;
       _networkSub = monitor.changes.listen(_onNetworkChanged);
-      _lifecycle = AppLifecycleListener(
-        onResume: _onResume,
-        onHide: _onBackground,
-      );
+      _lifecycle = AppLifecycleListener(onResume: _onResume);
       state = state.copyWith(
         port: server.port,
         deviceName: device.deviceName,
@@ -301,7 +305,30 @@ class ReceiveController extends Notifier<ReceiveState> {
     await _advertiser?.stop();
     await _sub?.cancel();
     await _server?.close();
-    await WakelockPlus.disable();
+    for (final sid in _kept.toList()) {
+      await _keepAlive.end(sid);
+    }
+    _kept.clear();
+    await _keepAlive.releaseScreen(this);
+  }
+
+  /// Keeps the app alive while [sessionId] moves bytes, and stops when it
+  /// ends.
+  Future<void> _trackKeepAlive(String sessionId, SessionStatus status) async {
+    final server = _server;
+    if (server == null) return;
+    if (status.isTerminal) {
+      if (_kept.remove(sessionId)) await _keepAlive.end(sessionId);
+      return;
+    }
+    if (status == SessionStatus.offered || !_kept.add(sessionId)) return;
+    final from = state.sessions[sessionId]?.sender.name ?? 'another phone';
+    await _keepAlive.begin(
+      sessionId,
+      _ServerKeepAlive(server),
+      title: 'Receiving from $from',
+      text: 'Keep CrossDrop open until the transfer finishes',
+    );
   }
 
   Future<bool> _ask(IncomingOffer offer) {
@@ -371,11 +398,6 @@ class ReceiveController extends Notifier<ReceiveState> {
     await _restartAdvertising();
   }
 
-  /// Going to the background: save progress before iOS suspends the app.
-  Future<void> _onBackground() async {
-    await _server?.checkpointAll();
-  }
-
   /// iOS pauses the app when the screen locks; the network may have
   /// changed meanwhile.
   Future<void> _onResume() async {
@@ -434,6 +456,7 @@ class ReceiveController extends Notifier<ReceiveState> {
           _dropPending(sessionId);
         }
         _update(sessionId, (s) => s.copyWith(status: status, reason: reason));
+        unawaited(_trackKeepAlive(sessionId, status));
         return;
       case FileProgress(:final sessionId, :final fileId, :final receivedBytes):
         final tracker = _trackers[sessionId];
@@ -447,6 +470,15 @@ class ReceiveController extends Notifier<ReceiveState> {
           return;
         }
         _lastUiUpdate = now;
+        if (tracker != null) {
+          unawaited(
+            _keepAlive.progress(
+              sessionId,
+              '${(tracker.fraction * 100).floor()}% · '
+              '${formatTimeLeft(tracker.eta)}',
+            ),
+          );
+        }
         _updateFile(
           sessionId,
           fileId,
@@ -507,4 +539,19 @@ class ReceiveController extends Notifier<ReceiveState> {
     if (s == null) return;
     state = state.copyWith(sessions: {...state.sessions, sessionId: change(s)});
   }
+}
+
+/// What a receiving session does when iOS is about to suspend the app:
+/// save every running upload's progress. The sender reconnects when the
+/// app is back.
+class _ServerKeepAlive implements BackgroundAware {
+  _ServerKeepAlive(this._server);
+
+  final ReceiveServer _server;
+
+  @override
+  Future<void> onBackground() => _server.checkpointAll();
+
+  @override
+  void onForeground() {}
 }

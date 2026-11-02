@@ -5,15 +5,36 @@ import '../../app/providers.dart';
 import '../nearby/nearby_screen.dart';
 import '../receive/receive_screen.dart';
 import '../settings/settings_screen.dart';
+import '../transfer/unfinished_transfers.dart';
 
-class HomeScreen extends ConsumerWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    void open(Widget screen) =>
-        Navigator.of(context)
-            .push(MaterialPageRoute<void>(builder: (_) => screen));
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  bool _askedAboutUnfinished = false;
+
+  void _open(Widget screen) =>
+      Navigator.of(context)
+          .push(MaterialPageRoute<void>(builder: (_) => screen));
+
+  @override
+  Widget build(BuildContext context) {
+    // Once per launch: offer to resume what an earlier run left unfinished.
+    ref.listen(unfinishedTransfersProvider, (_, next) {
+      final sessions = next.value;
+      if (_askedAboutUnfinished || sessions == null || sessions.isEmpty) {
+        return;
+      }
+      _askedAboutUnfinished = true;
+      showDialog<void>(
+        context: context,
+        builder: (_) => UnfinishedTransfersDialog(sessions: sessions),
+      );
+    });
     final name = ref.watch(identityProvider).value?.deviceName;
 
     return Scaffold(
@@ -22,7 +43,7 @@ class HomeScreen extends ConsumerWidget {
         actions: [
           IconButton(
             tooltip: 'Settings',
-            onPressed: () => open(const SettingsScreen()),
+            onPressed: () => _open(const SettingsScreen()),
             icon: const Icon(Icons.settings),
           ),
         ],
@@ -42,7 +63,7 @@ class HomeScreen extends ConsumerWidget {
               const SizedBox(height: 24),
             ],
             FilledButton(
-              onPressed: () => open(const ReceiveScreen()),
+              onPressed: () => _open(const ReceiveScreen()),
               child: const Padding(
                 padding: EdgeInsets.all(16),
                 child: Text('Receive'),
@@ -50,7 +71,7 @@ class HomeScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 16),
             OutlinedButton(
-              onPressed: () => open(const NearbyScreen()),
+              onPressed: () => _open(const NearbyScreen()),
               child: const Padding(
                 padding: EdgeInsets.all(16),
                 child: Text('Send'),
