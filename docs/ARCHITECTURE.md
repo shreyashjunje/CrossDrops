@@ -130,8 +130,11 @@ The protocol is plain HTTPS with JSON for control and streamed request bodies fo
 **Discovery advertisement (Bonjour/mDNS)**
 
 - Service type: `_crossdrop._tcp`, port = the receiver's random listening port.
-- TXT record: `v=1` (protocol version), `id=<device UUID>`, `n=<device name>`, `p=ios|android`, `fp=<first 16 hex chars of certificate SHA-256>`.
+- Instance name: `CrossDrop-<first 8 characters of the device UUID>`. It carries no personal data and rarely clashes; the device name is only in TXT `n`.
+- TXT record: `v=1` (protocol version), `id=<device UUID>`, `n=<device name, at most 63 UTF-8 bytes>`, `p=ios|android`, `fp=<first 16 hex chars of certificate SHA-256>`. Keys are case-insensitive. A record with a newer `v` needs only `v`, `id` and `n` and is listed as "needs update".
 - The TXT fingerprint is a hint only. The full fingerprint is checked in the TLS handshake.
+- Browsers ignore records with a bad TXT, their own id, or no IPv4 address in a local range (10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10), so an advertisement can never point the app outside the local network.
+- In Phase 2 a phone advertises only while its Receive screen is open (D-016). It re-advertises when the Wi-Fi or IP changes and when the app returns to the foreground.
 
 **QR code payload**
 
@@ -139,11 +142,21 @@ The protocol is plain HTTPS with JSON for control and streamed request bodies fo
 
 In offline hotspot mode the Android QR also carries the Wi-Fi name and password, so one scan joins the network and connects.
 
+Parsing is strict. Every listed parameter must appear exactly once, and unknown parameters are ignored, so later versions can add fields. Each field is checked:
+
+- `ip`: a dotted IPv4 literal in one of the local ranges above. Hostnames are never resolved.
+- `port`: 1–65535.
+- `fp`: 64 hex characters.
+- `id`: a UUID.
+- `n`: sanitized.
+
+Payloads over 1024 characters, or with control characters or stray `%` escapes, are refused. QR payloads are never logged. A typed IP and port follows the same address rules.
+
 **Endpoints**
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/v1/info` | Device id, name, platform, protocol versions supported |
+| GET | `/v1/info` | `{"id", "name", "platform", "versions": [1]}`. The sender calls it before every connect to check the protocol version and, from the list or a QR code, the device id |
 | POST | `/v1/sessions` | Sender offers a session with a file manifest; returns `sessionId`, status `pending` |
 | WS | `/v1/sessions/{id}/events` | Live events: `accepted`, `rejected`, `progress`, `file_done`, `cancelled`, `error` |
 | PUT | `/v1/sessions/{id}/files/{fileId}?offset=N` | Streams file bytes starting at byte N |
@@ -221,8 +234,9 @@ Most platform risk sits in four areas: how files are read, how they are saved, w
 
 | Area | iPhone (Swift) | Android (Kotlin) |
 | --- | --- | --- |
-| Discovery | Bonjour via NWListener/NWBrowser (e.g. the `bonsoir` plugin). Avoid raw multicast sockets: they need a special Apple entitlement. Requires `NSBonjourServices` and `NSLocalNetworkUsageDescription`. | NsdManager (same plugin). Hold a Wi-Fi multicast lock while discovering. |
-| Local network permission | System prompt on first discovery. If denied, nothing is found and connections fail; detect this and link to Settings. | No prompt on same Wi-Fi. `NEARBY_WIFI_DEVICES` on Android 13+ for hotspot features. |
+| Discovery | Bonjour through the `bonsoir` plugin (NWBrowser and DNSServiceRegister). Avoid raw multicast sockets: they need a special Apple entitlement. Requires `NSBonjourServices` and `NSLocalNetworkUsageDescription`. | NsdManager (same plugin). A Wi-Fi multicast lock is held while browsing or advertising: bonsoir takes it on start and releases it on stop, and the app stops browsing in the background. Permissions: `CHANGE_WIFI_MULTICAST_STATE`, `ACCESS_WIFI_STATE`, `ACCESS_NETWORK_STATE`; no location. |
+| Local network permission | System prompt on first discovery. If denied, nothing is found and connections fail. Detection (D-015): after 5 s with no peers, a Swift probe advertises and browses a short-lived Bonjour service; still `PolicyDenied` at 8 s means denied. The app then explains why and links to Settings. | No prompt on same Wi-Fi. `NEARBY_WIFI_DEVICES` on Android 13+ for hotspot features. |
+| QR scanning | `mobile_scanner` (AVFoundation); needs `NSCameraUsageDescription`. | `mobile_scanner` (ML Kit); `CAMERA` asked at runtime. |
 | Picking photos and videos | PhotoKit via `photo_manager`, which gets the original file. The default image picker may convert or compress. Handle "Limited" photo access. | MediaStore via `photo_manager`; `READ_MEDIA_IMAGES` and `READ_MEDIA_VIDEO`, or the system Photo Picker. |
 | iCloud-only originals | If "Optimize iPhone Storage" is on, the original may be in iCloud. Download it first (needs internet) and show "Preparing". | Not applicable. |
 | Picking other files | Document picker; files arrive as security-scoped URLs. | Storage Access Framework; content URIs read through ContentResolver. |
@@ -246,7 +260,9 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | Failure | How it's detected | Recovery |
 | --- | --- | --- |
 | No devices found | Discovery shows nothing after about 5 s | Check Local Network permission (iOS) and Wi-Fi; offer QR scan; then offer hotspot mode |
-| Local Network permission denied (iOS) | Discovery and connect fail instantly | Explain why it's needed; button to open Settings |
+| Local Network permission denied (iOS) | Nothing found within 5 s, then the Bonjour self-probe (D-015) stays in `PolicyDenied` | Explain why it's needed; button to open Settings; probe again on return |
+| Receiver's Wi-Fi or IP changes | Connectivity event or a changed address list (3 s poll) | Re-advertise and redraw the QR code; the sender's nearby list restarts browsing |
+| Stale entry in the nearby list | `GET /v1/info` fails, or another device id answers | Remove the entry and tell the user; pull to refresh |
 | QR connect times out | TCP connect fails within 5–10 s | Likely client isolation or different networks; suggest hotspot mode |
 | Certificate fingerprint mismatch | TLS handshake fails pinning check | Stop; warn "This isn't the device you scanned"; never fall back to unpinned |
 | Receiver rejects or doesn't answer | `rejected` event, or no answer within 60 s | Tell the sender; nothing is sent |
@@ -328,5 +344,5 @@ crossdrop/
 - [ ] Live Photos default: still only (recommended) or still plus video?
 - [ ] Is iPhone Personal Hotspot mode worth an in-app guide in v1, or Android hotspot mode only?
 - [ ] Trusted devices: allow auto-accept, or always show the Accept prompt?
-- [ ] Minimum OS versions (for example iOS 16+ and Android 10+), which decides which APIs you can use without fallbacks.
+- [ ] Minimum OS versions (for example iOS 16+ and Android 10+), which decides which APIs you can use without fallbacks. Current project defaults: iOS 15, Android 7.0 (SDK 24); all Phase 2 packages support these.
 - [ ] What speed target counts as success, decided after the Phase 1 proof of concept measures real numbers?

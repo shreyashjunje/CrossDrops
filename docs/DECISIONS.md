@@ -91,3 +91,47 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: The PoC has no discovery, QR or pairing, so there is no fingerprint to pin and no Accept prompt.
 - Decision: The upload client accepts any server certificate and sends no client certificate (`TODO(phase4)` in `upload_client.dart`); `POST /v1/sessions` is accepted immediately. Traffic is still TLS-encrypted.
 - Consequences: Not safe against a man in the middle or unwanted senders on the same network; acceptable only for development builds on a trusted Wi-Fi. Phase 4 removes the bypass with no fallback (CLAUDE.md hard rule 4), and the session-flow phase adds the Accept prompt and free-space check.
+
+## D-012: bonsoir for Bonjour/mDNS discovery
+- Date: 2026-11-02
+- Status: Accepted
+- Context: Phase 2 needs to advertise and browse `_crossdrop._tcp` with TXT records on iOS and Android, without raw multicast sockets (which need an Apple entitlement).
+- Decision: Use `bonsoir` 7.1. Checked in its source: on iOS it uses `NWBrowser` (with TXT) and `DNSServiceRegister`; on Android it uses `NsdManager`. Each `start()` takes a reference-counted Wi-Fi multicast lock and the matching `stop()` releases it, so we do not add our own Kotlin lock. Its logs are turned off because they contain device names. The alternative, `nsd` 5.0, is less active and offered nothing extra.
+- Consequences: No native discovery code of ours. Discovery sits behind `MdnsBackend`, so it is tested with a fake. bonsoir ignores `NWBrowser`'s `.waiting(PolicyDenied)` state, so iOS permission detection needs its own probe (D-015). Browsing must be stopped in the background to release the lock.
+
+## D-013: drift for the local database
+- Date: 2026-11-02
+- Status: Accepted
+- Context: The device identity must persist now. ARCHITECTURE.md lists five tables for later phases. CLAUDE.md allows drift or sqflite.
+- Decision: Use `drift` and `drift_flutter`, with `drift_dev` and `build_runner` as dev dependencies. The generated `database.g.dart` is committed so builds do not need code generation.
+- Consequences: Typed tables and queries, and migrations through `schemaVersion`. Unit tests use `NativeDatabase.memory()`, which runs on the dev PC (sqlite is bundled by `sqlite3` 3.x). The cost is a code-generation step when the schema changes (`dart run build_runner build`).
+
+## D-014: Packages for QR codes and network changes
+- Date: 2026-11-02
+- Status: Accepted
+- Context: The QR fallback needs to draw and scan codes. Discovery must react when the Wi-Fi or IP changes.
+- Decision:
+  - `qr_flutter` draws the code. It is pure Dart; its last release was 2023, but it is stable.
+  - `mobile_scanner` scans: ML Kit on Android, AVFoundation on iOS. It handles the camera permission.
+  - `connectivity_plus` gives OS network events, combined with polling `NetworkInterface.list` every 3 s.
+  - Not added: `network_info_plus` (reading the Wi-Fi name needs location permission on Android), `uuid` (16 bytes from `Random.secure` is enough), `app_settings` (our channel opens Settings), `device_info_plus` (the default name is "iPhone" or "Android XXXX" and the user can edit it).
+- Consequences: The camera permission is added on both platforms. None of these packages makes network calls.
+
+## D-015: Detect iOS Local Network denial with a Bonjour self-probe
+- Date: 2026-11-02
+- Status: Accepted
+- Context: iOS has no API to read the Local Network permission. When it is denied, discovery returns nothing and connections fail, and bonsoir does not report it (D-012).
+- Decision: After 5 s with no peers, the Nearby screen calls a Swift probe over the `crossdrop/local_network` channel. The probe advertises a short-lived `_crossdrop._tcp` service with `NWListener` and browses for it with `NWBrowser`:
+  - seeing its own service means `granted`
+  - still waiting with `PolicyDenied` at the 8 s timeout means `denied`
+  - anything else means `unknown`
+
+  Only `denied` shows the explanation screen. A peer appearing later clears it, and returning from Settings probes again. Android answers `granted`.
+- Consequences: The answer is reliable without private APIs. The code lives in `AppDelegate.swift`, so the Xcode project file does not change. The probe service is briefly visible to other phones, which ignore it because it has no TXT record. While the first-run prompt is open longer than the timeout, the result can be a false `denied`; Try again fixes it.
+
+## D-016: Phase 2 advertises only while Receive is open, with the per-launch fingerprint
+- Date: 2026-11-02
+- Status: Accepted (revisit with the Accept prompt and Phase 4)
+- Context: Offers are still accepted automatically (D-011), so advertising whenever the app is open would let anyone on the Wi-Fi push files. Phase 4 brings the persistent certificate. Until then the server creates a certificate at each launch.
+- Decision: The server and the advertisement run only while the Receive screen is open. TXT `fp` and the QR `fp` use the real fingerprint of the current per-launch certificate, not a placeholder. Nothing checks it yet.
+- Consequences: The formats are final, and Phase 4 only has to start checking the fingerprint. Receiving requires opening Receive first. The fingerprint, port and QR code change at each launch.
