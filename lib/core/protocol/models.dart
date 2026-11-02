@@ -1,12 +1,44 @@
 /// Protocol v1 message models. See docs/ARCHITECTURE.md, "Protocol spec".
 library;
 
+/// The newest protocol version this app speaks.
 const int protocolVersion = 1;
+
+/// Every protocol version this app speaks, oldest first. Below the first
+/// entry is the minimum supported version (ARCHITECTURE.md, "Threats").
+const List<int> supportedVersions = [1];
+
+/// The highest version in both [supportedVersions] and [theirs], or null if
+/// there is none ("Update CrossDrop on the other phone").
+int? negotiateVersion(Iterable<int> theirs) {
+  int? best;
+  for (final v in theirs) {
+    if (supportedVersions.contains(v) && (best == null || v > best)) best = v;
+  }
+  return best;
+}
+
+/// Most files one offer may list. Bounds the memory and database rows a
+/// single offer can cost the receiver.
+const int maxFilesPerOffer = 10000;
+
+/// Longest file name accepted in an offer, in UTF-16 code units, before
+/// sanitizing. Longer names are refused rather than silently cut.
+const int maxOfferedNameLength = 1024;
 
 /// Allowed characters for ids that end up in URL paths and temp file names.
 final RegExp _idPattern = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
 
 bool isValidId(String id) => _idPattern.hasMatch(id);
+
+/// What a file is, so the receiver knows where to save it.
+abstract final class FileKind {
+  static const photo = 'photo';
+  static const video = 'video';
+  static const file = 'file';
+
+  static const all = {photo, video, file};
+}
 
 class FormatError implements Exception {
   FormatError(this.message);
@@ -21,18 +53,33 @@ class FileOffer {
     required this.name,
     required this.size,
     this.mime,
+    this.kind = FileKind.file,
+    this.created,
+    this.livePhotoGroup,
   });
 
   final String fileId;
+
+  /// As sent by the peer. Sanitize before using it on disk.
   final String name;
   final int size;
   final String? mime;
+
+  /// One of [FileKind]. Unknown kinds from newer peers read as `file`.
+  final String kind;
+  final DateTime? created;
+
+  /// Files with the same value form one Live Photo (still plus video).
+  final String? livePhotoGroup;
 
   Map<String, Object?> toJson() => {
     'fileId': fileId,
     'name': name,
     'size': size,
     if (mime != null) 'mime': mime,
+    'kind': kind,
+    if (created != null) 'created': created!.toUtc().toIso8601String(),
+    'livePhotoGroup': livePhotoGroup,
   };
 
   factory FileOffer.fromJson(Object? json) {
@@ -43,17 +90,35 @@ class FileOffer {
     final name = json['name'];
     final size = json['size'];
     final mime = json['mime'];
+    final kind = json['kind'];
+    final created = json['created'];
+    final group = json['livePhotoGroup'];
     if (fileId is! String || !isValidId(fileId)) {
       throw FormatError('invalid fileId');
     }
-    if (name is! String || name.isEmpty) throw FormatError('invalid name');
+    if (name is! String || name.isEmpty || name.length > maxOfferedNameLength) {
+      throw FormatError('invalid name');
+    }
     if (size is! int || size < 0) throw FormatError('invalid size');
-    if (mime != null && mime is! String) throw FormatError('invalid mime');
+    if (mime != null && (mime is! String || mime.length > 255)) {
+      throw FormatError('invalid mime');
+    }
+    if (kind != null && kind is! String) throw FormatError('invalid kind');
+    if (created != null && created is! String) {
+      throw FormatError('invalid created');
+    }
+    if (group != null && (group is! String || !isValidId(group))) {
+      throw FormatError('invalid livePhotoGroup');
+    }
     return FileOffer(
       fileId: fileId,
       name: name,
       size: size,
       mime: mime as String?,
+      kind: FileKind.all.contains(kind) ? kind! as String : FileKind.file,
+      // A date we can't read is metadata, not a reason to refuse the file.
+      created: created == null ? null : DateTime.tryParse(created as String),
+      livePhotoGroup: group as String?,
     );
   }
 }
@@ -82,7 +147,12 @@ class SenderInfo {
     final id = json['id'];
     final name = json['name'];
     final platform = json['platform'];
-    if (id is! String || name is! String || platform is! String) {
+    if (id is! String ||
+        !isValidId(id.replaceAll('-', '')) ||
+        name is! String ||
+        name.length > 256 ||
+        platform is! String ||
+        platform.length > 16) {
       throw FormatError('invalid sender');
     }
     return SenderInfo(id: id, name: name, platform: platform);
@@ -146,6 +216,8 @@ class SessionOffer {
   final SenderInfo sender;
   final List<FileOffer> files;
 
+  int get totalBytes => files.fold(0, (sum, f) => sum + f.size);
+
   Map<String, Object?> toJson() => {
     'protocol': protocol,
     'sender': sender.toJson(),
@@ -159,7 +231,9 @@ class SessionOffer {
     final protocol = json['protocol'];
     final files = json['files'];
     if (protocol is! int) throw FormatError('invalid protocol');
-    if (files is! List || files.isEmpty) throw FormatError('invalid files');
+    if (files is! List || files.isEmpty || files.length > maxFilesPerOffer) {
+      throw FormatError('invalid files');
+    }
     final parsed = [for (final f in files) FileOffer.fromJson(f)];
     final ids = parsed.map((f) => f.fileId).toSet();
     if (ids.length != parsed.length) throw FormatError('duplicate fileId');
@@ -204,7 +278,8 @@ class FileStatus {
   final int size;
   final int receivedBytes;
 
-  /// `receiving` or `saved`.
+  /// One of [FileTransferStatus] names: `pending`, `receiving`,
+  /// `verifying`, `saved` or `failed`.
   final String status;
 
   Map<String, Object?> toJson() => {
@@ -254,6 +329,111 @@ class CompleteRequest {
   }
 }
 
+/// Session states. ARCHITECTURE.md, "Session state machine". The wire value
+/// is the [name].
+enum SessionStatus {
+  offered,
+  accepted,
+  transferring,
+  paused,
+  verifying,
+  done,
+  rejected,
+  cancelled,
+  failed;
+
+  bool get isFinal => this == done || this == rejected || this == cancelled;
+
+  /// No more bytes will move in this session.
+  bool get isTerminal => isFinal || this == failed;
+
+  static SessionStatus? tryParse(Object? value) {
+    for (final s in values) {
+      if (s.name == value) return s;
+    }
+    return null;
+  }
+}
+
+/// Per-file states. The wire value is the [name].
+enum FileTransferStatus {
+  pending,
+  receiving,
+  verifying,
+  saved,
+  failed;
+
+  bool get isTerminal => this == saved || this == failed;
+
+  static FileTransferStatus? tryParse(Object? value) {
+    for (final s in values) {
+      if (s.name == value) return s;
+    }
+    return null;
+  }
+}
+
+/// Reply to `GET /v1/sessions/{id}`: where a session stands, so a sender
+/// that reconnects (or whose event socket missed a message) can catch up.
+class SessionStatusReply {
+  const SessionStatusReply({
+    required this.sessionId,
+    required this.status,
+    required this.files,
+    this.reason,
+  });
+
+  final String sessionId;
+  final SessionStatus status;
+  final List<FileStatus> files;
+
+  /// Why the session was rejected, cancelled or failed; one of
+  /// [RejectReasons] or [ErrorCodes].
+  final String? reason;
+
+  Map<String, Object?> toJson() => {
+    'sessionId': sessionId,
+    'status': status.name,
+    'files': [for (final f in files) f.toJson()],
+    if (reason != null) 'reason': reason,
+  };
+
+  factory SessionStatusReply.fromJson(Object? json) {
+    if (json is! Map<String, Object?>) throw FormatError('not an object');
+    final sessionId = json['sessionId'];
+    final status = SessionStatus.tryParse(json['status']);
+    final files = json['files'];
+    final reason = json['reason'];
+    if (sessionId is! String ||
+        status == null ||
+        files is! List ||
+        (reason != null && reason is! String)) {
+      throw FormatError('invalid session status');
+    }
+    return SessionStatusReply(
+      sessionId: sessionId,
+      status: status,
+      files: [for (final f in files) FileStatus.fromJson(f)],
+      reason: reason as String?,
+    );
+  }
+}
+
+/// Why a receiver refused an offer (`rejected` event and session reason).
+abstract final class RejectReasons {
+  /// The user tapped Decline.
+  static const declined = 'declined';
+
+  /// Nobody answered the Accept prompt within 60 s.
+  static const timeout = 'timeout';
+
+  /// Not enough free space; the event carries `neededBytes`.
+  static const noSpace = 'no_space';
+
+  /// This sender already has an unfinished session here.
+  static const senderBusy = 'sender_busy';
+}
+
 /// Error codes returned as `{"error": code, "message": ..., ...}`.
 abstract final class ErrorCodes {
   static const badRequest = 'bad_request';
@@ -265,4 +445,22 @@ abstract final class ErrorCodes {
   static const hashMismatch = 'hash_mismatch';
   static const alreadySaved = 'already_saved';
   static const ioError = 'io_error';
+
+  /// No common protocol version.
+  static const unsupportedVersion = 'unsupported_version';
+
+  /// Bytes sent before the receiver accepted.
+  static const notAccepted = 'not_accepted';
+
+  /// The session was cancelled, rejected or failed; stop sending.
+  static const sessionClosed = 'session_closed';
+
+  /// The file failed for good (second hash mismatch).
+  static const fileFailed = 'file_failed';
+
+  /// The receiver's disk filled up mid-transfer; the partial file is kept.
+  static const noSpace = 'no_space';
+
+  /// Too many offers: one unfinished session per sender.
+  static const senderBusy = 'sender_busy';
 }

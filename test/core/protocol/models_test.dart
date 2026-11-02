@@ -85,6 +85,119 @@ void main() {
     });
   });
 
+  group('FileOffer manifest fields', () {
+    test('kind, created and livePhotoGroup round-trip', () {
+      final f = FileOffer(
+        fileId: 'f1',
+        name: 'IMG_1.MOV',
+        size: 5,
+        mime: 'video/quicktime',
+        kind: FileKind.video,
+        created: DateTime.utc(2026, 10, 30, 18, 22),
+        livePhotoGroup: 'g1',
+      );
+      final back = FileOffer.fromJson(f.toJson());
+      expect(back.kind, FileKind.video);
+      expect(back.created, DateTime.utc(2026, 10, 30, 18, 22));
+      expect(back.livePhotoGroup, 'g1');
+    });
+
+    test('older manifests without the new fields still parse', () {
+      final f = FileOffer.fromJson({'fileId': 'f1', 'name': 'a', 'size': 1});
+      expect(f.kind, FileKind.file);
+      expect(f.created, isNull);
+      expect(f.livePhotoGroup, isNull);
+    });
+
+    test('unknown kind and unreadable date are tolerated', () {
+      final f = FileOffer.fromJson({
+        'fileId': 'f1',
+        'name': 'a',
+        'size': 1,
+        'kind': 'hologram',
+        'created': 'yesterday',
+      });
+      expect(f.kind, FileKind.file);
+      expect(f.created, isNull);
+    });
+
+    test('rejects absurd names, mimes and group ids', () {
+      for (final bad in [
+        {'name': 'x' * (maxOfferedNameLength + 1)},
+        {'mime': 'x' * 256},
+        {'livePhotoGroup': '../g'},
+        {'kind': 3},
+      ]) {
+        expect(
+          () => FileOffer.fromJson({
+            'fileId': 'f1',
+            'name': 'a',
+            'size': 1,
+            ...bad,
+          }),
+          throwsA(isA<FormatError>()),
+          reason: '$bad',
+        );
+      }
+    });
+  });
+
+  test('offer with too many files is rejected', () {
+    expect(
+      () => SessionOffer.fromJson({
+        'protocol': 1,
+        'sender': {'id': 'a', 'name': 'b', 'platform': 'ios'},
+        'files': [
+          for (var i = 0; i <= maxFilesPerOffer; i++)
+            {'fileId': 'f$i', 'name': 'a', 'size': 1},
+        ],
+      }),
+      throwsA(isA<FormatError>()),
+    );
+  });
+
+  test('SessionOffer.totalBytes sums the sizes', () {
+    const offer = SessionOffer(
+      sender: SenderInfo(id: 'a', name: 'b', platform: 'ios'),
+      files: [
+        FileOffer(fileId: 'a', name: 'a', size: 3),
+        FileOffer(fileId: 'b', name: 'b', size: 4),
+      ],
+    );
+    expect(offer.totalBytes, 7);
+  });
+
+  group('negotiateVersion', () {
+    test('picks the highest common version', () {
+      expect(negotiateVersion([1]), 1);
+      expect(negotiateVersion([1, 2, 3]), 1);
+    });
+
+    test('returns null when there is none', () {
+      expect(negotiateVersion([]), isNull);
+      expect(negotiateVersion([0, 2]), isNull);
+    });
+  });
+
+  test('SessionStatusReply round-trips', () {
+    const reply = SessionStatusReply(
+      sessionId: 's1',
+      status: SessionStatus.rejected,
+      reason: RejectReasons.noSpace,
+      files: [
+        FileStatus(fileId: 'f', size: 5, receivedBytes: 0, status: 'pending'),
+      ],
+    );
+    final back = SessionStatusReply.fromJson(reply.toJson());
+    expect(back.status, SessionStatus.rejected);
+    expect(back.reason, RejectReasons.noSpace);
+    expect(back.files.single.status, 'pending');
+    expect(
+      () => SessionStatusReply.fromJson({...reply.toJson(), 'status': 'x'}),
+      throwsA(isA<FormatError>()),
+    );
+  });
+
   test('FileStatus round-trips', () {
     const s = FileStatus(
       fileId: 'f',
