@@ -68,6 +68,12 @@
 	</array>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>CrossDrop connects directly to your other phone on this Wi-Fi to send and receive files.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_crossdrop._tcp</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>CrossDrop uses the camera to scan the QR code shown on your other phone.</string>
 	<key>UIFileSharingEnabled</key>
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>

@@ -1,6 +1,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- Local HTTPS server and client for transfers. -->
     <uses-permission android:name="android.permission.INTERNET"/>
+    <!-- Discovery (NsdManager). bonsoir holds a Wi-Fi multicast lock while
+         browsing or advertising. No location or NEARBY_WIFI_DEVICES needed. -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <!-- Network change events (connectivity_plus). -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- QR scanning; asked at runtime when the scanner opens. -->
+    <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
     <application
         android:label="crossdrop"
         android:name="${applicationName}"
