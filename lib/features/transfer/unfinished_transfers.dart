@@ -52,10 +52,14 @@ Future<void> discardTransfer(WidgetRef ref, StoredSession s) async {
     } on FileSystemException {
       // Already gone.
     }
-  } else if (s.peerHost != null && s.peerPort != null) {
+  } else if (s.peerHost != null &&
+      s.peerPort != null &&
+      s.peerFingerprint != null) {
     final client = UploadClient(
       host: s.peerHost!,
       port: s.peerPort!,
+      fingerprint: s.peerFingerprint!,
+      credentials: await ref.read(credentialsProvider.future),
       connectTimeout: const Duration(seconds: 3),
       stallTimeout: const Duration(seconds: 3),
     );

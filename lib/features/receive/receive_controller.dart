@@ -14,8 +14,8 @@ import '../../core/log.dart';
 import '../../core/protocol/connect_payload.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
-import '../../core/security/ephemeral_identity.dart';
 import '../../core/server/receive_server.dart';
+import '../../core/storage/trust_repository.dart';
 import '../transfer/transfer_format.dart';
 
 class IncomingFile {
@@ -112,10 +112,15 @@ class ReceiveState {
     this.pendingOffers = const [],
     this.notice,
     this.error,
+    this.receivingOff = false,
   });
 
-  /// Null while the server is starting.
+  /// Null while the server is starting or stopped.
   final int? port;
+
+  /// The "Receiving" switch is off: nothing listens and nothing is
+  /// advertised once running transfers end (D-031).
+  final bool receivingOff;
   final String? deviceName;
 
   /// Addresses other phones may reach (no mobile data or VPN).
@@ -154,8 +159,10 @@ class ReceiveState {
     List<IncomingOffer>? pendingOffers,
     String? Function()? notice,
     String? error,
+    bool? receivingOff,
+    bool clearPort = false,
   }) => ReceiveState(
-    port: port ?? this.port,
+    port: clearPort ? null : (port ?? this.port),
     deviceName: deviceName ?? this.deviceName,
     addresses: addresses ?? this.addresses,
     qrPayload: qrPayload != null ? qrPayload() : this.qrPayload,
@@ -168,6 +175,7 @@ class ReceiveState {
     pendingOffers: pendingOffers ?? this.pendingOffers,
     notice: notice != null ? notice() : this.notice,
     error: error ?? this.error,
+    receivingOff: receivingOff ?? this.receivingOff,
   );
 }
 
@@ -176,11 +184,18 @@ final receiveControllerProvider =
       ReceiveController.new,
     );
 
-/// Runs the receive server while the Receive screen is open, advertises it
-/// on the local network, asks the user about each offer and tracks
-/// progress.
+/// Runs the receive server while the Receive screen is open and the
+/// "Receiving" switch is on, advertises it on the local network, asks the
+/// user about each offer and tracks progress.
+///
+/// Turning the switch off stops advertising and refuses offers from
+/// untrusted devices at once; the server stops as soon as no transfer is
+/// running (D-031). A new random port is used at every start.
 class ReceiveController extends Notifier<ReceiveState> {
   ReceiveServer? _server;
+  bool _receivingOn = true;
+  bool _starting = false;
+  final Map<String, IncomingOffer> _offers = {};
   StreamSubscription<ReceiveEvent>? _sub;
   Advertiser? _advertiser;
   NetworkMonitor? _monitor;
@@ -199,14 +214,76 @@ class ReceiveController extends Notifier<ReceiveState> {
   ReceiveState build() {
     _keepAlive = ref.read(keepAliveProvider);
     ref.onDispose(_stop);
+    ref.listen(receivingEnabledProvider, (_, next) {
+      final on = next.value;
+      if (on != null) unawaited(_onSwitch(on));
+    });
     unawaited(_start());
     return const ReceiveState();
   }
 
-  /// Answers the Accept prompt for [sessionId].
-  void answer(String sessionId, {required bool accept}) {
+  /// Answers the Accept prompt for [sessionId]. With [trust], the sender's
+  /// fingerprint is added to the trusted devices (the user compared the
+  /// pairing code).
+  void answer(String sessionId, {required bool accept, bool trust = false}) {
+    final offer = _offers.remove(sessionId);
+    if (accept && trust && offer != null) {
+      unawaited(
+        ref
+            .read(trustRepositoryProvider)
+            .trust(
+              fingerprint: offer.senderFingerprint,
+              deviceId: offer.sender.id,
+              name: offer.sender.name,
+              platform: offer.sender.platform,
+            ),
+      );
+    }
     _decisions.remove(sessionId)?.complete(accept);
     _dropPending(sessionId);
+  }
+
+  /// Sets the global "Receiving" switch.
+  Future<void> setReceiving(bool on) =>
+      ref.read(settingsRepositoryProvider).setReceivingEnabled(on);
+
+  Future<void> _onSwitch(bool on) async {
+    if (!ref.mounted || on == _receivingOn) return;
+    _receivingOn = on;
+    state = state.copyWith(receivingOff: !on);
+    if (on) {
+      if (_server == null) await _start();
+      return;
+    }
+    // Off: nobody new should find this phone.
+    await _advertiser?.stop();
+    if (!ref.mounted) return;
+    state = state.copyWith(advertising: false, qrPayload: () => null);
+    await _stopIfIdle();
+  }
+
+  /// With the switch off, stops the server once no transfer needs it.
+  Future<void> _stopIfIdle() async {
+    if (_receivingOn || _server == null) return;
+    final busy = state.sessions.values.any(
+      (s) => s.isActive || s.status == SessionStatus.offered,
+    );
+    if (busy) return;
+    await _stopServer();
+    if (ref.mounted) state = state.copyWith(clearPort: true);
+  }
+
+  /// The pairing code and trust are checked by the server; this answers
+  /// what the TrustLookup asks, and notes that a trusted device was seen.
+  Future<PeerTrust> _lookupTrust(String fingerprint, SenderInfo claimed) async {
+    final repo = ref.read(trustRepositoryProvider);
+    final trust = await repo.check(
+      fingerprint: fingerprint,
+      deviceId: claimed.id,
+      name: claimed.name,
+    );
+    if (trust.isTrusted) await repo.touch(fingerprint);
+    return trust;
   }
 
   /// Cancels a session from this side. An offer still waiting is declined.
@@ -218,10 +295,21 @@ class ReceiveController extends Notifier<ReceiveState> {
   void clearNotice() => state = state.copyWith(notice: () => null);
 
   Future<void> _start() async {
+    if (_starting || _server != null) return;
+    _starting = true;
     try {
+      _receivingOn = await ref
+          .read(settingsRepositoryProvider)
+          .receivingEnabled();
+      if (!ref.mounted) return;
+      if (!_receivingOn) {
+        state = state.copyWith(receivingOff: true);
+        return;
+      }
+      state = state.copyWith(receivingOff: false);
       final dirs = await AppDirs.resolve();
       final device = await ref.read(identityProvider.future);
-      final identity = await EphemeralIdentity.generate();
+      final identity = await ref.read(credentialsProvider.future);
       final freeSpace = ref.read(freeSpaceProvider);
       final server = await ReceiveServer.start(
         info: DeviceInfo(
@@ -229,11 +317,13 @@ class ReceiveController extends Notifier<ReceiveState> {
           name: device.deviceName,
           platform: DevicePlatform.current.name,
         ),
-        securityContext: identity.serverContext(),
+        credentials: identity,
         tempDir: dirs.incomingTemp,
         saveDir: dirs.received,
         repository: ref.read(transferRepositoryProvider),
         decider: _ask,
+        trustLookup: _lookupTrust,
+        acceptsUntrusted: () => _receivingOn,
         freeSpace: freeSpace.freeBytes,
       );
       if (!ref.mounted) {
@@ -291,6 +381,8 @@ class ReceiveController extends Notifier<ReceiveState> {
       }
     } catch (e) {
       if (ref.mounted) state = state.copyWith(error: 'Could not start: $e');
+    } finally {
+      _starting = false;
     }
   }
 
@@ -299,12 +391,24 @@ class ReceiveController extends Notifier<ReceiveState> {
       c.complete(false);
     }
     _decisions.clear();
+    _offers.clear();
+    await _stopServer();
+  }
+
+  Future<void> _stopServer() async {
     _lifecycle?.dispose();
+    _lifecycle = null;
     await _networkSub?.cancel();
+    _networkSub = null;
     await _monitor?.dispose();
+    _monitor = null;
     await _advertiser?.stop();
+    _advertiser = null;
     await _sub?.cancel();
-    await _server?.close();
+    _sub = null;
+    final server = _server;
+    _server = null;
+    await server?.close();
     for (final sid in _kept.toList()) {
       await _keepAlive.end(sid);
     }
@@ -334,6 +438,7 @@ class ReceiveController extends Notifier<ReceiveState> {
   Future<bool> _ask(IncomingOffer offer) {
     final c = Completer<bool>();
     _decisions[offer.sessionId] = c;
+    _offers[offer.sessionId] = offer;
     if (ref.mounted) {
       state = state.copyWith(pendingOffers: [...state.pendingOffers, offer]);
     }
@@ -424,6 +529,9 @@ class ReceiveController extends Notifier<ReceiveState> {
               'Refused a transfer: not enough free space '
                   '(${((neededBytes ?? 0) / 1e9).toStringAsFixed(1)} GB '
                   'needed).',
+            ErrorCodes.receivingOff =>
+              'Refused a transfer from an untrusted device: receiving is '
+                  'off.',
             _ =>
               'Refused a transfer: that phone already has an unfinished '
                   'transfer here.',
@@ -453,10 +561,12 @@ class ReceiveController extends Notifier<ReceiveState> {
         if (status != SessionStatus.offered) {
           // Timed out or withdrawn while the prompt was open.
           _decisions.remove(sessionId)?.complete(false);
+          _offers.remove(sessionId);
           _dropPending(sessionId);
         }
         _update(sessionId, (s) => s.copyWith(status: status, reason: reason));
         unawaited(_trackKeepAlive(sessionId, status));
+        if (status.isTerminal) unawaited(_stopIfIdle());
         return;
       case FileProgress(:final sessionId, :final fileId, :final receivedBytes):
         final tracker = _trackers[sessionId];

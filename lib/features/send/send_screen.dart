@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/client/peer_check.dart';
 import '../../core/engine/send_session.dart';
 import '../../core/protocol/models.dart';
+import '../../core/security/peer_auth.dart';
 import '../transfer/transfer_format.dart';
 import 'send_controller.dart';
 
@@ -98,6 +99,19 @@ class _SendScreenState extends ConsumerState<SendScreen> {
               ],
             ),
           ],
+          if ((state.receiver ?? widget.target)?.trust.lookalike
+              case final lookalike?) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.all(8),
+              color: theme.colorScheme.errorContainer,
+              child: Text(
+                'This is not the "${lookalike.name}" you trusted: its '
+                'security key is different.',
+                style: TextStyle(color: theme.colorScheme.onErrorContainer),
+              ),
+            ),
+          ],
           if (state.items.isNotEmpty) ...[
             const SizedBox(height: 8),
             Text(
@@ -143,6 +157,28 @@ class _SendScreenState extends ConsumerState<SendScreen> {
             LinearProgressIndicator(value: snap.fraction),
             const SizedBox(height: 8),
             Text(_status(snap), style: theme.textTheme.titleMedium),
+            if (snap.phase == SendPhase.waitingForAccept &&
+                snap.pairingCode != null) ...[
+              const SizedBox(height: 12),
+              const Text('Check that the other phone shows this code:'),
+              Center(
+                child: Text(
+                  formatPairingCode(snap.pairingCode!),
+                  style: theme.textTheme.headlineMedium?.copyWith(
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                    letterSpacing: 2,
+                  ),
+                ),
+              ),
+            ],
+            if (state.canTrustReceiver) ...[
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                onPressed: controller.trustReceiver,
+                icon: const Icon(Icons.verified_user_outlined),
+                label: Text('Trust ${state.receiverName ?? 'this device'}'),
+              ),
+            ],
             if (snap.phase == SendPhase.sending)
               Text(
                 '${formatSize(snap.sentBytes)} of '
@@ -189,6 +225,9 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       SendReasons.version => 'Update CrossDrop on the other phone.',
       SendReasons.identityMismatch =>
         'A different device answered at this address.',
+      SendReasons.pinMismatch =>
+        "That isn't the expected device: its security key is different. "
+            'Sending stopped.',
       SendReasons.timeout => 'The other phone did not answer.',
       SendReasons.sourceUnreadable =>
         'A file could not be read any more, so the transfer stopped.',

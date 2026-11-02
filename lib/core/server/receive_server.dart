@@ -14,10 +14,15 @@ import '../engine/chunked_reader.dart';
 import '../engine/session_state_machine.dart';
 import '../engine/sha256_isolate.dart';
 import '../log.dart';
+import '../protocol/auth_messages.dart';
 import '../protocol/events.dart';
 import '../protocol/models.dart';
+import '../security/device_credentials.dart';
 import '../storage/file_name_sanitizer.dart';
 import '../storage/transfer_repository.dart';
+import '../storage/trust_repository.dart';
+import 'rate_limiter.dart';
+import 'sender_auth.dart';
 
 /// Events for the UI. They carry ids and sizes, never file contents.
 sealed class ReceiveEvent {
@@ -78,11 +83,22 @@ class IncomingOffer {
     required this.sessionId,
     required this.sender,
     required this.files,
+    required this.senderFingerprint,
+    required this.pairingCode,
+    this.trust = PeerTrust.unknown,
   });
 
   final String sessionId;
+
+  /// What the sender claims; only [senderFingerprint] is proven.
   final SenderInfo sender;
   final List<FileOffer> files;
+  final String senderFingerprint;
+
+  /// The 6-digit code the sender shows too. The user checks it before
+  /// accepting from an untrusted device (ARCHITECTURE.md, "Pairing").
+  final String pairingCode;
+  final PeerTrust trust;
 
   int get totalBytes => files.fold(0, (sum, f) => sum + f.size);
 }
@@ -93,6 +109,46 @@ typedef OfferDecider = Future<bool> Function(IncomingOffer offer);
 
 /// Free bytes on the volume holding [path], or null if unknown.
 typedef FreeSpaceProbe = Future<int?> Function(String path);
+
+/// Whether [fingerprint] is trusted, given what the sender claims to be.
+typedef TrustLookup = Future<PeerTrust> Function(
+  String fingerprint,
+  SenderInfo claimed,
+);
+
+Future<PeerTrust> _trustNobody(String _, SenderInfo _) async =>
+    PeerTrust.unknown;
+
+/// Limits for one server (ARCHITECTURE.md, "Abuse limits", D-032).
+class ServerLimits {
+  const ServerLimits({
+    this.offerBurst = 3,
+    this.offerRefill = const Duration(seconds: 20),
+    this.authBurst = 10,
+    this.authRefill = const Duration(seconds: 3),
+    this.maxHeaderBytes = 16 * 1024,
+    this.maxControlBodyBytes = 16 * 1024,
+    this.maxOfferBodyBytes = 4 * 1024 * 1024,
+  });
+
+  /// `POST /v1/sessions` per IP address: [offerBurst] at once, then one
+  /// per [offerRefill] (3 a minute).
+  final int offerBurst;
+  final Duration offerRefill;
+
+  /// `POST /v1/auth/challenge` and `/v1/auth` per IP address.
+  final int authBurst;
+  final Duration authRefill;
+
+  /// Sum of header names and values. dart:io itself stops at 1 MB.
+  final int maxHeaderBytes;
+
+  /// Auth and `complete` bodies: small JSON.
+  final int maxControlBodyBytes;
+
+  /// An offer of 10,000 files with long names fits.
+  final int maxOfferBodyBytes;
+}
 
 /// Read-only view of a session for the UI.
 class ReceiveSessionSnapshot {
@@ -192,14 +248,25 @@ class _Session {
     required this.rowId,
     required this.dir,
     required this.sender,
+    required this.senderFingerprint,
     required this.files,
     required this.machine,
+    this.pairingCode = '',
+    this.trust = PeerTrust.unknown,
   });
 
   final String id;
   final int rowId;
   final String dir;
   final SenderInfo sender;
+
+  /// Only this sender may see or continue the session.
+  final String senderFingerprint;
+
+  /// From the authentication that made the offer; empty after a restart
+  /// (restored sessions are past the Accept prompt).
+  final String pairingCode;
+  final PeerTrust trust;
 
   /// In manifest order.
   final Map<String, _ReceivingFile> files;
@@ -222,11 +289,15 @@ class _Session {
 /// received byte counts are stored in the database, so a session survives
 /// an app restart and the sender can resume it.
 ///
-/// Phase 3 limits: no client certificate is required yet (Phase 4), so the
-/// sender id in an offer is not proven.
+/// Senders authenticate first (`/v1/auth`, D-027); every session belongs
+/// to the fingerprint that offered it.
 class ReceiveServer {
   ReceiveServer._(
     this._info,
+    this._auth,
+    this._trustLookup,
+    this._acceptsUntrusted,
+    this._limits,
     this._tempDir,
     this._saveDir,
     this._repo,
@@ -239,6 +310,18 @@ class ReceiveServer {
   );
 
   final DeviceInfo _info;
+  final SenderAuthenticator _auth;
+  final TrustLookup _trustLookup;
+  final bool Function() _acceptsUntrusted;
+  final ServerLimits _limits;
+  late final RateLimiter _offerLimiter = RateLimiter(
+    burst: _limits.offerBurst,
+    refillEvery: _limits.offerRefill,
+  );
+  late final RateLimiter _authLimiter = RateLimiter(
+    burst: _limits.authBurst,
+    refillEvery: _limits.authRefill,
+  );
   final String _tempDir;
   final String _saveDir;
   final TransferRepository _repo;
@@ -252,23 +335,29 @@ class ReceiveServer {
   final StreamController<ReceiveEvent> _events = StreamController.broadcast();
   late final HttpServer _server;
 
-  static const int _maxJsonBytes = 4 * 1024 * 1024;
-
   /// Unfinished sessions at once, from all senders. More offers get 503.
   static const int maxOpenSessions = 8;
 
   /// Starts listening on [port] (0 = random, as ARCHITECTURE.md asks) and
   /// restores unfinished sessions from [repository].
   ///
+  /// TLS 1.3 with [credentials]. [trustLookup] tells trusted senders apart;
+  /// while [acceptsUntrusted] returns false, offers from untrusted senders
+  /// get 403 `receiving_off`.
+  ///
   /// Partial files go to `<tempDir>/<sessionId>/<fileId>.part`; verified
   /// files are moved into [saveDir].
   static Future<ReceiveServer> start({
     required DeviceInfo info,
-    required SecurityContext securityContext,
+    required DeviceCredentials credentials,
     required String tempDir,
     required String saveDir,
     required TransferRepository repository,
     required OfferDecider decider,
+    TrustLookup trustLookup = _trustNobody,
+    bool Function()? acceptsUntrusted,
+    ServerLimits limits = const ServerLimits(),
+    SenderAuthenticator? authenticator,
     FreeSpaceProbe? freeSpace,
     Object? address,
     int port = 0,
@@ -279,6 +368,11 @@ class ReceiveServer {
   }) async {
     final server = ReceiveServer._(
       info,
+      authenticator ??
+          SenderAuthenticator(ownFingerprint: credentials.fingerprint),
+      trustLookup,
+      acceptsUntrusted ?? () => true,
+      limits,
       tempDir,
       saveDir,
       repository,
@@ -293,11 +387,13 @@ class ReceiveServer {
     await Directory(saveDir).create(recursive: true);
     await server._restore();
     server._server = await shelf_io.serve(
-      server._router().call,
+      server._handler(),
       address ?? InternetAddress.anyIPv4,
       port,
-      securityContext: securityContext,
+      securityContext: credentials.serverContext(),
     );
+    // Idle keep-alive connections are closed sooner than dart:io's 120 s.
+    server._server.idleTimeout = const Duration(seconds: 30);
     _log('listening on port ${server.port}');
     return server;
   }
@@ -382,8 +478,15 @@ class ReceiveServer {
     }
   }
 
+  Handler _handler() => const Pipeline()
+      .addMiddleware(_limitHeaders)
+      .addMiddleware(_requireAuth)
+      .addHandler(_router().call);
+
   Router _router() => Router(notFoundHandler: (_) => _notFound())
     ..get('/v1/info', (Request _) => _json(200, _info))
+    ..post('/v1/auth/challenge', _challenge)
+    ..post('/v1/auth', _authenticate)
     ..post('/v1/sessions', _createSession)
     ..get('/v1/sessions/<sid>', _getSession)
     ..delete('/v1/sessions/<sid>', _deleteSession)
@@ -392,11 +495,136 @@ class ReceiveServer {
     ..put('/v1/sessions/<sid>/files/<fid>', _putFile)
     ..post('/v1/sessions/<sid>/files/<fid>/complete', _complete);
 
+  // ------------------------------------------------- authentication, limits
+
+  static const String _peerKey = 'crossdrop.peer';
+
+  /// Paths that need a token: everything under `/v1/sessions`.
+  static bool _needsAuth(Request req) =>
+      req.url.path == 'v1/sessions' || req.url.path.startsWith('v1/sessions/');
+
+  /// The authenticated sender of a request that passed [_requireAuth].
+  static AuthenticatedSender _peer(Request req) =>
+      req.context[_peerKey]! as AuthenticatedSender;
+
+  /// The session [sid] if it belongs to the caller. Someone else's session
+  /// looks the same as one that does not exist.
+  _Session? _owned(Request req, String sid) {
+    final s = _sessions[sid];
+    if (s == null || s.senderFingerprint != _peer(req).fingerprint) {
+      return null;
+    }
+    return s;
+  }
+
+  Handler _limitHeaders(Handler inner) => (req) {
+    var total = 0;
+    req.headersAll.forEach((name, values) {
+      total += name.length;
+      for (final v in values) {
+        total += v.length;
+      }
+    });
+    if (total > _limits.maxHeaderBytes) {
+      return _error(431, ErrorCodes.headersTooLarge, 'headers too large');
+    }
+    return inner(req);
+  };
+
+  Handler _requireAuth(Handler inner) => (req) {
+    if (!_needsAuth(req)) return inner(req);
+    final header = req.headers['authorization'] ?? '';
+    const prefix = 'Bearer ';
+    final sender = header.startsWith(prefix)
+        ? _auth.lookup(header.substring(prefix.length))
+        : null;
+    if (sender == null) {
+      return _error(401, ErrorCodes.authRequired, 'authenticate first');
+    }
+    return inner(req.change(context: {_peerKey: sender}));
+  };
+
+  /// Null if [req]'s address may go on; otherwise a 429 reply.
+  Response? _rateLimit(RateLimiter limiter, Request req) {
+    final info = req.context['shelf.io.connection_info'];
+    final ip = info is HttpConnectionInfo
+        ? info.remoteAddress.address
+        : 'unknown';
+    final wait = limiter.take(ip);
+    if (wait == null) return null;
+    _log('rate limited ${req.url.path}');
+    final seconds = (wait.inMilliseconds / 1000).ceil();
+    return Response(
+      429,
+      body: jsonEncode({
+        'error': ErrorCodes.rateLimited,
+        'message': 'too many requests',
+        'retryAfter': seconds,
+      }),
+      headers: {'content-type': 'application/json', 'retry-after': '$seconds'},
+    );
+  }
+
+  Future<Response> _challenge(Request req) async {
+    final limited = _rateLimit(_authLimiter, req);
+    if (limited != null) return limited;
+    try {
+      final body = AuthChallengeRequest.fromJson(
+        await _readJson(req, _limits.maxControlBodyBytes),
+      );
+      return _json(200, AuthChallenge(nonce: _auth.challenge(body.commit)));
+    } on _BodyTooLarge {
+      return _error(413, ErrorCodes.bodyTooLarge, 'body too large');
+    } on FormatError catch (e) {
+      return _error(400, ErrorCodes.badRequest, e.message);
+    }
+  }
+
+  Future<Response> _authenticate(Request req) async {
+    final limited = _rateLimit(_authLimiter, req);
+    if (limited != null) return limited;
+    final AuthRequest body;
+    try {
+      body = AuthRequest.fromJson(
+        await _readJson(req, _limits.maxControlBodyBytes),
+      );
+    } on _BodyTooLarge {
+      return _error(413, ErrorCodes.bodyTooLarge, 'body too large');
+    } on FormatError catch (e) {
+      return _error(400, ErrorCodes.badRequest, e.message);
+    }
+    try {
+      final granted = _auth.authenticate(body);
+      _log(
+        'sender ${granted.sender.fingerprint.substring(0, 8)} '
+        'authenticated',
+      );
+      return _json(
+        200,
+        AuthGranted(token: granted.token, expiresIn: _auth.tokenTtl.inSeconds),
+      );
+    } on AuthFailure catch (e) {
+      _log('authentication refused: ${e.reason}');
+      return _error(401, ErrorCodes.authFailed, 'authentication failed');
+    }
+  }
+
   // ---------------------------------------------------------------- restore
 
   Future<void> _restore() async {
     for (final stored in await _repo.unfinished(TransferDirection.receive)) {
       final dir = p.join(_tempDir, stored.sessionId);
+      final senderFp = stored.peerFingerprint;
+      if (senderFp == null) {
+        // Stored before Phase 4: nobody can prove they own it.
+        await _repo.updateSession(
+          stored.rowId,
+          status: SessionStatus.failed,
+          reason: 'expired',
+        );
+        await _deleteDir(dir);
+        continue;
+      }
       if (stored.status == SessionStatus.offered) {
         // The prompt died with the app; the sender will see `rejected`.
         await _repo.updateSession(
@@ -439,6 +667,7 @@ class ReceiveServer {
         rowId: stored.rowId,
         dir: dir,
         sender: stored.peer,
+        senderFingerprint: senderFp,
         files: files,
         machine: SessionStateMachine(stored.status),
       );
@@ -475,9 +704,16 @@ class ReceiveServer {
   // ----------------------------------------------------------------- offers
 
   Future<Response> _createSession(Request req) async {
+    final limited = _rateLimit(_offerLimiter, req);
+    if (limited != null) return limited;
+    final peer = _peer(req);
     final SessionOffer offer;
     try {
-      offer = SessionOffer.fromJson(await _readJson(req));
+      offer = SessionOffer.fromJson(
+        await _readJson(req, _limits.maxOfferBodyBytes),
+      );
+    } on _BodyTooLarge {
+      return _error(413, ErrorCodes.bodyTooLarge, 'offer too large');
     } on FormatError catch (e) {
       return _error(400, ErrorCodes.badRequest, e.message);
     }
@@ -489,10 +725,24 @@ class ReceiveServer {
         {'versions': supportedVersions},
       );
     }
+    final PeerTrust trust;
+    try {
+      trust = await _trustLookup(peer.fingerprint, offer.sender);
+    } catch (e) {
+      _log('trust lookup failed: ${e.runtimeType}');
+      return _error(503, ErrorCodes.busy, 'try again');
+    }
+    if (!trust.isTrusted && !_acceptsUntrusted()) {
+      _events.add(OfferRefused(offer.sender, ErrorCodes.receivingOff));
+      return _error(
+        403,
+        ErrorCodes.receivingOff,
+        'receiving is turned off on this device',
+      );
+    }
     final open = _sessions.values.where((s) => !s.status.isTerminal);
-    // One unfinished session per sender (Phase 4 ties the id to the
-    // certificate; until then it is only what the sender claims).
-    if (open.any((s) => s.sender.id == offer.sender.id)) {
+    // One unfinished session per sender, by proven fingerprint.
+    if (open.any((s) => s.senderFingerprint == peer.fingerprint)) {
       _events.add(OfferRefused(offer.sender, RejectReasons.senderBusy));
       return _error(
         409,
@@ -523,6 +773,7 @@ class ReceiveServer {
       sessionId: id,
       direction: TransferDirection.receive,
       peer: offer.sender,
+      peerFingerprint: peer.fingerprint,
       status: SessionStatus.offered,
       files: [
         for (final f in offer.files)
@@ -534,6 +785,9 @@ class ReceiveServer {
       rowId: rowId,
       dir: dir,
       sender: offer.sender,
+      senderFingerprint: peer.fingerprint,
+      pairingCode: peer.pairingCode,
+      trust: trust,
       files: Map.fromEntries([
         for (final f in offer.files)
           MapEntry(
@@ -549,7 +803,11 @@ class ReceiveServer {
     unawaited(_decide(session));
     return _json(
       200,
-      SessionCreated(sessionId: id, status: SessionStatus.offered.name),
+      SessionCreated(
+        sessionId: id,
+        status: SessionStatus.offered.name,
+        trusted: trust.isTrusted,
+      ),
     );
   }
 
@@ -579,13 +837,18 @@ class ReceiveServer {
     s.acceptTimer = Timer(_acceptTimeout, () {
       if (!decision.isCompleted) decision.complete(null);
     });
-    _decider(
-      IncomingOffer(
-        sessionId: s.id,
-        sender: s.sender,
-        files: [for (final f in s.files.values) f.offer],
-      ),
-    ).then(
+    final offer = IncomingOffer(
+      sessionId: s.id,
+      sender: s.sender,
+      files: [for (final f in s.files.values) f.offer],
+      senderFingerprint: s.senderFingerprint,
+      pairingCode: s.pairingCode,
+      trust: s.trust,
+    );
+    // Auto-accept only for the exact trusted fingerprint the user chose.
+    final auto = s.trust.trusted?.autoAccept ?? false;
+    if (auto) _log('session ${s.id}: auto-accepted (trusted device)');
+    (auto ? Future.value(true) : _decider(offer)).then(
       (v) {
         if (!decision.isCompleted) decision.complete(v);
       },
@@ -621,13 +884,13 @@ class ReceiveServer {
   // ------------------------------------------------------- session routes
 
   Response _getSession(Request req, String sid) {
-    final s = _sessions[sid];
+    final s = _owned(req, sid);
     if (s == null) return _notFound();
     return _json(200, _sessionStatus(s));
   }
 
   Future<Response> _deleteSession(Request req, String sid) async {
-    final s = _sessions[sid];
+    final s = _owned(req, sid);
     if (s == null) return _notFound();
     if (!s.status.isTerminal) {
       if (s.status == SessionStatus.offered) {
@@ -661,7 +924,7 @@ class ReceiveServer {
   }
 
   FutureOr<Response> _eventSocket(Request req, String sid) {
-    final s = _sessions[sid];
+    final s = _owned(req, sid);
     if (s == null) return _notFound();
     final handler = webSocketHandler((ws, _) {
       final socket = _EventSocket(
@@ -719,8 +982,8 @@ class ReceiveServer {
   // ---------------------------------------------------------- file routes
 
   /// Common checks for routes that touch a file's bytes.
-  (_Session, _ReceivingFile)? _lookup(String sid, String fid) {
-    final s = _sessions[sid];
+  (_Session, _ReceivingFile)? _lookup(Request req, String sid, String fid) {
+    final s = _owned(req, sid);
     final f = s?.files[fid];
     return f == null ? null : (s!, f);
   }
@@ -751,7 +1014,7 @@ class ReceiveServer {
   }
 
   Future<Response> _getFile(Request req, String sid, String fid) async {
-    final found = _lookup(sid, fid);
+    final found = _lookup(req, sid, fid);
     if (found == null) return _notFound();
     final (s, f) = found;
     final gate = _sessionGate(s);
@@ -760,7 +1023,7 @@ class ReceiveServer {
   }
 
   Future<Response> _putFile(Request req, String sid, String fid) async {
-    final found = _lookup(sid, fid);
+    final found = _lookup(req, sid, fid);
     if (found == null) return _notFound();
     final (s, f) = found;
     final gate = _sessionGate(s) ?? _fileGate(f);
@@ -960,7 +1223,7 @@ class ReceiveServer {
   }
 
   Future<Response> _complete(Request req, String sid, String fid) async {
-    final found = _lookup(sid, fid);
+    final found = _lookup(req, sid, fid);
     if (found == null) return _notFound();
     final (s, f) = found;
     final gate = _sessionGate(s) ?? _fileGate(f);
@@ -970,7 +1233,11 @@ class ReceiveServer {
     }
     final CompleteRequest body;
     try {
-      body = CompleteRequest.fromJson(await _readJson(req));
+      body = CompleteRequest.fromJson(
+        await _readJson(req, _limits.maxControlBodyBytes),
+      );
+    } on _BodyTooLarge {
+      return _error(413, ErrorCodes.bodyTooLarge, 'body too large');
     } on FormatError catch (e) {
       return _error(400, ErrorCodes.badRequest, e.message);
     }
@@ -1202,15 +1469,15 @@ class ReceiveServer {
     }
   }
 
-  static Future<Object?> _readJson(Request req) async {
+  /// Reads at most [maxBytes]; throws [_BodyTooLarge] beyond that, and
+  /// [FormatError] if it is not JSON.
+  static Future<Object?> _readJson(Request req, int maxBytes) async {
     final declared = req.contentLength;
-    if (declared != null && declared > _maxJsonBytes) {
-      throw FormatError('body too large');
-    }
+    if (declared != null && declared > maxBytes) throw const _BodyTooLarge();
     final bytes = BytesBuilder(copy: false);
     await for (final chunk in req.read()) {
       bytes.add(chunk);
-      if (bytes.length > _maxJsonBytes) throw FormatError('body too large');
+      if (bytes.length > maxBytes) throw const _BodyTooLarge();
     }
     try {
       return jsonDecode(utf8.decode(bytes.takeBytes()));
@@ -1244,4 +1511,8 @@ class ReceiveServer {
       _error(404, ErrorCodes.notFound, 'unknown session, file or route');
 
   static void _log(String message) => logEvent('server', message);
+}
+
+class _BodyTooLarge implements Exception {
+  const _BodyTooLarge();
 }

@@ -25,9 +25,17 @@ final checkLocalNetworkPermissionProvider = Provider<bool>(
   (ref) => Platform.isIOS,
 );
 
-/// Checks a target before sending; replaced in tests.
+/// Checks a target before sending, pinned to its fingerprint and with
+/// this phone's trust records; replaced in tests.
 final peerCheckProvider =
-    Provider<Future<ConnectTarget> Function(ConnectTarget)>((ref) => checkPeer);
+    Provider<Future<ConnectTarget> Function(ConnectTarget)>(
+      (ref) =>
+          (target) async => checkPeer(
+            target,
+            credentials: await ref.read(credentialsProvider.future),
+            trustLookup: ref.read(trustRepositoryProvider).check,
+          ),
+    );
 
 class NearbyState {
   const NearbyState({

@@ -3,10 +3,11 @@ import 'dart:io';
 import 'package:crossdrop/core/client/peer_check.dart';
 import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/protocol/models.dart';
-import 'package:crossdrop/core/security/ephemeral_identity.dart';
+import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
+import 'package:crossdrop/core/storage/trust_repository.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -14,9 +15,22 @@ import 'package:path/path.dart' as p;
 const _id = '3f2a9c1b-0d4e-4f5a-8b6c-7d8e9f0a1b2c';
 
 void main() {
-  late EphemeralIdentity identity;
+  late DeviceCredentials identity;
+  late DeviceCredentials other;
+  late DeviceCredentials me;
 
-  setUpAll(() async => identity = await EphemeralIdentity.generate());
+  setUpAll(() async {
+    identity = await DeviceCredentials.generate();
+    other = await DeviceCredentials.generate();
+    me = await DeviceCredentials.generate();
+  });
+
+  Future<ConnectTarget> check(
+    ConnectTarget t, {
+    ReceiverTrustLookup? trustLookup,
+    Duration timeout = const Duration(seconds: 5),
+  }) =>
+      checkPeer(t, credentials: me, trustLookup: trustLookup, timeout: timeout);
 
   Future<ReceiveServer> start(Directory root, {List<int>? versions}) =>
       ReceiveServer.start(
@@ -26,7 +40,7 @@ void main() {
           platform: 'android',
           versions: versions ?? const [protocolVersion],
         ),
-        securityContext: identity.serverContext(),
+        credentials: identity,
         tempDir: p.join(root.path, 'tmp'),
         saveDir: p.join(root.path, 'save'),
         repository: TransferRepository(AppDatabase(NativeDatabase.memory())),
@@ -38,36 +52,115 @@ void main() {
   setUp(() => root = Directory.systemTemp.createTempSync('cd_peer'));
   tearDown(() => root.deleteSync(recursive: true));
 
-  test('returns the target with id and name', () async {
+  test('first contact: learns the fingerprint, id and name', () async {
     final server = await start(root);
     addTearDown(server.close);
-    final t = await checkPeer(
-      ConnectTarget(host: '127.0.0.1', port: server.port),
-    );
+    final t = await check(ConnectTarget(host: '127.0.0.1', port: server.port));
     expect(t.deviceId, _id);
     expect(t.name, 'Pixel');
     expect(t.port, server.port);
+    expect(t.fingerprint, identity.fingerprint);
+    expect(t.pinSource, PinSource.firstContact);
+    expect(t.trust.isTrusted, isFalse);
   });
 
-  test('accepts the expected id and keeps the fingerprint', () async {
+  test('nearby list: the TXT hint must match the real fingerprint', () async {
     final server = await start(root);
     addTearDown(server.close);
-    final t = await checkPeer(
+    final ok = await check(
       ConnectTarget(
         host: '127.0.0.1',
         port: server.port,
         deviceId: _id,
-        fingerprint: 'a' * 64,
+        fingerprintHint: identity.fingerprint.substring(0, 16),
       ),
     );
-    expect(t.fingerprint, 'a' * 64);
+    expect(ok.fingerprint, identity.fingerprint);
+    await expectLater(
+      check(
+        ConnectTarget(
+          host: '127.0.0.1',
+          port: server.port,
+          deviceId: _id,
+          fingerprintHint: other.fingerprint.substring(0, 16),
+        ),
+      ),
+      throwsA(
+        isA<UploadException>().having(
+          (e) => e.code,
+          'code',
+          'identity_mismatch',
+        ),
+      ),
+    );
+  });
+
+  test('QR: connects when the TLS fingerprint matches the QR', () async {
+    final server = await start(root);
+    addTearDown(server.close);
+    final t = await check(
+      ConnectTarget(
+        host: '127.0.0.1',
+        port: server.port,
+        deviceId: _id,
+        fingerprint: identity.fingerprint,
+      ),
+    );
+    expect(t.fingerprint, identity.fingerprint);
+    expect(t.pinSource, PinSource.qr);
+  });
+
+  test(
+    'QR: a tampered fingerprint fails and is never retried unpinned',
+    () async {
+      final server = await start(root);
+      addTearDown(server.close);
+      await expectLater(
+        check(
+          ConnectTarget(
+            host: '127.0.0.1',
+            port: server.port,
+            deviceId: _id,
+            fingerprint: other.fingerprint,
+          ),
+        ),
+        throwsA(
+          isA<UploadException>().having((e) => e.code, 'code', pinMismatchCode),
+        ),
+      );
+    },
+  );
+
+  test('reports trust and lookalikes from the lookup', () async {
+    final server = await start(root);
+    addTearDown(server.close);
+    final known = TrustedDevice(
+      fingerprint: other.fingerprint,
+      deviceId: _id,
+      name: 'Pixel',
+      platform: 'android',
+      autoAccept: false,
+      firstSeen: DateTime(2026),
+      lastSeen: DateTime(2026),
+    );
+    String? askedFp;
+    final t = await check(
+      ConnectTarget(host: '127.0.0.1', port: server.port),
+      trustLookup: ({required fingerprint, deviceId, name}) async {
+        askedFp = fingerprint;
+        return PeerTrust(lookalike: known);
+      },
+    );
+    expect(askedFp, identity.fingerprint);
+    expect(t.trust.isTrusted, isFalse);
+    expect(t.trust.lookalike?.name, 'Pixel');
   });
 
   test('another device at the address is refused', () async {
     final server = await start(root);
     addTearDown(server.close);
     await expectLater(
-      checkPeer(
+      check(
         ConnectTarget(
           host: '127.0.0.1',
           port: server.port,
@@ -88,7 +181,7 @@ void main() {
     final server = await start(root, versions: const [7]);
     addTearDown(server.close);
     await expectLater(
-      checkPeer(ConnectTarget(host: '127.0.0.1', port: server.port)),
+      check(ConnectTarget(host: '127.0.0.1', port: server.port)),
       throwsA(isA<UploadException>().having((e) => e.code, 'code', 'version')),
     );
   });
@@ -98,7 +191,7 @@ void main() {
     final port = socket.port;
     await socket.close();
     await expectLater(
-      checkPeer(
+      check(
         ConnectTarget(host: '127.0.0.1', port: port),
         timeout: const Duration(seconds: 2),
       ),

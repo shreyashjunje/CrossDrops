@@ -7,7 +7,7 @@ import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/engine/backoff.dart';
 import 'package:crossdrop/core/engine/send_session.dart';
 import 'package:crossdrop/core/protocol/models.dart';
-import 'package:crossdrop/core/security/ephemeral_identity.dart';
+import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
 import 'package:drift/native.dart';
@@ -20,12 +20,16 @@ import '../../support/test_receiver.dart';
 const sender = testSender;
 
 void main() {
-  late EphemeralIdentity identity;
+  late DeviceCredentials identity;
+  late DeviceCredentials me;
   late Directory src;
   late TestReceiver r;
   late FlakyProxy proxy;
 
-  setUpAll(() async => identity = await EphemeralIdentity.generate());
+  setUpAll(() async {
+    identity = await DeviceCredentials.generate();
+    me = await testSenderCredentials();
+  });
 
   setUp(() async {
     src = Directory.systemTemp.createTempSync('cd_src');
@@ -57,6 +61,8 @@ void main() {
   UploadClient quickClient(String host, int port) => UploadClient(
     host: host,
     port: port,
+    fingerprint: identity.fingerprint,
+    credentials: me,
     connectTimeout: const Duration(seconds: 2),
     stallTimeout: const Duration(seconds: 2),
   );
@@ -73,6 +79,8 @@ void main() {
     port: port ?? proxy.port,
     sender: sender,
     items: items,
+    receiverFingerprint: identity.fingerprint,
+    credentials: me,
     expectedDeviceId: testDeviceInfo.id,
     repository: repo,
     locate: locate,
@@ -193,6 +201,7 @@ void main() {
         final again = SendSession.resume(
           stored,
           sender: sender,
+          credentials: me,
           repository: repo,
           clientFactory: quickClient,
           backoff: fastBackoff,
@@ -250,7 +259,7 @@ void main() {
       final s = session(
         [item],
         clientFactory: (h, port) =>
-            _CorruptingClient(h, port, () => corrupt-- > 0),
+            _CorruptingClient(h, port, identity, me, () => corrupt-- > 0),
       );
       final result = await s.run();
       expect(result.phase, SendPhase.done, reason: result.reason);
@@ -267,8 +276,14 @@ void main() {
       final (good, goodSha) = await makeFile('good.bin', 1 * mb, seed: 6);
       final s = session(
         [bad, good],
-        clientFactory: (h, port) =>
-            _CorruptingClient(h, port, () => true, onlyFile: 'f0'),
+        clientFactory: (h, port) => _CorruptingClient(
+          h,
+          port,
+          identity,
+          me,
+          () => true,
+          onlyFile: 'f0',
+        ),
       );
       final result = await s.run();
       expect(result.phase, SendPhase.done);
@@ -424,13 +439,21 @@ void main() {
 
 /// Sends a wrong SHA-256 while [corrupt] says so.
 class _CorruptingClient extends UploadClient {
-  _CorruptingClient(String host, int port, this.corrupt, {this.onlyFile})
-    : super(
-        host: host,
-        port: port,
-        connectTimeout: const Duration(seconds: 2),
-        stallTimeout: const Duration(seconds: 2),
-      );
+  _CorruptingClient(
+    String host,
+    int port,
+    DeviceCredentials receiver,
+    DeviceCredentials sender,
+    this.corrupt, {
+    this.onlyFile,
+  }) : super(
+         host: host,
+         port: port,
+         fingerprint: receiver.fingerprint,
+         credentials: sender,
+         connectTimeout: const Duration(seconds: 2),
+         stallTimeout: const Duration(seconds: 2),
+       );
 
   final bool Function() corrupt;
   final String? onlyFile;

@@ -5,7 +5,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:crossdrop/core/client/upload_client.dart';
-import 'package:crossdrop/core/security/ephemeral_identity.dart';
+import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -18,14 +18,16 @@ const int fileSize = 50 * mb;
 const int maxRssGrowth = 40 * mb;
 
 void main() {
-  late EphemeralIdentity identity;
+  late DeviceCredentials identity;
+  late DeviceCredentials me;
   late Directory root;
   late String sourcePath;
   late String sourceSha;
   late TestReceiver r;
 
   setUpAll(() async {
-    identity = await EphemeralIdentity.generate();
+    identity = await DeviceCredentials.generate();
+    me = await testSenderCredentials();
     root = Directory.systemTemp.createTempSync('cd_transfer');
     sourcePath = p.join(root.path, 'source.bin');
     sourceSha = await writeRandomFile(sourcePath, fileSize);
@@ -36,7 +38,7 @@ void main() {
   setUp(() async => r = await TestReceiver.start(identity: identity));
   tearDown(() => r.close());
 
-  UploadClient newClient() => UploadClient(host: '127.0.0.1', port: r.port);
+  UploadClient newClient() => clientFor(r, me);
 
   String savedPath() => r.saved.single.savedPath;
 

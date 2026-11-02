@@ -32,7 +32,7 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
     if (pending.isEmpty) return;
     final offer = pending.first;
     _prompting = offer.sessionId;
-    final accept = await showDialog<bool>(
+    final decision = await showDialog<AcceptDecision>(
       context: context,
       barrierDismissible: false,
       builder: (_) => AcceptOfferDialog(offer: offer),
@@ -40,10 +40,14 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
     if (!mounted) return;
     if (_prompting == offer.sessionId) {
       _prompting = null;
-      if (accept != null) {
+      if (decision != null) {
         ref
             .read(receiveControllerProvider.notifier)
-            .answer(offer.sessionId, accept: accept);
+            .answer(
+              offer.sessionId,
+              accept: decision.accept,
+              trust: decision.trust,
+            );
       }
     }
     // Another offer may be waiting.
@@ -68,8 +72,22 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Receiving'),
+            subtitle: Text(
+              state.receivingOff
+                  ? 'Off: this phone is hidden and refuses new transfers.'
+                  : 'On while this screen is open.',
+            ),
+            value: !state.receivingOff,
+            onChanged: (on) =>
+                ref.read(receiveControllerProvider.notifier).setReceiving(on),
+          ),
           if (state.error != null)
             Text(state.error!, style: TextStyle(color: theme.colorScheme.error))
+          else if (state.receivingOff && state.port == null)
+            const Text('Receiving is off. Turn it on to receive files.')
           else if (state.port == null)
             const Text('Starting…')
           else ...[

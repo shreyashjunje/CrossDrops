@@ -9,6 +9,7 @@ import '../../core/protocol/connect_payload.dart';
 import '../../core/security/device_identity.dart';
 import '../send/send_screen.dart';
 import 'local_network_denied_view.dart';
+import 'lookalike_dialog.dart';
 import 'manual_address_dialog.dart';
 import 'nearby_controller.dart';
 import 'qr_scan_screen.dart';
@@ -37,6 +38,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     try {
       final target = await check();
       if (!mounted) return;
+      if (!await confirmLookalike(context, target) || !mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => SendScreen(target: target)),
       );
@@ -57,6 +59,9 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
         'network' =>
           'Could not reach that phone. Check that Receive is open on it and '
               'that both phones are on the same Wi-Fi.',
+        'pin_mismatch' =>
+          "This isn't the device you scanned: its security key is "
+              'different. Nothing was sent.',
         'identity_mismatch' when fromQr =>
           "This isn't the device you scanned. Scan the code again.",
         'identity_mismatch' =>

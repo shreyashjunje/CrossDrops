@@ -11,10 +11,9 @@ import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
-import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/engine/backoff.dart';
 import 'package:crossdrop/core/engine/send_session.dart';
-import 'package:crossdrop/core/security/ephemeral_identity.dart';
+import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -32,7 +31,8 @@ void main() {
   test(
     '2 GB with a drop at 1.2 GB: resumes, hashes match, memory flat',
     () async {
-      final identity = await EphemeralIdentity.generate();
+      final identity = await DeviceCredentials.generate();
+      final me = await testSenderCredentials();
       final src = Directory.systemTemp.createTempSync('cd_large');
       addTearDown(() => src.deleteSync(recursive: true));
       final path = p.join(src.path, 'big.mov');
@@ -49,7 +49,8 @@ void main() {
         port: proxy.port,
         sender: testSender,
         items: [SendItem(path: path, name: 'big.mov', size: size)],
-        clientFactory: (h, port) => UploadClient(host: h, port: port),
+        receiverFingerprint: identity.fingerprint,
+        credentials: me,
         backoff: () => Backoff(
           steps: const [Duration(milliseconds: 100)],
           giveUpAfter: const Duration(minutes: 1),

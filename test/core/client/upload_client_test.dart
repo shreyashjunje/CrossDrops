@@ -4,15 +4,41 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:crossdrop/core/client/upload_client.dart';
-import 'package:crossdrop/core/security/ephemeral_identity.dart';
+import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
 void main() {
   late Directory dir;
-  late EphemeralIdentity identity;
+  late DeviceCredentials identity;
+  late DeviceCredentials sender;
 
-  setUpAll(() async => identity = await EphemeralIdentity.generate());
+  setUpAll(() async {
+    identity = await DeviceCredentials.generate();
+    sender = await DeviceCredentials.generate();
+  });
+
+  /// Answers the two auth requests with well-formed values, so the
+  /// client gets past authentication; returns false for other requests.
+  bool answerAuth(Socket socket, String head) {
+    final String body;
+    if (head.startsWith('POST /v1/auth/challenge ')) {
+      body = jsonEncode({'nonce': 'N' * 43});
+    } else if (head.startsWith('POST /v1/auth ')) {
+      body = jsonEncode({'token': 'T' * 43, 'expiresIn': 3600});
+    } else {
+      return false;
+    }
+    socket.write(
+      'HTTP/1.1 200 OK\r\n'
+      'content-type: application/json\r\n'
+      'content-length: ${body.length}\r\n'
+      'connection: close\r\n\r\n$body',
+    );
+    socket.close();
+    return true;
+  }
+
   setUp(() => dir = Directory.systemTemp.createTempSync('cd_client'));
   tearDown(() => dir.deleteSync(recursive: true));
 
@@ -27,7 +53,9 @@ void main() {
     server.listen((socket) {
       late StreamSubscription<Uint8List> sub;
       sub = socket.listen((data) {
-        if (latin1.decode(data.take(4).toList()) == 'GET ') {
+        final head = latin1.decode(data.take(64).toList());
+        if (answerAuth(socket, head)) return;
+        if (head.startsWith('GET ')) {
           final body = jsonEncode({
             'fileId': 'f1',
             'size': size,
@@ -60,6 +88,8 @@ void main() {
     final client = UploadClient(
       host: '127.0.0.1',
       port: server.port,
+      fingerprint: identity.fingerprint,
+      credentials: sender,
       stallTimeout: const Duration(seconds: 1),
     );
     addTearDown(client.close);
@@ -90,6 +120,8 @@ void main() {
     final client = UploadClient(
       host: '127.0.0.1',
       port: server.port,
+      fingerprint: identity.fingerprint,
+      credentials: sender,
       stallTimeout: const Duration(seconds: 1),
     );
     addTearDown(client.close);

@@ -10,11 +10,16 @@ import 'keep_alive.dart';
 
 import '../core/discovery/bonsoir_backend.dart';
 import '../core/discovery/mdns_backend.dart';
+import '../core/security/device_credentials.dart';
 import '../core/security/device_identity.dart';
+import '../core/security/secret_store.dart';
 import '../core/storage/database.dart';
+import '../core/storage/settings_repository.dart';
 import '../core/storage/transfer_repository.dart';
+import '../core/storage/trust_repository.dart';
 import '../platform/free_space.dart';
 import '../platform/local_network.dart';
+import '../platform/secure_secret_store.dart';
 
 /// The app's database, open for the app's lifetime.
 final databaseProvider = Provider<AppDatabase>((ref) {
@@ -48,6 +53,36 @@ class IdentityNotifier extends AsyncNotifier<DeviceIdentity> {
     state = AsyncData(await _repo.rename(name));
   }
 }
+
+/// iOS Keychain / Android Keystore-backed storage for the private key.
+final secretStoreProvider = Provider<SecretStore>((ref) => SecureSecretStore());
+
+/// This device's key and certificate; the fingerprint is its identity.
+/// Created on first launch (ARCHITECTURE.md, "Device identity").
+final credentialsProvider = FutureProvider<DeviceCredentials>(
+  (ref) => CredentialRepository(
+    ref.read(databaseProvider),
+    ref.read(secretStoreProvider),
+  ).loadOrCreate(),
+);
+
+final trustRepositoryProvider = Provider<TrustRepository>(
+  (ref) => TrustRepository(ref.watch(databaseProvider)),
+);
+
+/// Trusted devices, most recently seen first.
+final trustedDevicesProvider = StreamProvider<List<TrustedDevice>>(
+  (ref) => ref.watch(trustRepositoryProvider).watchAll(),
+);
+
+final settingsRepositoryProvider = Provider<SettingsRepository>(
+  (ref) => SettingsRepository(ref.watch(databaseProvider)),
+);
+
+/// The global "Receiving" switch (D-031).
+final receivingEnabledProvider = StreamProvider<bool>(
+  (ref) => ref.watch(settingsRepositoryProvider).watchReceivingEnabled(),
+);
 
 /// mDNS browsing and advertising (bonsoir on the phones).
 final mdnsBackendProvider = Provider<MdnsBackend>((ref) => BonsoirBackend());

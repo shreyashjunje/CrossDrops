@@ -7,12 +7,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/keep_alive.dart';
 import '../../app/providers.dart';
 import '../../core/client/peer_check.dart';
+import '../../core/client/upload_client.dart';
 import '../../core/discovery/peer_locator.dart';
 import '../../core/engine/send_session.dart';
 import '../../core/protocol/file_type.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/storage/transfer_repository.dart';
+import '../nearby/nearby_controller.dart';
 import '../transfer/transfer_format.dart';
 
 class SendState {
@@ -21,7 +23,23 @@ class SendState {
     this.snapshot,
     this.error,
     this.receiverName,
+    this.receiver,
+    this.receiverTrusted = false,
   });
+
+  /// The receiver of the current or last send, after [checkPeer].
+  final ConnectTarget? receiver;
+
+  /// This phone trusts the receiver's fingerprint.
+  final bool receiverTrusted;
+
+  /// Offer "Trust this device" once a send to an untrusted receiver
+  /// reached it (the user compared the code, or scanned its QR).
+  bool get canTrustReceiver =>
+      !receiverTrusted &&
+      receiver?.fingerprint != null &&
+      receiver?.deviceId != null &&
+      snapshot?.phase == SendPhase.done;
 
   /// Files picked, in sending order.
   final List<SendItem> items;
@@ -42,11 +60,15 @@ class SendState {
     SendSnapshot? Function()? snapshot,
     String? Function()? error,
     String? receiverName,
+    ConnectTarget? receiver,
+    bool? receiverTrusted,
   }) => SendState(
     items: items ?? this.items,
     snapshot: snapshot != null ? snapshot() : this.snapshot,
     error: error != null ? error() : this.error,
     receiverName: receiverName ?? this.receiverName,
+    receiver: receiver ?? this.receiver,
+    receiverTrusted: receiverTrusted ?? this.receiverTrusted,
   );
 }
 
@@ -108,23 +130,75 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     state = const SendState();
   }
 
-  /// Offers the picked files to [target] and sends them.
+  /// Offers the picked files to [target] and sends them. A target that
+  /// was not checked yet (an address typed on the Send screen) is checked
+  /// first, so every connection is pinned to the receiver's fingerprint.
   Future<void> send(ConnectTarget target) async {
     if (state.isRunning || state.items.isEmpty) return;
+    var checked = target;
+    if (target.pinSource == null) {
+      try {
+        checked = await ref.read(peerCheckProvider)(target);
+      } on UploadException catch (e) {
+        if (ref.mounted) {
+          state = state.copyWith(error: () => _checkError(e));
+        }
+        return;
+      }
+    }
     final device = await ref.read(identityProvider.future);
-    final deviceId = target.deviceId;
+    final credentials = await ref.read(credentialsProvider.future);
+    final deviceId = checked.deviceId;
     final session = SendSession(
-      host: target.host,
-      port: target.port,
+      host: checked.host,
+      port: checked.port,
       sender: _senderInfo(device),
       items: state.items,
+      receiverFingerprint: checked.fingerprint!,
+      credentials: credentials,
       expectedDeviceId: deviceId,
       repository: ref.read(transferRepositoryProvider),
       locate: deviceId == null ? null : _locator(deviceId, device.deviceId),
     );
-    state = state.copyWith(receiverName: target.name ?? target.host);
+    if (checked.trust.isTrusted) {
+      await ref.read(trustRepositoryProvider).touch(checked.fingerprint!);
+    }
+    state = state.copyWith(
+      receiverName: checked.name ?? checked.host,
+      receiver: checked,
+      receiverTrusted: checked.trust.isTrusted,
+    );
     await _run(session);
   }
+
+  /// Trusts the receiver of the last send: later sends to it are pinned
+  /// to this fingerprint and a different key is reported.
+  Future<void> trustReceiver() async {
+    final r = state.receiver;
+    final fp = r?.fingerprint;
+    final id = r?.deviceId;
+    if (r == null || fp == null || id == null) return;
+    await ref
+        .read(trustRepositoryProvider)
+        .trust(
+          fingerprint: fp,
+          deviceId: id,
+          name: r.name ?? r.host,
+          platform: r.platform ?? 'unknown',
+        );
+    if (ref.mounted) state = state.copyWith(receiverTrusted: true);
+  }
+
+  static String _checkError(UploadException e) => switch (e.code) {
+    pinMismatchCode =>
+      "That isn't the expected device: its security key is different. "
+          'Nothing was sent.',
+    'identity_mismatch' => 'A different device answered at this address.',
+    'version' => 'Update CrossDrop on the other phone.',
+    _ =>
+      'Could not reach that phone. Check the IP and port on its Receive '
+          'screen.',
+  };
 
   /// Continues the last session after it gave up (network) or the
   /// receiver ran out of space.
@@ -141,12 +215,25 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   Future<void> resumeStored(StoredSession stored) async {
     if (state.isRunning) return;
     final device = await ref.read(identityProvider.future);
-    final session = SendSession.resume(
-      stored,
-      sender: _senderInfo(device),
-      repository: ref.read(transferRepositoryProvider),
-      locate: _locator(stored.peer.id, device.deviceId),
-    );
+    final credentials = await ref.read(credentialsProvider.future);
+    final SendSession session;
+    try {
+      session = SendSession.resume(
+        stored,
+        sender: _senderInfo(device),
+        credentials: credentials,
+        repository: ref.read(transferRepositoryProvider),
+        locate: _locator(stored.peer.id, device.deviceId),
+      );
+    } on StateError {
+      // Stored before Phase 4, without the receiver's fingerprint.
+      state = state.copyWith(
+        error: () =>
+            'This transfer was started by an older version of CrossDrop '
+            'and cannot be resumed safely. Send the files again.',
+      );
+      return;
+    }
     state = SendState(
       items: [
         for (final f in stored.files)

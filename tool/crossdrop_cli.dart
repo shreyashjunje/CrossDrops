@@ -13,7 +13,9 @@ import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/engine/chunked_reader.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_identity.dart';
-import 'package:crossdrop/core/security/ephemeral_identity.dart';
+import 'package:crossdrop/core/security/device_credentials.dart';
+import 'package:crossdrop/core/security/peer_auth.dart';
+import 'package:crossdrop/core/security/pinning.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
@@ -50,21 +52,25 @@ Future<void> _receive(List<String> args) async {
   }
   final saveDir = p.absolute(dir);
   final tempDir = p.join(Directory.systemTemp.path, 'crossdrop_cli_incoming');
-  final identity = await EphemeralIdentity.generate();
+  // A new identity per run: the CLI is a dev tool and trusts nobody.
+  final identity = await DeviceCredentials.generate();
   final server = await ReceiveServer.start(
     info: DeviceInfo(
       id: newDeviceId(),
       name: 'CrossDrop CLI',
       platform: 'android',
     ),
-    securityContext: identity.serverContext(),
+    credentials: identity,
     tempDir: tempDir,
     saveDir: saveDir,
     // A throwaway database: the CLI keeps no history.
     repository: TransferRepository(AppDatabase(NativeDatabase.memory())),
     // Dev tool on your own computer: accept every offer, and say so.
     decider: (offer) async {
-      stdout.writeln('Accepting ${offer.files.length} file(s) automatically.');
+      stdout.writeln(
+        'Accepting ${offer.files.length} file(s) automatically. '
+        'Pairing code: ${formatPairingCode(offer.pairingCode)}',
+      );
       return true;
     },
     port: port,
@@ -128,9 +134,27 @@ Future<void> _send(List<String> args) async {
     exitCode = 66;
     return;
   }
-  final client = UploadClient(host: host, port: port);
+  // First contact: pin whatever certificate answers, then compare the
+  // pairing code with the phone's Accept prompt.
+  final fingerprint = await probeFingerprint(host, port);
+  final client = UploadClient(
+    host: host,
+    port: port,
+    fingerprint: fingerprint,
+    credentials: await DeviceCredentials.generate(),
+  );
   try {
-    final target = await client.offerFile(path);
+    final pending = client.offerFile(path);
+    // The code is known once the offer is authenticated.
+    unawaited(
+      Future<void>.delayed(const Duration(seconds: 1), () {
+        final code = client.pairingCode;
+        if (code != null) {
+          stdout.writeln('Pairing code: ${formatPairingCode(code)}');
+        }
+      }),
+    );
+    final target = await pending;
     final watch = Stopwatch()..start();
     var lastPrint = 0;
     final sha = await client.transfer(

@@ -6,7 +6,7 @@ import 'dart:typed_data';
 
 import 'package:crossdrop/core/protocol/events.dart';
 import 'package:crossdrop/core/protocol/models.dart';
-import 'package:crossdrop/core/security/ephemeral_identity.dart';
+import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
 import 'package:crypto/crypto.dart';
@@ -16,11 +16,35 @@ import 'package:path/path.dart' as p;
 import '../../support/test_receiver.dart';
 
 void main() {
-  late EphemeralIdentity identity;
+  late DeviceCredentials identity;
+  late DeviceCredentials defaultSender;
+  late DeviceCredentials sender;
   late TestReceiver r;
   late HttpClient http;
+  String? token;
 
-  setUpAll(() async => identity = await EphemeralIdentity.generate());
+  setUpAll(() async {
+    identity = await DeviceCredentials.generate();
+    defaultSender = await testSenderCredentials();
+  });
+
+  /// Sends the following requests as another device.
+  Future<void> actAs(DeviceCredentials who) async {
+    sender = who;
+    token = null;
+  }
+
+  /// A token for [sender] at the current server (servers forget tokens
+  /// when they restart).
+  Future<String> auth() async => token ??= await authenticateRaw(
+    r.port,
+    sender,
+    receiverFingerprint: identity.fingerprint,
+  );
+
+  /// The auth header line for raw sockets.
+  Future<String> authLine() async =>
+      'authorization: Bearer ${await auth()}\r\n';
 
   setUp(() async {
     r = await TestReceiver.start(
@@ -28,6 +52,8 @@ void main() {
       bodyIdleTimeout: const Duration(seconds: 2),
     );
     http = HttpClient()..badCertificateCallback = (_, _, _) => true;
+    sender = defaultSender;
+    token = null;
   });
 
   tearDown(() async {
@@ -43,18 +69,31 @@ void main() {
     Object? json,
     List<int>? bytes,
     bool chunked = false,
+    bool authenticated = true,
   }) async {
-    final req = await http.openUrl(method, url(path));
-    if (json != null) {
-      req.headers.contentType = ContentType.json;
-      req.write(jsonEncode(json));
-    } else if (bytes != null) {
-      if (!chunked) req.contentLength = bytes.length;
-      req.add(bytes);
+    Future<(int, Map<String, Object?>)> once() async {
+      final req = await http.openUrl(method, url(path));
+      if (authenticated) {
+        req.headers.set('authorization', 'Bearer ${await auth()}');
+      }
+      if (json != null) {
+        req.headers.contentType = ContentType.json;
+        req.write(jsonEncode(json));
+      } else if (bytes != null) {
+        if (!chunked) req.contentLength = bytes.length;
+        req.add(bytes);
+      }
+      final res = await req.close();
+      final text = await res.transform(utf8.decoder).join();
+      return (res.statusCode, jsonDecode(text) as Map<String, Object?>);
     }
-    final res = await req.close();
-    final text = await res.transform(utf8.decoder).join();
-    return (res.statusCode, jsonDecode(text) as Map<String, Object?>);
+
+    final first = await once();
+    if (!authenticated || first.$2['error'] != ErrorCodes.authRequired) {
+      return first;
+    }
+    token = null; // the server restarted
+    return once();
   }
 
   Map<String, Object?> offerJson(
@@ -100,6 +139,7 @@ void main() {
   }) async {
     final ws = await WebSocket.connect(
       'wss://127.0.0.1:${r.port}/v1/sessions/$sid/events',
+      headers: {'authorization': 'Bearer ${await auth()}'},
       customClient: http,
     );
     final got = <SessionEvent>[];
@@ -128,8 +168,9 @@ void main() {
       r.port,
       onBadCertificate: (_) => true,
     );
+    final authHeader = await authLine();
     socket.write(
-      'PUT $path HTTP/1.1\r\nhost: 127.0.0.1\r\n'
+      'PUT $path HTTP/1.1\r\nhost: 127.0.0.1\r\n$authHeader'
       'content-length: $declared\r\n'
       'content-type: application/octet-stream\r\n\r\n',
     );
@@ -264,12 +305,18 @@ void main() {
       );
       expect(code, 409);
       expect(body['error'], ErrorCodes.senderBusy);
-      // Another sender is fine.
-      await createSession(
-        'c',
-        1,
-        sender: const SenderInfo(id: 'other', name: 'x', platform: 'android'),
+      // Claiming another id does not help: the sender is its fingerprint.
+      final (code2, _) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([
+          const FileOffer(fileId: 'f1', name: 'b', size: 1),
+        ], sender: const SenderInfo(id: 'other', name: 'x', platform: 'ios')),
       );
+      expect(code2, 409);
+      // Another device (another key) is fine.
+      await actAs(await DeviceCredentials.generate());
+      await createSession('c', 1);
     });
 
     test('a finished session frees the sender', () async {
@@ -308,6 +355,7 @@ void main() {
     test('too many open sessions get 503', () async {
       r.decider = (_) => Completer<bool>().future;
       for (var i = 0; i < ReceiveServer.maxOpenSessions; i++) {
+        await actAs(await DeviceCredentials.generate());
         final (code, _) = await send(
           'POST',
           '/v1/sessions',
@@ -317,6 +365,7 @@ void main() {
         );
         expect(code, 200);
       }
+      await actAs(await DeviceCredentials.generate());
       final (code, _) = await send(
         'POST',
         '/v1/sessions',
@@ -632,7 +681,7 @@ void main() {
       addTearDown(socket.destroy);
       socket.write(
         'PUT /v1/sessions/$sid/files/f1?offset=0 HTTP/1.1\r\n'
-        'host: x\r\ncontent-length: ${64 * mb}\r\n\r\n',
+        'host: x\r\n${await authLine()}content-length: ${64 * mb}\r\n\r\n',
       );
       socket.add(Uint8List(2 * mb));
       await socket.flush();
@@ -743,7 +792,7 @@ void main() {
       addTearDown(socket.destroy);
       socket.write(
         'PUT /v1/sessions/$sid/files/f1?offset=0 HTTP/1.1\r\n'
-        'host: x\r\ncontent-length: ${4 * mb}\r\n\r\n',
+        'host: x\r\n${await authLine()}content-length: ${4 * mb}\r\n\r\n',
       );
       socket.add(Uint8List(3 * mb));
       await socket.flush();
@@ -821,7 +870,7 @@ void main() {
       addTearDown(socket.destroy);
       socket.write(
         'PUT /v1/sessions/$sid/files/f1?offset=0 HTTP/1.1\r\n'
-        'host: x\r\ncontent-length: ${8 * mb}\r\n\r\n',
+        'host: x\r\n${await authLine()}content-length: ${8 * mb}\r\n\r\n',
       );
       socket.add(Uint8List(2 * mb));
       await socket.flush();

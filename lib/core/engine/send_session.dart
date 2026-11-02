@@ -5,6 +5,7 @@ import '../client/upload_client.dart';
 import '../log.dart';
 import '../protocol/events.dart';
 import '../protocol/models.dart';
+import '../security/device_credentials.dart';
 import '../storage/transfer_repository.dart';
 import 'backoff.dart';
 import 'progress_tracker.dart';
@@ -48,6 +49,10 @@ abstract final class SendReasons {
 
   /// The receiver no longer knows the session (expired or wiped).
   static const sessionLost = 'session_lost';
+
+  /// The receiver's certificate is not the pinned one. Never retried
+  /// (CLAUDE.md hard rule 4).
+  static const pinMismatch = 'pin_mismatch';
 }
 
 /// A file to send.
@@ -100,10 +105,15 @@ class SendSnapshot {
     this.bytesPerSecond = 0,
     this.eta,
     this.retryIn,
+    this.pairingCode,
   });
 
   final SendPhase phase;
   final String? sessionId;
+
+  /// The 6-digit code to show while the receiver decides, when it does
+  /// not trust this phone yet (ARCHITECTURE.md, "Pairing").
+  final String? pairingCode;
 
   /// One of [SendReasons], [RejectReasons] or [ErrorCodes].
   final String? reason;
@@ -166,6 +176,8 @@ class SendSession {
     required int port,
     required this.sender,
     required List<SendItem> items,
+    required this.receiverFingerprint,
+    required DeviceCredentials credentials,
     this.expectedDeviceId,
     TransferRepository? repository,
     PeerLocator? locate,
@@ -177,26 +189,42 @@ class SendSession {
        _port = port,
        _repo = repository,
        _locator = locate,
-       _clientFactory = clientFactory ?? _defaultClient,
+       _clientFactory =
+           clientFactory ??
+           ((h, p) => UploadClient(
+             host: h,
+             port: p,
+             fingerprint: receiverFingerprint,
+             credentials: credentials,
+           )),
        _newBackoff = backoff ?? Backoff.new,
        _files = [for (final (i, item) in items.indexed) _File('f$i', item)] {
     _client = _clientFactory(host, port);
     _tracker = ProgressTracker({for (final f in _files) f.fileId: f.item.size});
   }
 
-  /// Continues a session stored by an earlier run (app restart).
+  /// Continues a session stored by an earlier run (app restart). Throws
+  /// [StateError] for a session stored without the receiver's fingerprint
+  /// (before Phase 4): it cannot be resumed safely.
   factory SendSession.resume(
     StoredSession stored, {
     required SenderInfo sender,
+    required DeviceCredentials credentials,
     TransferRepository? repository,
     PeerLocator? locate,
     ClientFactory? clientFactory,
     Backoff Function()? backoff,
   }) {
+    final fingerprint = stored.peerFingerprint;
+    if (fingerprint == null) {
+      throw StateError('stored without a receiver fingerprint');
+    }
     final s = SendSession(
       host: stored.peerHost ?? '',
       port: stored.peerPort ?? 0,
       sender: sender,
+      receiverFingerprint: fingerprint,
+      credentials: credentials,
       expectedDeviceId: stored.peer.id,
       items: [
         for (final f in stored.files)
@@ -231,6 +259,9 @@ class SendSession {
 
   final SenderInfo sender;
 
+  /// Every connection to the receiver is pinned to this.
+  final String receiverFingerprint;
+
   /// The receiver's device id, if known (nearby list, QR code, stored).
   final String? expectedDeviceId;
   final Duration acceptTimeout;
@@ -253,6 +284,7 @@ class SendSession {
   String? _sessionId;
   int? _rowId;
   SenderInfo? _peer;
+  String? _pairingCode;
   SendPhase _phase = SendPhase.connecting;
   String? _reason;
   int? _neededBytes;
@@ -266,9 +298,6 @@ class SendSession {
   Completer<void>? _pauseGate;
   bool _resumedFromPause = false;
   bool _running = false;
-
-  static UploadClient _defaultClient(String host, int port) =>
-      UploadClient(host: host, port: port);
 
   Stream<SendSnapshot> get updates => _updates.stream;
 
@@ -295,6 +324,7 @@ class SendSession {
     bytesPerSecond: _phase == SendPhase.sending ? _tracker.bytesPerSecond : 0,
     eta: _phase == SendPhase.sending ? _tracker.eta : null,
     retryIn: _retryIn,
+    pairingCode: _pairingCode,
   );
 
   /// Runs until the session is done, rejected, cancelled or failed.
@@ -440,6 +470,8 @@ class SendSession {
       };
     }
     _sessionId = created.sessionId;
+    // The receiver shows the code of the authentication behind this offer.
+    _pairingCode = created.trusted ? null : _client.pairingCode;
     _log('session ${created.sessionId}: offered ${_files.length} file(s)');
     final repo = _repo;
     if (repo != null) {
@@ -450,6 +482,7 @@ class SendSession {
         status: SessionStatus.offered,
         peerHost: _host,
         peerPort: _port,
+        peerFingerprint: receiverFingerprint,
         files: [
           for (final f in _files)
             StoredFile(

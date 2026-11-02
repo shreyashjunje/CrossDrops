@@ -36,6 +36,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       );
     });
     final name = ref.watch(identityProvider).value?.deviceName;
+    // Creates the key pair and certificate on first launch, before the
+    // user needs them (ARCHITECTURE.md, "Device identity").
+    ref.watch(credentialsProvider);
 
     return Scaffold(
       appBar: AppBar(

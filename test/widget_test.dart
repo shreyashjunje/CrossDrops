@@ -1,5 +1,6 @@
 import 'package:crossdrop/app/app.dart';
 import 'package:crossdrop/app/providers.dart';
+import 'package:crossdrop/core/security/secret_store.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -11,7 +12,10 @@ void main() {
     addTearDown(db.close);
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [databaseProvider.overrideWithValue(db)],
+        overrides: [
+          databaseProvider.overrideWithValue(db),
+          secretStoreProvider.overrideWithValue(MemorySecretStore()),
+        ],
         child: const CrossDropApp(),
       ),
     );
