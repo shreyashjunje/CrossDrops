@@ -6,6 +6,7 @@ import UIKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var localNetwork: LocalNetworkChannel?
   private var storage: StorageChannel?
+  private var background: BackgroundTaskChannel?
 
   override func application(
     _ application: UIApplication,
@@ -22,6 +23,55 @@ import UIKit
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "StorageChannel") {
       storage = StorageChannel(messenger: registrar.messenger())
     }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "BackgroundTaskChannel") {
+      background = BackgroundTaskChannel(messenger: registrar.messenger())
+    }
+  }
+}
+
+/// Platform channel `crossdrop/background` (Dart side:
+/// lib/platform/keep_alive.dart).
+///
+/// - `begin`: asks iOS for a little time after the app leaves the screen
+///   (about 30 s), so the transfer can finish its chunk and save progress.
+/// - `end`: gives the time back.
+/// - Native to Dart `expiring`: iOS wants the time back now; the task is
+///   ended right after.
+final class BackgroundTaskChannel {
+  private let channel: FlutterMethodChannel
+  private var task: UIBackgroundTaskIdentifier = .invalid
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "crossdrop/background", binaryMessenger: messenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else { return }
+      switch call.method {
+      case "begin":
+        self.begin()
+        result(nil)
+      case "end":
+        self.end()
+        result(nil)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+  }
+
+  private func begin() {
+    guard task == .invalid else { return }
+    task = UIApplication.shared.beginBackgroundTask(withName: "CrossDrop transfer") {
+      [weak self] in
+      guard let self else { return }
+      self.channel.invokeMethod("expiring", arguments: nil)
+      self.end()
+    }
+  }
+
+  private func end() {
+    guard task != .invalid else { return }
+    UIApplication.shared.endBackgroundTask(task)
+    task = .invalid
   }
 }
 

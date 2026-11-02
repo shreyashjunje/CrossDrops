@@ -1,5 +1,12 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../platform/keep_alive.dart';
+import 'keep_alive.dart';
 
 import '../core/discovery/bonsoir_backend.dart';
 import '../core/discovery/mdns_backend.dart';
@@ -44,6 +51,27 @@ class IdentityNotifier extends AsyncNotifier<DeviceIdentity> {
 
 /// mDNS browsing and advertising (bonsoir on the phones).
 final mdnsBackendProvider = Provider<MdnsBackend>((ref) => BonsoirBackend());
+
+/// A fresh mDNS backend for one-off lookups, such as finding a receiver
+/// again by id. bonsoir runs one browse per backend.
+final mdnsBackendFactoryProvider = Provider<MdnsBackend Function()>(
+  (ref) => BonsoirBackend.new,
+);
+
+/// Keeps transfers alive: screen on, Android foreground service, iOS
+/// background task when the app is hidden.
+final keepAliveProvider = Provider<KeepAliveCoordinator>((ref) {
+  final c = KeepAliveCoordinator(
+    PlatformKeepAlive(),
+    pauseInBackground: Platform.isIOS,
+  );
+  final lifecycle = AppLifecycleListener(
+    onHide: () => unawaited(c.appBackgrounded()),
+    onShow: c.appResumed,
+  );
+  ref.onDispose(lifecycle.dispose);
+  return c;
+});
 
 /// Local Network permission probe and the system settings link.
 final localNetworkProvider = Provider<LocalNetwork>(
