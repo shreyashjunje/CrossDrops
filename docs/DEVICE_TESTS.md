@@ -128,3 +128,154 @@ Same as P1-2 with `crossdrop-1GB.bin`.
 | P1-6 | | | | | | |
 | P1-7 | | | | | | |
 
+## Phase 2: discovery and QR connect
+
+Feature docs: [features/discovery.md](features/discovery.md), [features/qr-connect.md](features/qr-connect.md).
+
+### Preparation (once)
+
+1. Build both phones from the same commit, as in Phase 1. The iPhone build is the first to include the Swift probe and the new Info.plist keys. If Xcode reports a Swift error in `AppDelegate.swift`, paste it back and stop.
+2. **Give each phone a distinct name** in CrossDrop > Settings (gear icon), for example "Test iPhone", "Test Android A", "Test Android B". Home then shows "This phone: <name>".
+3. **Wi-Fi:** all phones on the same home Wi-Fi, VPN off. For P2-5 you also need a second network: a second Wi-Fi name (many routers have separate 2.4 GHz and 5 GHz names), a guest network without client isolation, or a hotspot from a third phone.
+4. **Logs:**
+   - Android: `adb logcat -s flutter`. Discovery lines start with `[crossdrop.discovery]`, for example `PeerAdded aaaaaaaa`, `advertising on port 53317`, `network changed: 1 address(es)`.
+   - iPhone: `flutter logs -d <iphone-id>` on the Mac.
+   - Logs contain ids, ports and counts only, never names or QR contents.
+
+Wording below: "**Receive**" means open CrossDrop > Receive and leave it open. "**Nearby**" means CrossDrop > Send, which now opens the "Send to" list.
+
+### P2-1: Home Wi-Fi, Android finds iPhone
+
+1. iPhone: **Receive**. If iOS asks to find devices on the local network, tap **Allow**.
+2. iPhone: the screen shows "Ready to receive as Test iPhone", "Phones on this Wi-Fi see you in their nearby list", and a QR code.
+3. Android: **Nearby**. Start a stopwatch.
+4. Android: when "Test iPhone" appears, note the time. Tap it.
+5. Android: the Send screen opens with "To Test iPhone" and the IP and port filled in. Pick a small file and send it.
+6. Optional multicast lock check, while Nearby is open on Android: `adb shell dumpsys wifi | findstr /i multicast`. Then go back to Home and run it again.
+
+**Expected**
+- "Test iPhone" appears within 5 s, with an iPhone icon. The subtitle shows the iPhone's IP and port; they match the iPhone's Receive screen.
+- Send works and ends with "Done, SHA-256 verified by receiver".
+- Step 6: a multicast lock (tag `bonsoirMulticastLock`) is listed while Nearby is open, and gone after leaving it. If the output has no lock list at all on your Android version, note "not checked".
+
+**Paste back:** the seconds until it appeared, a screenshot of the Android list, the `adb logcat -s flutter` lines from opening Nearby to the end of the send, and the step 6 output.
+
+### P2-2: Home Wi-Fi, iPhone finds Android
+
+Same as P2-1 with roles swapped: Android on **Receive**, iPhone on **Nearby**.
+- If this is the iPhone's first discovery, iOS shows the Local Network prompt when Nearby opens. Tap **Allow**.
+
+**Expected**
+- "Test Android A" appears within 5 s (within about 5 s of tapping Allow on first run), with an Android icon.
+- Tapping it opens Send pre-filled, and the send works.
+- No "Local Network" explanation screen appears.
+
+**Paste back:** as P2-1, with iPhone logs if you have them.
+
+### P2-3: iOS Local Network denied, then granted
+
+1. iPhone: Settings > Privacy & Security > Local Network > **turn CrossDrop off**.
+2. Android: **Receive**.
+3. iPhone: **Nearby**. Wait up to 20 s.
+4. Tap **Open Settings**. In CrossDrop's settings page, turn **Local Network** on and return to CrossDrop with the app switcher or the "< CrossDrop" link.
+5. Wait up to 20 s.
+6. Optional, fresh-install variant: delete the app, reinstall, open **Nearby**, and tap **Don't Allow** on the prompt. Then repeat steps 3 to 5.
+
+**Expected**
+- Step 3: after about 13 s (5 s search plus the 8 s probe), the screen "CrossDrop needs Local Network access" appears, with Open Settings, Try again and Scan a QR code anyway.
+- Step 4: Open Settings opens CrossDrop's page in the Settings app.
+- Step 5: the explanation goes away and "Test Android A" appears in the list.
+- The app never freezes or crashes.
+
+**Paste back:** screenshots of step 3 and step 5, how many seconds each took, and the iPhone log lines containing `local network probe`.
+
+### P2-4: QR code when discovery is blocked
+
+**Part A: QR path, both directions (any network).**
+1. Android: **Receive**. iPhone: **Nearby** > **Scan QR code**. The first time, iOS asks for the camera: Allow. Point the camera at the Android QR code.
+2. Expected: the scanner closes and Send opens with "To Test Android A". Send a small file.
+3. Swap roles: iPhone on **Receive**, Android on **Nearby** > **Scan QR code** (allow the camera).
+
+**Part B: discovery actually blocked.** Use one of these:
+- (a) A network known to block mDNS, such as many office or guest networks, or a router with "IGMP snooping", "multicast enhancement" or "mDNS" filtering turned on.
+- (b) If you have none: on the iPhone (sender) only, turn Local Network off as in P2-3. The QR connect is then also expected to fail; record that. On iOS, Local Network blocks both discovery and connections.
+
+Then:
+4. Receiver: **Receive**. Sender: **Nearby**. Wait 10 s.
+5. Expected: the list stays empty, then shows "No phones found yet" and the hint to scan the QR code.
+6. Sender: **Scan QR code** on the receiver's code.
+   - Expected with (a): Send opens and the send works.
+   - Expected with (a), if the network also isolates clients: within 5 s the message "Could not connect. This Wi-Fi may block phone-to-phone traffic, or a VPN is on. Try a hotspot."
+
+**Part C: wrong codes.**
+7. Sender: **Scan QR code** on any other QR code, for example a website, a Wi-Fi sharing code, or a payment QR.
+8. Expected: "This is not a CrossDrop code…" under the camera view; the scanner stays open and nothing connects.
+9. Android: in system Settings > Apps > CrossDrop > Permissions, deny Camera, then open the scanner.
+   - Expected: "CrossDrop needs the camera…" and an Open Settings button that opens CrossDrop's App info page.
+
+**Paste back:** for each part, what you saw (screenshots welcome, but do not post the QR codes themselves), which network type you used for Part B, and the logs.
+
+### P2-5: Wi-Fi switched mid-session
+
+Needs Wi-Fi A and Wi-Fi B (see Preparation).
+
+1. Both phones on Wi-Fi A. Android: **Receive**. Note its IP. iPhone: **Nearby**, wait until "Test Android A" is listed.
+2. **Android only:** switch to Wi-Fi B in quick settings. Keep Receive open.
+3. Within about 5 s, the Android Receive screen should show the new IP (the QR code is redrawn). Note how long it took.
+4. Watch the iPhone list for 30 s. Note whether, and when, "Test Android A" disappears. It may stay, because the iPhone cannot see network B.
+5. If it is still listed, tap it.
+   - Expected: within about 5 s, "Could not reach that phone…", and the entry disappears.
+6. **iPhone:** switch to Wi-Fi B. The list should restart and show "Test Android A" again within about 10 s, with the new IP. Tap it and send a small file.
+7. Repeat steps 1 to 6 with roles swapped: iPhone on Receive, Android on Nearby, and the iPhone switching networks first.
+
+**Expected:** Receive shows the new address within about 5 s of the switch. The sender finds the receiver again once both are on the same network. A stale entry is removed when tapped. No crash, and no Receive restart needed.
+
+**Paste back:** the timings from steps 3, 4 and 6 for both directions, and logs from both phones (look for `network changed`, `advertising restarted`, `browsing started`).
+
+### P2-6: Two Android phones and one iPhone
+
+1. Android A and Android B: **Receive**. iPhone: **Nearby**.
+   - Expected: both "Test Android A" and "Test Android B" are listed, with Android icons and different IPs, sorted by name, within 5 s.
+2. Android B: leave Receive (back to Home). Start a stopwatch.
+   - Expected on the iPhone: "Test Android B" disappears. Note how long it took (up to about 2 minutes is acceptable for now; record what you see).
+3. Android B: Settings > rename to "Test Android B2". Open **Receive** again.
+   - Expected on the iPhone: one entry "Test Android B2", not two entries for B.
+4. iPhone and Android B: **Receive**. Android A: **Nearby**.
+   - Expected: "Test iPhone" (iPhone icon) and "Test Android B2" listed.
+   - Tap each in turn and send a small file to each; both work.
+5. Android A: pull down on the list.
+   - Expected: the list empties and both devices come back within 5 s.
+6. Each phone never lists itself.
+
+**Paste back:** a screenshot of each list, the disappearance time in step 2, and logs from the phone on Nearby.
+
+### P2-7: Manual address
+
+1. Android: **Receive**. Note the IP (`wlan0`) and port.
+2. iPhone: **Nearby** > **Enter IP**. Try these:
+   - `8.8.8.8` → "Use the local address shown on Receive"
+   - `192.168.1` → "Enter an address like 192.168.1.23"
+   - port `0` → "Enter the port shown on Receive"
+3. Enter the right IP with a wrong port.
+   - Expected: within about 5 s, "Could not reach that phone…".
+4. Enter the right IP and port.
+   - Expected: Send opens with "To Test Android A"; send a small file.
+5. Swap roles, with Android on Nearby (the iPhone IP is the `en0` line).
+
+**Paste back:** what each step showed.
+
+### Results
+
+| Check | Date | iPhone, iOS | Android(s), version | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| P2-1 | | | | | | |
+| P2-2 | | | | | | |
+| P2-3 | | | | | | |
+| P2-4 A | | | | | | |
+| P2-4 B | | | | | | |
+| P2-4 C | | | | | | |
+| P2-5 Android switches | | | | | | |
+| P2-5 iPhone switches | | | | | | |
+| P2-6 | | | | | | |
+| P2-7 | | | | | | |
+
