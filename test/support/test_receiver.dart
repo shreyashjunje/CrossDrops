@@ -160,7 +160,17 @@ class TestReceiver {
     await _sub?.cancel();
     await server.close();
     await db.close();
-    root.deleteSync(recursive: true);
+    // An accept that was still running may create a session folder while
+    // this deletes; Windows then reports the folder as not empty.
+    for (var attempt = 1; ; attempt++) {
+      try {
+        root.deleteSync(recursive: true);
+        return;
+      } on FileSystemException {
+        if (attempt == 5) rethrow;
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    }
   }
 }
 

@@ -282,6 +282,10 @@ void main() {
         );
         expect(ok, 200);
         expect(created['trusted'], isTrue);
+        await waitFor(
+          () =>
+              r.server.sessions.any((s) => s.status == SessionStatus.accepted),
+        );
       },
     );
 
@@ -299,6 +303,9 @@ void main() {
         token: await tokenFor(alice),
       );
       await waitFor(() => asked == 1);
+      await waitFor(
+        () => r.server.sessions.any((s) => s.status == SessionStatus.accepted),
+      );
     });
 
     test('auto-accept skips the prompt only for that fingerprint', () async {
