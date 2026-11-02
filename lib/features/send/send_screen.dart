@@ -1,19 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/client/peer_check.dart';
 import '../transfer/transfer_format.dart';
 import 'send_controller.dart';
 
 class SendScreen extends ConsumerStatefulWidget {
-  const SendScreen({super.key});
+  const SendScreen({super.key, this.target});
+
+  /// Receiver chosen on the Nearby screen. The address stays editable.
+  final ConnectTarget? target;
 
   @override
   ConsumerState<SendScreen> createState() => _SendScreenState();
 }
 
 class _SendScreenState extends ConsumerState<SendScreen> {
-  final _host = TextEditingController();
-  final _port = TextEditingController();
+  late final _host = TextEditingController(text: widget.target?.host);
+  late final _port = TextEditingController(
+    text: widget.target == null ? null : '${widget.target!.port}',
+  );
 
   @override
   void dispose() {
@@ -47,6 +53,8 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          if (widget.target?.name case final name?)
+            Text('To $name', style: theme.textTheme.titleLarge),
           TextField(
             controller: _host,
             enabled: !sending,

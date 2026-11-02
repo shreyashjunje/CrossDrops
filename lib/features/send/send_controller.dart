@@ -4,7 +4,10 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../app/providers.dart';
 import '../../core/client/upload_client.dart';
+import '../../core/protocol/models.dart';
+import '../../core/security/device_identity.dart';
 
 enum SendPhase { idle, sending, done, failed, cancelled }
 
@@ -90,7 +93,16 @@ class SendController extends Notifier<SendState> {
     _port = port;
     _setPhase(SendPhase.sending);
     try {
-      final target = await client.offerFile(path, name: state.name);
+      final device = await ref.read(identityProvider.future);
+      final target = await client.offerFile(
+        path,
+        name: state.name,
+        sender: SenderInfo(
+          id: device.deviceId,
+          name: device.deviceName,
+          platform: DevicePlatform.current.name,
+        ),
+      );
       state = _copy(target: target);
       await _run(client, target);
     } on UploadException catch (e) {
