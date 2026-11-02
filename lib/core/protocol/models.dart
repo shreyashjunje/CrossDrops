@@ -89,6 +89,51 @@ class SenderInfo {
   }
 }
 
+/// Reply to `GET /v1/info`.
+class DeviceInfo {
+  const DeviceInfo({
+    required this.id,
+    required this.name,
+    required this.platform,
+    this.versions = const [protocolVersion],
+  });
+
+  final String id;
+  final String name;
+  final String platform;
+
+  /// Protocol versions this device supports.
+  final List<int> versions;
+
+  Map<String, Object?> toJson() => {
+    'id': id,
+    'name': name,
+    'platform': platform,
+    'versions': versions,
+  };
+
+  factory DeviceInfo.fromJson(Object? json) {
+    if (json is! Map<String, Object?>) throw FormatError('not an object');
+    final id = json['id'];
+    final name = json['name'];
+    final platform = json['platform'];
+    final versions = json['versions'];
+    if (id is! String ||
+        name is! String ||
+        platform is! String ||
+        versions is! List ||
+        versions.any((v) => v is! int)) {
+      throw FormatError('invalid info');
+    }
+    return DeviceInfo(
+      id: id,
+      name: name,
+      platform: platform,
+      versions: versions.cast<int>(),
+    );
+  }
+}
+
 /// Body of `POST /v1/sessions`.
 class SessionOffer {
   const SessionOffer({

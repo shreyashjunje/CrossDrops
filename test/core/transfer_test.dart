@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/engine/chunked_reader.dart';
 import 'package:crossdrop/core/security/ephemeral_identity.dart';
+import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -41,6 +42,7 @@ void main() {
   setUp(() async {
     final run = root.createTempSync('run');
     server = await ReceiveServer.start(
+      info: testDeviceInfo,
       securityContext: identity.serverContext(),
       tempDir: p.join(run.path, 'tmp'),
       saveDir: p.join(run.path, 'save'),
@@ -195,3 +197,9 @@ class _DigestSink implements Sink<Digest> {
   @override
   void close() {}
 }
+
+const testDeviceInfo = DeviceInfo(
+  id: '00000000-0000-4000-8000-000000000000',
+  name: 'Test receiver',
+  platform: 'android',
+);

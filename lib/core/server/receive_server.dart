@@ -76,7 +76,14 @@ class _Session {
 /// WebSocket events), no client certificate is required, no free-space
 /// check, and sessions live only in memory.
 class ReceiveServer {
-  ReceiveServer._(this._tempDir, this._saveDir, this._bodyIdleTimeout);
+  ReceiveServer._(
+    this._info,
+    this._tempDir,
+    this._saveDir,
+    this._bodyIdleTimeout,
+  );
+
+  final DeviceInfo _info;
 
   final String _tempDir;
   final String _saveDir;
@@ -92,6 +99,7 @@ class ReceiveServer {
   /// Partial files go to `<tempDir>/<sessionId>/<fileId>.part`; verified
   /// files are moved into [saveDir].
   static Future<ReceiveServer> start({
+    required DeviceInfo info,
     required SecurityContext securityContext,
     required String tempDir,
     required String saveDir,
@@ -99,7 +107,7 @@ class ReceiveServer {
     int port = 0,
     Duration bodyIdleTimeout = const Duration(seconds: 15),
   }) async {
-    final server = ReceiveServer._(tempDir, saveDir, bodyIdleTimeout);
+    final server = ReceiveServer._(info, tempDir, saveDir, bodyIdleTimeout);
     await Directory(tempDir).create(recursive: true);
     await Directory(saveDir).create(recursive: true);
     server._server = await shelf_io.serve(
@@ -122,6 +130,7 @@ class ReceiveServer {
   }
 
   Router _router() => Router(notFoundHandler: (_) => _notFound())
+    ..get('/v1/info', (Request _) => _json(200, _info))
     ..post('/v1/sessions', _createSession)
     ..get('/v1/sessions/<sid>/files/<fid>', _getFile)
     ..put('/v1/sessions/<sid>/files/<fid>', _putFile)

@@ -5,7 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../app/app_dirs.dart';
+import '../../app/providers.dart';
 import '../../core/engine/speed_meter.dart';
+import '../../core/protocol/models.dart';
+import '../../core/security/device_identity.dart';
 import '../../core/security/ephemeral_identity.dart';
 import '../../core/server/receive_server.dart';
 
@@ -96,8 +99,14 @@ class ReceiveController extends Notifier<ReceiveState> {
   Future<void> _start() async {
     try {
       final dirs = await AppDirs.resolve();
+      final device = await ref.read(identityProvider.future);
       final identity = await EphemeralIdentity.generate();
       final server = await ReceiveServer.start(
+        info: DeviceInfo(
+          id: device.deviceId,
+          name: device.deviceName,
+          platform: DevicePlatform.current.name,
+        ),
         securityContext: identity.serverContext(),
         tempDir: dirs.incomingTemp,
         saveDir: dirs.received,

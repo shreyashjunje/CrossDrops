@@ -10,6 +10,8 @@ import 'dart:io';
 
 import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/engine/chunked_reader.dart';
+import 'package:crossdrop/core/protocol/models.dart';
+import 'package:crossdrop/core/security/device_identity.dart';
 import 'package:crossdrop/core/security/ephemeral_identity.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
 import 'package:crypto/crypto.dart';
@@ -46,6 +48,11 @@ Future<void> _receive(List<String> args) async {
   final tempDir = p.join(Directory.systemTemp.path, 'crossdrop_cli_incoming');
   final identity = await EphemeralIdentity.generate();
   final server = await ReceiveServer.start(
+    info: DeviceInfo(
+      id: newDeviceId(),
+      name: 'CrossDrop CLI',
+      platform: 'android',
+    ),
     securityContext: identity.serverContext(),
     tempDir: tempDir,
     saveDir: saveDir,

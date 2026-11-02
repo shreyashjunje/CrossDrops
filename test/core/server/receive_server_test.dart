@@ -21,6 +21,11 @@ void main() {
   setUp(() async {
     root = Directory.systemTemp.createTempSync('cd_server');
     server = await ReceiveServer.start(
+      info: const DeviceInfo(
+        id: '00000000-0000-4000-8000-000000000000',
+        name: 'Test receiver',
+        platform: 'android',
+      ),
       securityContext: identity.serverContext(),
       tempDir: p.join(root.path, 'tmp'),
       saveDir: p.join(root.path, 'save'),
@@ -80,6 +85,16 @@ void main() {
     final rnd = Random(7);
     return Uint8List.fromList(List.generate(n, (_) => rnd.nextInt(256)));
   }
+
+  test('GET /v1/info returns id, name, platform and versions', () async {
+    final (code, body) = await send('GET', '/v1/info');
+    expect(code, 200);
+    final info = DeviceInfo.fromJson(body);
+    expect(info.id, '00000000-0000-4000-8000-000000000000');
+    expect(info.name, 'Test receiver');
+    expect(info.platform, 'android');
+    expect(info.versions, [protocolVersion]);
+  });
 
   test('full flow: offer, put, status, complete', () async {
     final data = randomBytes(3 * 1024 * 1024 + 5);
