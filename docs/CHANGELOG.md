@@ -19,6 +19,8 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
   - Unit tests for TXT parsing, QR parsing (malformed and hostile input), the peer list state machine, the network monitor, the peer check and the Nearby controller.
 - Docs: decisions D-012 to D-016, Phase 2 device checks, architecture updates for discovery and QR.
 
+- CI: GitHub Actions workflow `Build`. Analyze, format check and tests run on every push. When started manually it also builds an Android APK and an unsigned iPhone `.ipa` for sideloading (D-017). Install steps are in `docs/DEVICE_TESTS.md`.
+
 ### Changed
 - Send on Home now opens the Nearby screen. The Send screen keeps editable IP and port fields.
 

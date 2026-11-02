@@ -1,0 +1,100 @@
+# CI for CrossDrop.
+#
+# - Every push and pull request: flutter analyze + flutter test (Linux, cheap).
+# - Run manually (Actions > Build > Run workflow, or
+#   `gh workflow run build.yml`): also builds the Android APK and an
+#   unsigned iPhone .ipa. Run this after each phase, then install the
+#   builds on the phones for the device checks in docs/DEVICE_TESTS.md.
+#
+# The iPhone build is unsigned. Install it from Windows with Sideloadly and
+# a free Apple ID (DEVICE_TESTS.md, "Installing the CI builds"). macOS
+# minutes count 10x on private repositories, so it only runs on demand.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.9
+
+jobs:
+  test:
+    name: Analyze and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - name: Check formatting
+        run: dart format --output=none --set-exit-if-changed .
+      - run: flutter analyze
+      - run: flutter test
+
+  android:
+    name: Android APK
+    needs: test
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      # Signed with the debug key (android/app/build.gradle.kts), so it
+      # installs with `adb install` or by opening the file on the phone.
+      - run: flutter build apk --release
+      - name: Name the APK after the commit
+        run: mv build/app/outputs/flutter-apk/app-release.apk "crossdrop-${GITHUB_SHA::7}.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crossdrop-android-${{ github.sha }}
+          path: crossdrop-*.apk
+          retention-days: 14
+
+  ios:
+    name: iPhone unsigned IPA
+    needs: test
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: flutter build ios --release --no-codesign
+      # An .ipa is a zip with Runner.app inside a Payload folder. Sideloadly
+      # signs it with the user's Apple ID when installing.
+      - name: Package unsigned IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qr "crossdrop-${GITHUB_SHA::7}-unsigned.ipa" Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: crossdrop-ios-unsigned-${{ github.sha }}
+          path: crossdrop-*-unsigned.ipa
+          retention-days: 14

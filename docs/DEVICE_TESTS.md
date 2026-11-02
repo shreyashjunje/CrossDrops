@@ -9,13 +9,60 @@ Acceptance checks that need real phones (one iPhone, one Android). Unit tests th
 - After running a check, record the date, devices, OS versions, result (pass/fail) and notes.
 - A device feature counts as working only after a check here has been run and passed.
 
+## Installing the CI builds (no Mac needed)
+
+The **Build** workflow (`.github/workflows/build.yml`) runs analyze and tests on every push. When started manually, it also builds an Android APK and an unsigned iPhone `.ipa`. Run it after each phase, then install both builds for that phase's checks.
+
+### 1. Start the build
+
+1. Push the commits to GitHub.
+2. Start the workflow:
+   - **Web:** on github.com, open the repository > **Actions** > **Build** > **Run workflow** > branch `main` > **Run workflow**.
+   - **Or with the GitHub CLI:** `gh workflow run build.yml --ref main`.
+3. Wait until all three jobs are green: Analyze and test, Android APK, iPhone unsigned IPA. The iPhone job takes about 10–20 min.
+4. Open the run and download the artifacts at the bottom of the page:
+   - `crossdrop-android-<sha>`, which contains `crossdrop-<sha7>.apk`
+   - `crossdrop-ios-unsigned-<sha>`, which contains `crossdrop-<sha7>-unsigned.ipa`
+
+   Unzip both. Note the 7-character commit id for the Results tables.
+
+If a job fails, open it, copy the red error lines and paste them back.
+
+### 2. Install on Android
+
+- **USB:** `adb install -r crossdrop-<sha7>.apk`
+- **Or without USB:** copy the APK to the phone, open it, and allow "Install unknown apps" for the file manager when asked.
+
+### 3. Install on iPhone from Windows (free Apple ID)
+
+Do this once:
+
+1. Install **iTunes** and **iCloud** for Windows from apple.com. The Microsoft Store versions do not work with Sideloadly.
+2. Install **Sideloadly** from its official site, sideloadly.io.
+3. Connect the iPhone by USB, unlock it, and tap **Trust** on the phone.
+4. iOS 16 and later: Settings > Privacy & Security > **Developer Mode** > on. The phone restarts; confirm when asked.
+
+For each build:
+
+1. Open Sideloadly. Drag `crossdrop-<sha7>-unsigned.ipa` into it. Select your iPhone and enter your Apple ID. A secondary Apple ID is fine.
+2. Click **Start**. Enter the Apple ID password and a two-factor code if asked. Wait for "Done".
+3. **First time only:** on the iPhone, Settings > General > VPN & Device Management > your Apple ID > **Trust**.
+4. Open CrossDrop.
+
+Limits of a free Apple ID:
+- The app stops opening after **7 days**. Install it again with Sideloadly, or turn on its auto-refresh.
+- Only about 3 sideloaded apps can be active at once.
+- Bundle id: Sideloadly may change it. If it says the id `com.example.crossdrop` is unavailable, use its "Bundle ID" option to set something unique, for example `com.<yourname>.crossdrop`.
+
+**Paste back if it fails:** the Sideloadly log (its Log window) and the iOS version.
+
 ## Phase 1: file transfer proof of concept
 
 Feature doc: [features/file-transfer-poc.md](features/file-transfer-poc.md). Speeds go in [BENCHMARKS.md](BENCHMARKS.md).
 
 ### Preparation (once)
 
-1. **Build in release mode** on both phones from the same commit:
+1. **Build in release mode** on both phones from the same commit. The easiest way: run the Build workflow and install both artifacts ([Installing the CI builds](#installing-the-ci-builds-no-mac-needed)). Other ways:
    - Android (from this PC): `flutter run --release -d <android-device-id>` (`flutter devices` lists ids).
    - iPhone (from a Mac with Xcode): open `ios/Runner.xcworkspace`, set your signing team under Runner > Signing & Capabilities (change the bundle id from `com.example.crossdrop` if Xcode says it is taken), then `flutter run --release -d <iphone-id>`.
 2. **Create test files** on the PC (PowerShell, random content so nothing can be compressed or deduplicated):
@@ -134,7 +181,7 @@ Feature docs: [features/discovery.md](features/discovery.md), [features/qr-conne
 
 ### Preparation (once)
 
-1. Build both phones from the same commit, as in Phase 1. The iPhone build is the first to include the Swift probe and the new Info.plist keys. If Xcode reports a Swift error in `AppDelegate.swift`, paste it back and stop.
+1. Build both phones from the same commit: run the Build workflow and install both artifacts ([Installing the CI builds](#installing-the-ci-builds-no-mac-needed)). The iPhone build is the first to include the Swift probe and the new Info.plist keys. If the iPhone job fails with a Swift error in `AppDelegate.swift`, paste it back and stop.
 2. **Give each phone a distinct name** in CrossDrop > Settings (gear icon), for example "Test iPhone", "Test Android A", "Test Android B". Home then shows "This phone: <name>".
 3. **Wi-Fi:** all phones on the same home Wi-Fi, VPN off. For P2-5 you also need a second network: a second Wi-Fi name (many routers have separate 2.4 GHz and 5 GHz names), a guest network without client isolation, or a hotspot from a third phone.
 4. **Logs:**

@@ -135,3 +135,14 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: Offers are still accepted automatically (D-011), so advertising whenever the app is open would let anyone on the Wi-Fi push files. Phase 4 brings the persistent certificate. Until then the server creates a certificate at each launch.
 - Decision: The server and the advertisement run only while the Receive screen is open. TXT `fp` and the QR `fp` use the real fingerprint of the current per-launch certificate, not a placeholder. Nothing checks it yet.
 - Consequences: The formats are final, and Phase 4 only has to start checking the fingerprint. Receiving requires opening Receive first. The fingerprint, port and QR code change at each launch.
+
+## D-017: GitHub Actions builds; iPhone installed by sideloading with a free Apple ID
+- Date: 2026-11-02
+- Status: Accepted
+- Context: There is no Mac, so iPhone builds cannot be made locally. Expo Go-style "scan and run" does not work for apps with custom native code, in Flutter or React Native. Ad hoc and TestFlight installs need the paid Apple Developer Program.
+- Decision: `.github/workflows/build.yml` runs analyze, format check and tests on every push and pull request (Linux). When started manually, it also builds a release APK (Linux) and an unsigned iPhone `.ipa` (`flutter build ios --no-codesign` on a GitHub macOS runner, packaged as `Payload/Runner.app`). The `.ipa` is installed from Windows with Sideloadly, which signs it with a free Apple ID. The builds are started manually after each phase.
+- Consequences:
+  - No Mac and no paid account needed for device testing. The Swift code is now compiled in CI.
+  - The free-account app expires after 7 days, and only a few sideloaded apps can be active at once.
+  - Capabilities that need a paid account, such as Hotspot Configuration for joining a hotspot in-app, will not work in these builds. The hotspot phase must plan for that, for example by joining the hotspot manually in iOS Settings.
+  - On a private repository, macOS minutes count 10×, which is why the device builds are manual only.

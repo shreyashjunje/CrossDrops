@@ -26,6 +26,8 @@ flutter run --release -d <device> # Android from any PC; iPhone needs a Mac with
 
 After changing database tables in `lib/core/storage/database.dart`, run `dart run build_runner build`.
 
+**CI and builds without a Mac:** the GitHub Actions workflow **Build** runs analyze and tests on every push. When started manually (Actions > Build > Run workflow) it also produces an Android APK and an unsigned iPhone `.ipa`. Install the `.ipa` from Windows with Sideloadly and a free Apple ID; the steps are in [docs/DEVICE_TESTS.md](docs/DEVICE_TESTS.md#installing-the-ci-builds-no-mac-needed).
+
 ## Docs
 
 Start with [docs/README.md](docs/README.md). The design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the checks that need real phones are in [docs/DEVICE_TESTS.md](docs/DEVICE_TESTS.md).
