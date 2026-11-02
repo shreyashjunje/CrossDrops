@@ -1,5 +1,4 @@
 import 'package:drift/drift.dart';
-import 'package:drift_flutter/drift_flutter.dart';
 
 part 'database.g.dart';
 
@@ -142,8 +141,10 @@ class Settings extends Table {
   tables: [Identity, TransferSessions, SessionFiles, TrustedDevices, Settings],
 )
 class AppDatabase extends _$AppDatabase {
-  AppDatabase([QueryExecutor? executor])
-    : super(executor ?? driftDatabase(name: 'crossdrop'));
+  /// The app passes `driftDatabase(name: 'crossdrop')` (see
+  /// `databaseProvider`); tests and the dev CLI pass an in-memory database.
+  /// No Flutter import here, so the core runs under plain `dart`.
+  AppDatabase(super.executor);
 
   @override
   int get schemaVersion => 3;
