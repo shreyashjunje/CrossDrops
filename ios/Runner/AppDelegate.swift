@@ -5,6 +5,7 @@ import UIKit
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private var localNetwork: LocalNetworkChannel?
+  private var storage: StorageChannel?
 
   override func application(
     _ application: UIApplication,
@@ -17,6 +18,52 @@ import UIKit
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "LocalNetworkChannel") {
       localNetwork = LocalNetworkChannel(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "StorageChannel") {
+      storage = StorageChannel(messenger: registrar.messenger())
+    }
+  }
+}
+
+/// Platform channel `crossdrop/storage` (Dart side:
+/// lib/platform/free_space.dart).
+///
+/// - `freeBytes {path}` -> Int: space available for user-initiated saves on
+///   the volume holding `path` (counts purgeable caches, like Files does).
+final class StorageChannel {
+  private let channel: FlutterMethodChannel
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "crossdrop/storage", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "freeBytes" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      guard let path = (call.arguments as? [String: Any])?["path"] as? String else {
+        result(FlutterError(code: "bad_args", message: "path missing", details: nil))
+        return
+      }
+      // The folder may not exist yet; its nearest existing parent is on the
+      // same volume.
+      var url = URL(fileURLWithPath: path)
+      while !FileManager.default.fileExists(atPath: url.path) && url.path != "/" {
+        url.deleteLastPathComponent()
+      }
+      do {
+        let values = try url.resourceValues(forKeys: [
+          .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
+        ])
+        if let important = values.volumeAvailableCapacityForImportantUsage, important > 0 {
+          result(NSNumber(value: important))
+        } else if let plain = values.volumeAvailableCapacity {
+          result(NSNumber(value: plain))
+        } else {
+          result(nil)
+        }
+      } catch {
+        result(FlutterError(code: "query_failed", message: nil, details: nil))
+      }
     }
   }
 }
