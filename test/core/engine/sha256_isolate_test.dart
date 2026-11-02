@@ -24,6 +24,29 @@ void main() {
   });
   tearDown(() => dir.deleteSync(recursive: true));
 
+  group('BackgroundFileHash', () {
+    test('hashes the whole file', () async {
+      final h = BackgroundFileHash.start(path, data.length);
+      expect(await h.digest, sha256.convert(data).toString());
+    });
+
+    test('abort fails the digest and releases the file', () async {
+      final h = BackgroundFileHash.start(path, data.length);
+      await h.abort();
+      await expectLater(h.digest, throwsA(isA<StateError>()));
+      // On Windows this fails while the worker still has the file open.
+      File(path).deleteSync();
+    });
+
+    test('close then abort does not hang', () async {
+      final hasher = await Sha256Isolate.spawn();
+      await hasher.addFilePrefix(path, data.length);
+      final digest = hasher.close();
+      hasher.abort();
+      await expectLater(digest, throwsA(isA<StateError>()));
+    });
+  });
+
   test('empty input gives the SHA-256 of nothing', () async {
     final h = await Sha256Isolate.spawn();
     expect(await h.close(), sha256.convert(const []).toString());

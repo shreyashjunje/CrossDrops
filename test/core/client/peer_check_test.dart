@@ -5,6 +5,9 @@ import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/ephemeral_identity.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
+import 'package:crossdrop/core/storage/database.dart';
+import 'package:crossdrop/core/storage/transfer_repository.dart';
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -26,6 +29,8 @@ void main() {
         securityContext: identity.serverContext(),
         tempDir: p.join(root.path, 'tmp'),
         saveDir: p.join(root.path, 'save'),
+        repository: TransferRepository(AppDatabase(NativeDatabase.memory())),
+        decider: (_) async => true,
         address: InternetAddress.loopbackIPv4,
       );
 

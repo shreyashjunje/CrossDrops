@@ -8,6 +8,7 @@ import '../engine/chunked_reader.dart';
 import '../log.dart';
 import '../engine/sha256_isolate.dart';
 import '../engine/speed_meter.dart';
+import '../protocol/events.dart';
 import '../protocol/models.dart';
 
 class TransferProgress {
@@ -27,12 +28,21 @@ class TransferProgress {
 }
 
 class UploadException implements Exception {
-  const UploadException(this.code, this.message, {this.statusCode});
+  const UploadException(
+    this.code,
+    this.message, {
+    this.statusCode,
+    this.details = const {},
+  });
 
-  /// One of [ErrorCodes], or `network` / `cancelled` / `bad_response`.
+  /// One of [ErrorCodes], or `network` / `stalled` / `cancelled` /
+  /// `bad_response`.
   final String code;
   final String message;
   final int? statusCode;
+
+  /// The receiver's whole error body (`receivedBytes`, `retry`, ...).
+  final Map<String, Object?> details;
 
   bool get isCancelled => code == 'cancelled';
 
@@ -56,7 +66,38 @@ class UploadTarget {
   final int size;
 }
 
-/// HTTPS client for the sender side (protocol v1, Phase 1 subset).
+/// The receiver's event WebSocket for one session.
+class EventConnection {
+  EventConnection._(this._ws)
+    : events = _ws
+          .where((m) => m is String)
+          .map((m) {
+            try {
+              return SessionEvent.fromJson(jsonDecode(m as String));
+            } on FormatException {
+              return null;
+            } on FormatError {
+              return null;
+            }
+          })
+          .where((e) => e != null)
+          .cast<SessionEvent>();
+
+  final WebSocket _ws;
+
+  /// Ends when the socket closes. Bad or unknown messages are skipped.
+  final Stream<SessionEvent> events;
+
+  Future<void> close() async {
+    try {
+      await _ws.close().timeout(const Duration(seconds: 2));
+    } on Object {
+      // Peer gone.
+    }
+  }
+}
+
+/// HTTPS client for the sender side (protocol v1).
 class UploadClient {
   UploadClient({
     required this.host,
@@ -101,7 +142,48 @@ class UploadClient {
   Future<DeviceInfo> info() async =>
       DeviceInfo.fromJson(await _requestJson('GET', '/v1/info'));
 
-  /// Offers one file and returns its upload target.
+  /// `POST /v1/sessions`. The session starts as `offered`; wait for the
+  /// `accepted` event before sending bytes.
+  Future<SessionCreated> offer(SessionOffer offer) async =>
+      SessionCreated.fromJson(
+        await _requestJson('POST', '/v1/sessions', offer.toJson()),
+      );
+
+  /// `GET /v1/sessions/{id}`.
+  Future<SessionStatusReply> sessionStatus(String sessionId) async =>
+      SessionStatusReply.fromJson(
+        await _requestJson('GET', '/v1/sessions/$sessionId'),
+      );
+
+  /// `DELETE /v1/sessions/{id}`: cancel from the sender's side.
+  Future<SessionStatusReply> cancelSession(String sessionId) async =>
+      SessionStatusReply.fromJson(
+        await _requestJson('DELETE', '/v1/sessions/$sessionId'),
+      );
+
+  /// Opens `WS /v1/sessions/{id}/events`.
+  Future<EventConnection> openEvents(String sessionId) async {
+    final url = _url('/v1/sessions/$sessionId/events').replace(scheme: 'wss');
+    try {
+      final ws = await WebSocket.connect(
+        url.toString(),
+        customClient: _http,
+      ).timeout(connectTimeout);
+      ws.pingInterval = const Duration(seconds: 10);
+      return EventConnection._(ws);
+    } on TimeoutException {
+      throw const UploadException('network', 'event socket timed out');
+    } on WebSocketException catch (e) {
+      throw UploadException('network', e.message);
+    } on SocketException catch (e) {
+      throw UploadException('network', e.message);
+    } on HttpException catch (e) {
+      throw UploadException('network', e.message);
+    }
+  }
+
+  /// Offers one file, waits until the receiver accepts, and returns its
+  /// upload target. For tools and tests; the app uses SendSession.
   Future<UploadTarget> offerFile(
     String path, {
     String? name,
@@ -110,17 +192,37 @@ class UploadClient {
       name: 'CrossDrop',
       platform: 'unknown',
     ),
+    Duration acceptTimeout = const Duration(seconds: 75),
   }) async {
     final size = await File(path).length();
     const fileId = 'f1';
-    final offer = SessionOffer(
-      sender: sender,
-      files: [
-        FileOffer(fileId: fileId, name: name ?? p.basename(path), size: size),
-      ],
+    final created = await offer(
+      SessionOffer(
+        sender: sender,
+        files: [
+          FileOffer(fileId: fileId, name: name ?? p.basename(path), size: size),
+        ],
+      ),
     );
-    final body = await _requestJson('POST', '/v1/sessions', offer.toJson());
-    final created = SessionCreated.fromJson(body);
+    final deadline = DateTime.now().add(acceptTimeout);
+    while (true) {
+      final s = await sessionStatus(created.sessionId);
+      if (s.status == SessionStatus.offered) {
+        if (DateTime.now().isAfter(deadline)) {
+          throw const UploadException('timeout', 'no answer from receiver');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        continue;
+      }
+      if (s.status.isTerminal) {
+        throw UploadException(
+          ErrorCodes.sessionClosed,
+          'receiver answered ${s.status.name}',
+          details: {'status': s.status.name, 'reason': s.reason},
+        );
+      }
+      break;
+    }
     return UploadTarget(
       sessionId: created.sessionId,
       fileId: fileId,
@@ -135,49 +237,73 @@ class UploadClient {
   /// Sends the file from wherever the receiver stopped, then asks it to
   /// verify the SHA-256 and save. Use the same call to resume.
   ///
+  /// [hash] is the whole file's hash, running in the background; pass the
+  /// same one again when resuming so the file is not hashed twice.
   /// Returns the SHA-256 of the whole file.
   Future<String> transfer(
     UploadTarget t, {
     void Function(TransferProgress)? onProgress,
+    BackgroundFileHash? hash,
   }) async {
     _cancelled = false;
-    String? sha;
-    for (var attempt = 1; sha == null; attempt++) {
-      final status = await fileStatus(t);
-      if (status.status == 'saved') {
-        throw const UploadException(
-          ErrorCodes.alreadySaved,
-          'receiver already has this file',
-        );
+    final ownHash = hash == null;
+    final h = hash ?? BackgroundFileHash.start(t.path, t.size);
+    try {
+      for (var attempt = 1; ; attempt++) {
+        final status = await fileStatus(t);
+        if (status.status == FileTransferStatus.saved.name) {
+          throw const UploadException(
+            ErrorCodes.alreadySaved,
+            'receiver already has this file',
+          );
+        }
+        if (status.status == FileTransferStatus.failed.name) {
+          throw const UploadException(ErrorCodes.fileFailed, 'file failed');
+        }
+        if (status.receivedBytes == t.size) break;
+        try {
+          await put(t, status.receivedBytes, onProgress: onProgress);
+          break;
+        } on UploadException catch (e) {
+          // A previous, interrupted PUT may still be finishing on the server.
+          final retry =
+              e.code == ErrorCodes.busy || e.code == ErrorCodes.offsetMismatch;
+          if (!retry || attempt >= 5) rethrow;
+          await Future<void>.delayed(Duration(milliseconds: 200 * attempt));
+        }
       }
-      try {
-        sha = await _put(t, status.receivedBytes, onProgress);
-      } on UploadException catch (e) {
-        // A previous, interrupted PUT may still be finishing on the server.
-        final retry =
-            e.code == ErrorCodes.busy || e.code == ErrorCodes.offsetMismatch;
-        if (!retry || attempt >= 5) rethrow;
-        await Future<void>.delayed(Duration(milliseconds: 200 * attempt));
-      }
+      final sha = await h.digest;
+      await complete(t, sha);
+      return sha;
+    } finally {
+      if (ownHash) await h.abort();
     }
+  }
+
+  /// `POST .../complete` with the file's SHA-256.
+  ///
+  /// Throws [UploadException] with `hash_mismatch` (details `retry: true`:
+  /// the receiver restarted the file from zero) or `file_failed`.
+  Future<void> complete(UploadTarget t, String sha) async {
     await _requestJson(
       'POST',
       '${_filePath(t)}/complete',
       CompleteRequest(sha256: sha).toJson(),
-      // The receiver may have to hash the whole file from disk.
-      const Duration(minutes: 2),
+      // After a restart the receiver hashes the whole file from disk.
+      // Allow for a slow phone: 2 minutes plus 1 s per 20 MB.
+      Duration(minutes: 2, seconds: t.size ~/ (20 * 1000 * 1000)),
     );
     _log('file ${t.fileId}: verified and saved by receiver');
-    return sha;
   }
 
-  Future<String> _put(
+  /// `PUT .../files/{fileId}?offset=N`: streams bytes [offset, size) and
+  /// returns the receiver's status once all of them arrived.
+  Future<FileStatus> put(
     UploadTarget t,
-    int offset,
+    int offset, {
     void Function(TransferProgress)? onProgress,
-  ) async {
+  }) async {
     _log('file ${t.fileId}: sending from $offset of ${t.size}');
-    final hasher = await Sha256Isolate.spawn();
     final meter = SpeedMeter()..add(offset);
     var sent = offset;
     // Completes with an error on stall or cancel. Every wait on the socket
@@ -193,8 +319,6 @@ class UploadClient {
 
     try {
       _checkCancelled();
-      // Rebuild the hash of bytes the receiver already has, from disk.
-      await hasher.addFilePrefix(t.path, offset);
       final HttpClientResponse res;
       try {
         kick();
@@ -209,7 +333,6 @@ class UploadClient {
           start: offset,
           end: t.size,
         )) {
-          await guarded(hasher.add(chunk));
           req.add(chunk);
           // At most one chunk waits in the socket buffer.
           await guarded(req.flush());
@@ -228,6 +351,9 @@ class UploadClient {
         res = await guarded(req.close());
       } on UploadException {
         rethrow;
+      } on FileSystemException catch (e) {
+        // The source file, not the network.
+        throw UploadException('source_unreadable', e.message);
       } on Exception catch (e) {
         _checkCancelled();
         throw UploadException('network', e.toString());
@@ -236,17 +362,16 @@ class UploadClient {
         _active = null;
         _abort = null;
       }
-      final json = await _decode(res);
-      final status = FileStatus.fromJson(json);
+      final status = FileStatus.fromJson(await _decode(res));
       if (status.receivedBytes != t.size) {
         throw UploadException(
           ErrorCodes.incomplete,
           'receiver has ${status.receivedBytes} of ${t.size} bytes',
+          details: {'receivedBytes': status.receivedBytes},
         );
       }
-      return await hasher.close();
+      return status;
     } catch (e) {
-      hasher.abort();
       // Error code or type only: messages can contain file paths.
       final reason = e is UploadException ? e.code : e.runtimeType;
       _log('file ${t.fileId}: stopped at $sent bytes ($reason)');
@@ -328,10 +453,13 @@ class UploadClient {
       );
     }
     if (res.statusCode != 200) {
+      final code = json['error'];
+      final message = json['message'];
       throw UploadException(
-        json['error'] as String? ?? 'http_${res.statusCode}',
-        json['message'] as String? ?? '',
+        code is String ? code : 'http_${res.statusCode}',
+        message is String ? message : '',
         statusCode: res.statusCode,
+        details: json,
       );
     }
     return json;

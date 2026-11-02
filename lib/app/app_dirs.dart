@@ -3,7 +3,10 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
-/// Folders used in Phase 1.
+/// Where partial and received files live.
+///
+/// Partial files: `<app support>/crossdrop_incoming/<sessionId>/`, kept
+/// across restarts for resume and removed by the 24-hour cleanup.
 ///
 /// Received files are saved in an app folder, not the gallery or Downloads
 /// (that comes with the platform modules in a later phase):
@@ -18,7 +21,9 @@ class AppDirs {
   final String received;
 
   static Future<AppDirs> resolve() async {
-    final temp = await getTemporaryDirectory();
+    // Not the OS temp or cache folder: both may be purged while the app is
+    // closed, which would lose partial files a sender wants to resume.
+    final support = await getApplicationSupportDirectory();
     Directory base;
     if (Platform.isAndroid) {
       base =
@@ -28,7 +33,7 @@ class AppDirs {
       base = await getApplicationDocumentsDirectory();
     }
     return AppDirs(
-      incomingTemp: p.join(temp.path, 'crossdrop_incoming'),
+      incomingTemp: p.join(support.path, 'crossdrop_incoming'),
       received: p.join(base.path, 'CrossDrop'),
     );
   }

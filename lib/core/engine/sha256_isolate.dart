@@ -19,6 +19,7 @@ class Sha256Isolate {
     this._fromWorker,
     Stream<Object?> messages,
     this.maxInFlight,
+    this.exited,
   ) {
     messages.listen(_onMessage);
   }
@@ -27,6 +28,9 @@ class Sha256Isolate {
   final SendPort _toWorker;
   final ReceivePort _fromWorker;
   final int maxInFlight;
+
+  /// Completes when the worker isolate has stopped and released its files.
+  final Future<void> exited;
 
   int _inFlight = 0;
   Completer<void>? _slot;
@@ -37,11 +41,14 @@ class Sha256Isolate {
 
   static Future<Sha256Isolate> spawn({int maxInFlight = 4}) async {
     final fromWorker = ReceivePort();
+    final exitPort = ReceivePort();
     final isolate = await Isolate.spawn(
       _workerMain,
       fromWorker.sendPort,
       debugName: 'sha256',
+      onExit: exitPort.sendPort,
     );
+    final exited = exitPort.first.then((_) => exitPort.close());
     // The first message is the worker's SendPort; the rest go to _onMessage.
     // The worker sends nothing else until it receives work.
     final messages = fromWorker.asBroadcastStream();
@@ -52,6 +59,7 @@ class Sha256Isolate {
       fromWorker,
       messages,
       maxInFlight,
+      exited,
     );
   }
 
@@ -128,6 +136,13 @@ class Sha256Isolate {
     final slot = _slot;
     _slot = null;
     slot?.complete();
+    // A close() already waiting would otherwise never finish.
+    final digest = _digest;
+    _digest = null;
+    if (digest != null && !digest.isCompleted) {
+      digest.future.ignore();
+      digest.completeError(StateError('hasher aborted'));
+    }
     _dispose();
   }
 
@@ -140,6 +155,56 @@ class Sha256Isolate {
   void _dispose() {
     _fromWorker.close();
     _isolate.kill(priority: Isolate.immediate);
+  }
+}
+
+/// SHA-256 of bytes [0, length) of a file, read and hashed in a background
+/// isolate at its own pace.
+///
+/// The sender runs one per file alongside the upload, so a resume never has
+/// to re-read the bytes already sent before continuing.
+class BackgroundFileHash {
+  BackgroundFileHash._(this._done);
+
+  final Completer<String> _done;
+  Sha256Isolate? _hasher;
+  bool _aborted = false;
+  late final Future<void> _running;
+
+  static BackgroundFileHash start(String path, int length) {
+    final h = BackgroundFileHash._(Completer<String>());
+    h._running = h._run(path, length);
+    return h;
+  }
+
+  Future<void> _run(String path, int length) async {
+    try {
+      final hasher = _hasher = await Sha256Isolate.spawn(maxInFlight: 1);
+      if (_aborted) return hasher.abort();
+      await hasher.addFilePrefix(path, length);
+      final digest = await hasher.close();
+      if (!_done.isCompleted) _done.complete(digest);
+    } catch (e, st) {
+      if (!_done.isCompleted && !_aborted) _done.completeError(e, st);
+    }
+  }
+
+  /// Lowercase hex digest. Fails if the file could not be read.
+  Future<String> get digest => _done.future;
+
+  /// Stops hashing. [digest] then fails with a [StateError]. Completes
+  /// once the worker has exited and closed the file.
+  Future<void> abort() async {
+    if (!_aborted) {
+      _aborted = true;
+      _hasher?.abort();
+      if (!_done.isCompleted) {
+        _done.future.ignore();
+        _done.completeError(StateError('hash aborted'));
+      }
+    }
+    await _running;
+    await _hasher?.exited.timeout(const Duration(seconds: 2), onTimeout: () {});
   }
 }
 

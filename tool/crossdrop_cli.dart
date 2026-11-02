@@ -4,7 +4,8 @@
 //   dart run tool/crossdrop_cli.dart receive [--port 8443] [--dir received]
 //   dart run tool/crossdrop_cli.dart send <ip> <port> <file>
 //
-// Phase 1 only: the client accepts any certificate (see D-011).
+// The client accepts any certificate until Phase 4 (see D-011), and the
+// receiver accepts every offer without asking.
 import 'dart:async';
 import 'dart:io';
 
@@ -14,7 +15,10 @@ import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_identity.dart';
 import 'package:crossdrop/core/security/ephemeral_identity.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
+import 'package:crossdrop/core/storage/database.dart';
+import 'package:crossdrop/core/storage/transfer_repository.dart';
 import 'package:crypto/crypto.dart';
+import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
 
 Future<void> main(List<String> args) async {
@@ -56,6 +60,13 @@ Future<void> _receive(List<String> args) async {
     securityContext: identity.serverContext(),
     tempDir: tempDir,
     saveDir: saveDir,
+    // A throwaway database: the CLI keeps no history.
+    repository: TransferRepository(AppDatabase(NativeDatabase.memory())),
+    // Dev tool on your own computer: accept every offer, and say so.
+    decider: (offer) async {
+      stdout.writeln('Accepting ${offer.files.length} file(s) automatically.');
+      return true;
+    },
     port: port,
   );
   stdout.writeln('Receiving on port ${server.port}. Saving to $saveDir');
@@ -73,7 +84,7 @@ Future<void> _receive(List<String> args) async {
   var lastPrint = Stopwatch()..start();
   await for (final e in server.events) {
     switch (e) {
-      case SessionStarted(:final files):
+      case SessionOffered(:final files):
         stdout.writeln(
           'Incoming: ${files.length} file(s), '
           '${files.first.size} bytes',
@@ -97,6 +108,12 @@ Future<void> _receive(List<String> args) async {
         );
       case FileFailed(:final code):
         stdout.writeln('\nFailed: $code');
+      case SessionStateChanged(:final status, :final reason):
+        stdout.writeln(
+          '\nSession ${status.name}${reason == null ? '' : ' ($reason)'}',
+        );
+      case OfferRefused(:final reason):
+        stdout.writeln('Refused an offer: $reason');
     }
   }
 }

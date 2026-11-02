@@ -1,35 +1,30 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:crossdrop/core/protocol/events.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/ephemeral_identity.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
+import 'package:crossdrop/core/storage/transfer_repository.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
+import '../../support/test_receiver.dart';
+
 void main() {
   late EphemeralIdentity identity;
-  late Directory root;
-  late ReceiveServer server;
+  late TestReceiver r;
   late HttpClient http;
 
   setUpAll(() async => identity = await EphemeralIdentity.generate());
 
   setUp(() async {
-    root = Directory.systemTemp.createTempSync('cd_server');
-    server = await ReceiveServer.start(
-      info: const DeviceInfo(
-        id: '00000000-0000-4000-8000-000000000000',
-        name: 'Test receiver',
-        platform: 'android',
-      ),
-      securityContext: identity.serverContext(),
-      tempDir: p.join(root.path, 'tmp'),
-      saveDir: p.join(root.path, 'save'),
-      address: InternetAddress.loopbackIPv4,
+    r = await TestReceiver.start(
+      identity: identity,
       bodyIdleTimeout: const Duration(seconds: 2),
     );
     http = HttpClient()..badCertificateCallback = (_, _, _) => true;
@@ -37,11 +32,10 @@ void main() {
 
   tearDown(() async {
     http.close(force: true);
-    await server.close();
-    root.deleteSync(recursive: true);
+    await r.close();
   });
 
-  Uri url(String path) => Uri.parse('https://127.0.0.1:${server.port}$path');
+  Uri url(String path) => Uri.parse('https://127.0.0.1:${r.port}$path');
 
   Future<(int, Map<String, Object?>)> send(
     String method,
@@ -49,18 +43,13 @@ void main() {
     Object? json,
     List<int>? bytes,
     bool chunked = false,
-    int? contentLength,
   }) async {
     final req = await http.openUrl(method, url(path));
     if (json != null) {
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(json));
     } else if (bytes != null) {
-      if (contentLength != null) {
-        req.contentLength = contentLength;
-      } else if (!chunked) {
-        req.contentLength = bytes.length;
-      }
+      if (!chunked) req.contentLength = bytes.length;
       req.add(bytes);
     }
     final res = await req.close();
@@ -68,17 +57,86 @@ void main() {
     return (res.statusCode, jsonDecode(text) as Map<String, Object?>);
   }
 
-  Future<String> createSession(String name, int size) async {
+  Map<String, Object?> offerJson(
+    List<FileOffer> files, {
+    SenderInfo sender = testSender,
+  }) => SessionOffer(sender: sender, files: files).toJson();
+
+  Future<SessionStatus> statusOf(String sid) async {
+    final (_, body) = await send('GET', '/v1/sessions/$sid');
+    return SessionStatusReply.fromJson(body).status;
+  }
+
+  /// Offers files and waits until the (auto-accepting) receiver accepts.
+  Future<String> createSession(
+    String name,
+    int size, {
+    List<FileOffer>? files,
+    SenderInfo sender = testSender,
+  }) async {
     final (code, body) = await send(
       'POST',
       '/v1/sessions',
-      json: SessionOffer(
-        sender: const SenderInfo(id: 's', name: 'test', platform: 'android'),
-        files: [FileOffer(fileId: 'f1', name: name, size: size)],
-      ).toJson(),
+      json: offerJson(
+        files ?? [FileOffer(fileId: 'f1', name: name, size: size)],
+        sender: sender,
+      ),
     );
-    expect(code, 200);
-    return body['sessionId']! as String;
+    expect(code, 200, reason: '$body');
+    expect(body['status'], 'offered');
+    final sid = body['sessionId']! as String;
+    final end = DateTime.now().add(const Duration(seconds: 5));
+    while (await statusOf(sid) == SessionStatus.offered) {
+      if (DateTime.now().isAfter(end)) break;
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    return sid;
+  }
+
+  Future<List<SessionEvent>> collectEvents(
+    String sid,
+    int count, {
+    Future<void> Function()? during,
+  }) async {
+    final ws = await WebSocket.connect(
+      'wss://127.0.0.1:${r.port}/v1/sessions/$sid/events',
+      customClient: http,
+    );
+    final got = <SessionEvent>[];
+    final done = Completer<void>();
+    ws.listen(
+      (m) {
+        final e = SessionEvent.fromJson(jsonDecode(m as String));
+        if (e != null) got.add(e);
+        if (got.length >= count && !done.isCompleted) done.complete();
+      },
+      onDone: () {
+        if (!done.isCompleted) done.complete();
+      },
+    );
+    await during?.call();
+    await done.future.timeout(const Duration(seconds: 10));
+    await ws.close();
+    return got;
+  }
+
+  /// Sends [sent] of [declared] bytes on a raw TLS socket, then drops it:
+  /// a Wi-Fi drop mid-upload.
+  Future<void> partialPut(String path, List<int> sent, int declared) async {
+    final socket = await SecureSocket.connect(
+      '127.0.0.1',
+      r.port,
+      onBadCertificate: (_) => true,
+    );
+    socket.write(
+      'PUT $path HTTP/1.1\r\nhost: 127.0.0.1\r\n'
+      'content-length: $declared\r\n'
+      'content-type: application/octet-stream\r\n\r\n',
+    );
+    socket.add(sent);
+    await socket.flush();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    socket.destroy();
   }
 
   Uint8List randomBytes(int n) {
@@ -86,189 +144,694 @@ void main() {
     return Uint8List.fromList(List.generate(n, (_) => rnd.nextInt(256)));
   }
 
+  String shaOf(List<int> data) => sha256.convert(data).toString();
+
   test('GET /v1/info returns id, name, platform and versions', () async {
     final (code, body) = await send('GET', '/v1/info');
     expect(code, 200);
     final info = DeviceInfo.fromJson(body);
-    expect(info.id, '00000000-0000-4000-8000-000000000000');
-    expect(info.name, 'Test receiver');
-    expect(info.platform, 'android');
-    expect(info.versions, [protocolVersion]);
+    expect(info.id, testDeviceInfo.id);
+    expect(info.versions, supportedVersions);
   });
 
-  test('full flow: offer, put, status, complete', () async {
-    final data = randomBytes(3 * 1024 * 1024 + 5);
-    final sid = await createSession('photo.jpg', data.length);
-    final files = '/v1/sessions/$sid/files/f1';
+  group('offer and accept', () {
+    test('POST returns offered; bytes are refused until Accept', () async {
+      final decision = Completer<bool>();
+      r.decider = (_) => decision.future;
+      final (code, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([const FileOffer(fileId: 'f1', name: 'a', size: 3)]),
+      );
+      expect(code, 200);
+      expect(body['status'], 'offered');
+      final sid = body['sessionId']! as String;
+      expect(r.events.whereType<SessionOffered>().single.sessionId, sid);
 
-    var (code, body) = await send('GET', files);
-    expect(body['receivedBytes'], 0);
+      final (put, err) = await send(
+        'PUT',
+        '/v1/sessions/$sid/files/f1?offset=0',
+        bytes: [1, 2, 3],
+      );
+      expect(put, 403);
+      expect(err['error'], ErrorCodes.notAccepted);
 
-    (code, body) = await send('PUT', '$files?offset=0', bytes: data);
-    expect(code, 200);
-    expect(body['receivedBytes'], data.length);
+      final events = collectEvents(
+        sid,
+        1,
+        during: () async => decision.complete(true),
+      );
+      expect((await events).single, isA<AcceptedEvent>());
+      expect(await statusOf(sid), SessionStatus.accepted);
+    });
 
-    (code, body) = await send(
-      'POST',
-      '$files/complete',
-      json: {'sha256': sha256.convert(data).toString()},
-    );
-    expect(code, 200, reason: '$body');
-    expect(body['status'], 'saved');
+    test('decline sends rejected and closes the session', () async {
+      r.decider = (_) async => false;
+      final sid = await createSession('a', 3);
+      expect(await statusOf(sid), SessionStatus.rejected);
+      final events = await collectEvents(sid, 1);
+      expect((events.single as RejectedEvent).reason, RejectReasons.declined);
+      final (code, body) = await send(
+        'PUT',
+        '/v1/sessions/$sid/files/f1?offset=0',
+        bytes: [1, 2, 3],
+      );
+      expect(code, 410);
+      expect(body['error'], ErrorCodes.sessionClosed);
+    });
 
-    final saved = File(p.join(root.path, 'save', 'photo.jpg'));
-    expect(saved.readAsBytesSync(), data);
-    expect(
-      File(p.join(root.path, 'tmp', sid, 'f1.part')).existsSync(),
-      isFalse,
-    );
+    test('no answer within the accept timeout rejects with timeout', () async {
+      await r.close();
+      r = await TestReceiver.start(
+        identity: identity,
+        acceptTimeout: const Duration(milliseconds: 200),
+        decider: (_) => Completer<bool>().future,
+      );
+      final sid = await createSession('a', 3);
+      final reply = SessionStatusReply.fromJson(
+        (await send('GET', '/v1/sessions/$sid')).$2,
+      );
+      expect(reply.status, SessionStatus.rejected);
+      expect(reply.reason, RejectReasons.timeout);
+    });
+
+    test('not enough free space is refused before the prompt', () async {
+      r.freeBytes = 10 * mb;
+      var asked = false;
+      r.decider = (_) async => asked = true;
+      final (code, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([
+          FileOffer(fileId: 'f1', name: 'big.mov', size: 20 * mb),
+        ]),
+      );
+      expect(code, 507);
+      expect(body['error'], ErrorCodes.noSpace);
+      expect(body['neededBytes'], 20 * mb);
+      expect(asked, isFalse);
+      expect(r.events.whereType<OfferRefused>().single.reason, 'no_space');
+    });
+
+    test('free space is checked again when the user accepts', () async {
+      r.freeBytes = 1000 * mb;
+      final decision = Completer<bool>();
+      r.decider = (_) => decision.future;
+      final (_, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([
+          FileOffer(fileId: 'f1', name: 'big.mov', size: 500 * mb),
+        ]),
+      );
+      final sid = body['sessionId']! as String;
+      r.freeBytes = 100 * mb; // filled up while the prompt was open
+      decision.complete(true);
+      await waitFor(() => r.server.sessions.single.status.isTerminal);
+      final reply = SessionStatusReply.fromJson(
+        (await send('GET', '/v1/sessions/$sid')).$2,
+      );
+      expect(reply.status, SessionStatus.rejected);
+      expect(reply.reason, RejectReasons.noSpace);
+    });
+
+    test('one unfinished session per sender', () async {
+      await createSession('a', 10);
+      final (code, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([const FileOffer(fileId: 'f1', name: 'b', size: 1)]),
+      );
+      expect(code, 409);
+      expect(body['error'], ErrorCodes.senderBusy);
+      // Another sender is fine.
+      await createSession(
+        'c',
+        1,
+        sender: const SenderInfo(id: 'other', name: 'x', platform: 'android'),
+      );
+    });
+
+    test('a finished session frees the sender', () async {
+      final sid = await createSession('a', 0);
+      await send(
+        'POST',
+        '/v1/sessions/$sid/files/f1/complete',
+        json: {'sha256': shaOf(const [])},
+      );
+      expect(await statusOf(sid), SessionStatus.done);
+      await createSession('b', 0);
+    });
+
+    test('unsupported protocol version and bad offers', () async {
+      var (code, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: {
+          ...offerJson([]),
+          'protocol': 99,
+          'files': [
+            {'fileId': 'f1', 'name': 'a', 'size': 1},
+          ],
+        },
+      );
+      expect(code, 400);
+      expect(body['error'], ErrorCodes.unsupportedVersion);
+      expect(body['versions'], supportedVersions);
+      (code, body) = await send('POST', '/v1/sessions', json: {'protocol': 1});
+      expect(code, 400);
+      expect(body['error'], ErrorCodes.badRequest);
+      (code, body) = await send('GET', '/v1/sessions/nope/files/f1');
+      expect(code, 404);
+    });
+
+    test('too many open sessions get 503', () async {
+      r.decider = (_) => Completer<bool>().future;
+      for (var i = 0; i < ReceiveServer.maxOpenSessions; i++) {
+        final (code, _) = await send(
+          'POST',
+          '/v1/sessions',
+          json: offerJson([
+            const FileOffer(fileId: 'f1', name: 'a', size: 1),
+          ], sender: SenderInfo(id: 's$i', name: 'x', platform: 'ios')),
+        );
+        expect(code, 200);
+      }
+      final (code, _) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([
+          const FileOffer(fileId: 'f1', name: 'a', size: 1),
+        ], sender: const SenderInfo(id: 'late', name: 'x', platform: 'ios')),
+      );
+      expect(code, 503);
+    });
   });
 
-  test('resume in two PUTs gives the right hash', () async {
-    final data = randomBytes(2 * 1024 * 1024 + 77);
-    final sid = await createSession('a.bin', data.length);
-    final files = '/v1/sessions/$sid/files/f1';
-    const half = 1024 * 1024 + 3;
+  group('bytes', () {
+    test('full flow: put, status, complete', () async {
+      final data = randomBytes(3 * mb + 5);
+      final sid = await createSession('photo.jpg', data.length);
+      final files = '/v1/sessions/$sid/files/f1';
 
-    var (code, _) = await send(
-      'PUT',
-      '$files?offset=0',
-      bytes: data.sublist(0, half),
+      var (code, body) = await send('GET', files);
+      expect(body['receivedBytes'], 0);
+      expect(body['status'], 'pending');
+
+      (code, body) = await send('PUT', '$files?offset=0', bytes: data);
+      expect(code, 200);
+      expect(body['receivedBytes'], data.length);
+
+      (code, body) = await send(
+        'POST',
+        '$files/complete',
+        json: {'sha256': shaOf(data)},
+      );
+      expect(code, 200, reason: '$body');
+      expect(body['status'], 'saved');
+
+      final saved = File(p.join(r.saveDir, 'photo.jpg'));
+      expect(saved.readAsBytesSync(), data);
+      expect(Directory(p.join(r.tempDir, sid)).existsSync(), isFalse);
+      expect(await statusOf(sid), SessionStatus.done);
+      final stored = await r.repo.find(sid, TransferDirection.receive);
+      expect(stored!.status, SessionStatus.done);
+      expect(stored.files.single.sha256, shaOf(data));
+    });
+
+    test('resume in two PUTs gives the right hash', () async {
+      final data = randomBytes(2 * mb + 77);
+      final sid = await createSession('a.bin', data.length);
+      final files = '/v1/sessions/$sid/files/f1';
+      const half = mb + 3;
+      var (code, _) = await send(
+        'PUT',
+        '$files?offset=0',
+        bytes: data.sublist(0, half),
+      );
+      expect(code, 200);
+      (code, _) = await send(
+        'PUT',
+        '$files?offset=$half',
+        bytes: data.sublist(half),
+      );
+      expect(code, 200);
+      final (c, body) = await send(
+        'POST',
+        '$files/complete',
+        json: {'sha256': shaOf(data)},
+      );
+      expect(c, 200, reason: '$body');
+    });
+
+    test('wrong offset returns 409 with receivedBytes', () async {
+      final sid = await createSession('a.bin', 100);
+      final files = '/v1/sessions/$sid/files/f1';
+      await send('PUT', '$files?offset=0', bytes: List.filled(40, 1));
+      final (code, body) = await send(
+        'PUT',
+        '$files?offset=10',
+        bytes: List.filled(10, 1),
+      );
+      expect(code, 409);
+      expect(body['error'], ErrorCodes.offsetMismatch);
+      expect(body['receivedBytes'], 40);
+    });
+
+    test('Content-Length beyond declared size fails the file', () async {
+      final sid = await createSession('a.bin', 10);
+      final (code, body) = await send(
+        'PUT',
+        '/v1/sessions/$sid/files/f1?offset=0',
+        bytes: List.filled(11, 1),
+      );
+      expect(code, 413);
+      expect(body['error'], ErrorCodes.tooManyBytes);
+      expect(r.events.whereType<FileFailed>().single.code, 'too_many_bytes');
+      // The only file failed, so the session failed.
+      expect(await statusOf(sid), SessionStatus.failed);
+    });
+
+    test(
+      'chunked body beyond declared size is stopped; others go on',
+      () async {
+        final sid = await createSession(
+          '',
+          0,
+          files: const [
+            FileOffer(fileId: 'f1', name: 'liar.bin', size: 10),
+            FileOffer(fileId: 'f2', name: 'ok.bin', size: 3),
+          ],
+        );
+        final (code, body) = await send(
+          'PUT',
+          '/v1/sessions/$sid/files/f1?offset=0',
+          bytes: List.filled(64, 1),
+          chunked: true,
+        );
+        expect(code, 413);
+        expect(body['error'], ErrorCodes.tooManyBytes);
+        expect(File(p.join(r.tempDir, sid, 'f1.part')).existsSync(), isFalse);
+        final (_, s1) = await send('GET', '/v1/sessions/$sid/files/f1');
+        expect(s1['status'], 'failed');
+
+        await send(
+          'PUT',
+          '/v1/sessions/$sid/files/f2?offset=0',
+          bytes: [1, 2, 3],
+        );
+        final (c2, _) = await send(
+          'POST',
+          '/v1/sessions/$sid/files/f2/complete',
+          json: {
+            'sha256': shaOf([1, 2, 3]),
+          },
+        );
+        expect(c2, 200);
+        expect(await statusOf(sid), SessionStatus.done);
+      },
     );
-    expect(code, 200);
-    (code, _) = await send(
-      'PUT',
-      '$files?offset=$half',
-      bytes: data.sublist(half),
-    );
-    expect(code, 200);
-    final (c, body) = await send(
-      'POST',
-      '$files/complete',
-      json: {'sha256': sha256.convert(data).toString()},
-    );
-    expect(c, 200, reason: '$body');
+
+    test('complete before all bytes arrive returns incomplete', () async {
+      final sid = await createSession('a.bin', 100);
+      final files = '/v1/sessions/$sid/files/f1';
+      await send('PUT', '$files?offset=0', bytes: List.filled(50, 1));
+      final (code, body) = await send(
+        'POST',
+        '$files/complete',
+        json: {'sha256': '0' * 64},
+      );
+      expect(code, 409);
+      expect(body['error'], ErrorCodes.incomplete);
+      expect(body['receivedBytes'], 50);
+    });
+
+    test('hostile names are sanitized and stay in the save folder', () async {
+      final names = {
+        '../../evil.sh': 'evil.sh',
+        r'..\..\win.bat': 'win.bat',
+        '/etc/passwd': 'passwd',
+        'CON.txt': '_CON.txt',
+        'a\u0000b\u001fc.jpg': 'a_b_c.jpg',
+        '...': 'file',
+        '${'x' * 300}.jpg': '${'x' * 196}.jpg',
+      };
+      final offers = [
+        for (final (i, n) in names.keys.indexed)
+          FileOffer(fileId: 'f$i', name: n, size: 1),
+      ];
+      final sid = await createSession('', 0, files: offers);
+      for (final f in offers) {
+        await send(
+          'PUT',
+          '/v1/sessions/$sid/files/${f.fileId}?offset=0',
+          bytes: [7],
+        );
+        final (code, body) = await send(
+          'POST',
+          '/v1/sessions/$sid/files/${f.fileId}/complete',
+          json: {
+            'sha256': shaOf([7]),
+          },
+        );
+        expect(code, 200, reason: '${f.name}: $body');
+      }
+      final savedNames = {for (final e in r.saved) p.basename(e.savedPath)};
+      expect(savedNames, names.values.toSet());
+      for (final e in r.saved) {
+        expect(p.isWithin(r.saveDir, e.savedPath), isTrue);
+      }
+    });
+
+    test('empty file can be completed without a PUT', () async {
+      final sid = await createSession('empty.txt', 0);
+      final (code, _) = await send(
+        'POST',
+        '/v1/sessions/$sid/files/f1/complete',
+        json: {'sha256': shaOf(const [])},
+      );
+      expect(code, 200);
+    });
+
+    test('emits progress and saved events', () async {
+      final data = randomBytes(2 * mb);
+      final sid = await createSession('a.bin', data.length);
+      final files = '/v1/sessions/$sid/files/f1';
+      await send('PUT', '$files?offset=0', bytes: data);
+      await send('POST', '$files/complete', json: {'sha256': shaOf(data)});
+      expect(r.events.first, isA<SessionOffered>());
+      expect(
+        r.events.whereType<FileProgress>().last.receivedBytes,
+        data.length,
+      );
+      expect(r.events.whereType<FileSaved>(), hasLength(1));
+    });
   });
 
-  test('wrong offset returns 409 with receivedBytes', () async {
-    final sid = await createSession('a.bin', 100);
-    final files = '/v1/sessions/$sid/files/f1';
-    await send('PUT', '$files?offset=0', bytes: List.filled(40, 1));
-    final (code, body) = await send(
-      'PUT',
-      '$files?offset=10',
-      bytes: List.filled(10, 1),
-    );
-    expect(code, 409);
-    expect(body['error'], ErrorCodes.offsetMismatch);
-    expect(body['receivedBytes'], 40);
+  group('hash mismatch', () {
+    test('first mismatch restarts the file, second fails it', () async {
+      final data = randomBytes(1000);
+      final sid = await createSession('a.bin', data.length);
+      final files = '/v1/sessions/$sid/files/f1';
+
+      await send('PUT', '$files?offset=0', bytes: data);
+      var (code, body) = await send(
+        'POST',
+        '$files/complete',
+        json: {'sha256': '0' * 64},
+      );
+      expect(code, 422);
+      expect(body['error'], ErrorCodes.hashMismatch);
+      expect(body['retry'], isTrue);
+      expect(Directory(r.saveDir).listSync(), isEmpty);
+      final (_, status) = await send('GET', files);
+      expect(status['receivedBytes'], 0);
+      expect(status['status'], 'receiving');
+
+      await send('PUT', '$files?offset=0', bytes: data);
+      (code, body) = await send(
+        'POST',
+        '$files/complete',
+        json: {'sha256': '0' * 64},
+      );
+      expect(code, 422);
+      expect(body['error'], ErrorCodes.fileFailed);
+      expect(body['retry'], isFalse);
+      expect(await statusOf(sid), SessionStatus.failed);
+      final stored = await r.repo.find(sid, TransferDirection.receive);
+      expect(stored!.files.single.hashAttempts, 2);
+      expect(stored.files.single.status, FileTransferStatus.failed);
+    });
+
+    test('a retry after one mismatch can succeed', () async {
+      final data = randomBytes(1000);
+      final sid = await createSession('a.bin', data.length);
+      final files = '/v1/sessions/$sid/files/f1';
+      await send('PUT', '$files?offset=0', bytes: data);
+      await send('POST', '$files/complete', json: {'sha256': '0' * 64});
+      await send('PUT', '$files?offset=0', bytes: data);
+      final (code, _) = await send(
+        'POST',
+        '$files/complete',
+        json: {'sha256': shaOf(data)},
+      );
+      expect(code, 200);
+      expect(await statusOf(sid), SessionStatus.done);
+    });
   });
 
-  test('Content-Length beyond declared size is rejected up front', () async {
-    final sid = await createSession('a.bin', 10);
-    final (code, body) = await send(
-      'PUT',
-      '/v1/sessions/$sid/files/f1?offset=0',
-      bytes: List.filled(11, 1),
+  group('cancel', () {
+    test('sender DELETE while offered withdraws the offer', () async {
+      r.decider = (_) => Completer<bool>().future;
+      final (_, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([const FileOffer(fileId: 'f1', name: 'a', size: 3)]),
+      );
+      final sid = body['sessionId']! as String;
+      final (code, reply) = await send('DELETE', '/v1/sessions/$sid');
+      expect(code, 200);
+      expect(reply['status'], 'cancelled');
+      expect(reply['reason'], 'sender');
+    });
+
+    test(
+      'sender DELETE after accept: cancelled event, parts deleted',
+      () async {
+        final sid = await createSession('a.bin', 100);
+        await send(
+          'PUT',
+          '/v1/sessions/$sid/files/f1?offset=0',
+          bytes: List.filled(40, 1),
+        );
+        expect(File(p.join(r.tempDir, sid, 'f1.part')).existsSync(), isTrue);
+        final events = collectEvents(
+          sid,
+          2,
+          during: () => send('DELETE', '/v1/sessions/$sid'),
+        );
+        final got = await events;
+        expect(got.last, isA<CancelledEvent>());
+        expect((got.last as CancelledEvent).by, 'sender');
+        expect(Directory(p.join(r.tempDir, sid)).existsSync(), isFalse);
+        final (code, body) = await send('GET', '/v1/sessions/$sid/files/f1');
+        expect(code, 410);
+        expect(body['status'], 'cancelled');
+        // Cancelling again is harmless.
+        expect((await send('DELETE', '/v1/sessions/$sid')).$1, 200);
+      },
     );
-    expect(code, 413);
-    expect(body['error'], ErrorCodes.tooManyBytes);
+
+    test('receiver cancel during an upload stops it', () async {
+      final sid = await createSession('a.bin', 64 * mb);
+      final socket = await SecureSocket.connect(
+        '127.0.0.1',
+        r.port,
+        onBadCertificate: (_) => true,
+      );
+      addTearDown(socket.destroy);
+      socket.write(
+        'PUT /v1/sessions/$sid/files/f1?offset=0 HTTP/1.1\r\n'
+        'host: x\r\ncontent-length: ${64 * mb}\r\n\r\n',
+      );
+      socket.add(Uint8List(2 * mb));
+      await socket.flush();
+      await waitFor(() => r.server.isReceiving);
+      await waitFor(
+        () => r.events.whereType<FileProgress>().isNotEmpty,
+        reason: 'first bytes',
+      );
+      // Keep sending while the receiver cancels.
+      final pump = () async {
+        for (var i = 0; i < 20; i++) {
+          try {
+            socket.add(Uint8List(mb));
+            await socket.flush();
+          } on Object {
+            return;
+          }
+        }
+      }();
+      await r.server.cancel(sid);
+      expect(await statusOf(sid), SessionStatus.cancelled);
+      expect(r.server.isReceiving, isFalse);
+      expect(Directory(p.join(r.tempDir, sid)).existsSync(), isFalse);
+      await pump;
+    });
+
+    test('receiver cancel while paused and while offered', () async {
+      final sid = await createSession('a.bin', 100);
+      await partialPut('/v1/sessions/$sid/files/f1?offset=0', [1, 2], 100);
+      await waitFor(
+        () => r.server.sessions.single.status == SessionStatus.paused,
+      );
+      await r.server.cancel(sid);
+      expect(await statusOf(sid), SessionStatus.cancelled);
+
+      r.decider = (_) => Completer<bool>().future;
+      final (_, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([
+          const FileOffer(fileId: 'f1', name: 'a', size: 3),
+        ], sender: const SenderInfo(id: 'b', name: 'b', platform: 'ios')),
+      );
+      final sid2 = body['sessionId']! as String;
+      await r.server.cancel(sid2);
+      expect(await statusOf(sid2), SessionStatus.rejected);
+    });
   });
 
-  test('chunked body beyond declared size is stopped and discarded', () async {
-    final sid = await createSession('a.bin', 10);
-    final files = '/v1/sessions/$sid/files/f1';
-    final (code, body) = await send(
-      'PUT',
-      '$files?offset=0',
-      bytes: List.filled(64, 1),
-      chunked: true,
-    );
-    expect(code, 413);
-    expect(body['error'], ErrorCodes.tooManyBytes);
-    final (_, status) = await send('GET', files);
-    expect(status['receivedBytes'], 0);
+  group('events socket', () {
+    test('a late socket gets the current state first', () async {
+      final data = randomBytes(10);
+      final sid = await createSession(
+        '',
+        0,
+        files: [
+          FileOffer(fileId: 'f1', name: 'a', size: data.length),
+          const FileOffer(fileId: 'f2', name: 'b', size: 100),
+        ],
+      );
+      await send('PUT', '/v1/sessions/$sid/files/f1?offset=0', bytes: data);
+      await send(
+        'POST',
+        '/v1/sessions/$sid/files/f1/complete',
+        json: {'sha256': shaOf(data)},
+      );
+      await send(
+        'PUT',
+        '/v1/sessions/$sid/files/f2?offset=0',
+        bytes: List.filled(30, 1),
+      );
+      final got = await collectEvents(sid, 3);
+      expect(got[0], isA<AcceptedEvent>());
+      expect((got[1] as FileDoneEvent).fileId, 'f1');
+      expect((got[2] as ProgressEvent).receivedBytes, 30);
+    });
+
+    test('unknown session gives 404', () async {
+      final (code, _) = await send('GET', '/v1/sessions/nope/events');
+      expect(code, 404);
+    });
   });
 
-  test('hash mismatch is not saved and resets the partial file', () async {
-    final data = randomBytes(1000);
-    final sid = await createSession('a.bin', data.length);
-    final files = '/v1/sessions/$sid/files/f1';
-    await send('PUT', '$files?offset=0', bytes: data);
-    final (code, body) = await send(
-      'POST',
-      '$files/complete',
-      json: {'sha256': '0' * 64},
-    );
-    expect(code, 422);
-    expect(body['error'], ErrorCodes.hashMismatch);
-    expect(Directory(p.join(root.path, 'save')).listSync(), isEmpty);
-    final (_, status) = await send('GET', files);
-    expect(status['receivedBytes'], 0);
-  });
+  group('checkpoints and restart', () {
+    test('a dropped upload pauses the session and keeps the bytes', () async {
+      final sid = await createSession('a.bin', 10 * mb);
+      final data = randomBytes(3 * mb);
+      await partialPut('/v1/sessions/$sid/files/f1?offset=0', data, 10 * mb);
+      await waitFor(
+        () => r.server.sessions.single.status == SessionStatus.paused,
+      );
+      final (_, status) = await send('GET', '/v1/sessions/$sid/files/f1');
+      expect(status['receivedBytes'], data.length);
+      final stored = await r.repo.find(sid, TransferDirection.receive);
+      expect(stored!.status, SessionStatus.paused);
+      expect(stored.files.single.transferredBytes, data.length);
+    });
 
-  test('complete before all bytes arrive returns incomplete', () async {
-    final sid = await createSession('a.bin', 100);
-    final files = '/v1/sessions/$sid/files/f1';
-    await send('PUT', '$files?offset=0', bytes: List.filled(50, 1));
-    final (code, body) = await send(
-      'POST',
-      '$files/complete',
-      json: {'sha256': '0' * 64},
-    );
-    expect(code, 409);
-    expect(body['error'], ErrorCodes.incomplete);
-    expect(body['receivedBytes'], 50);
-  });
+    test('progress is stored every checkpoint while bytes flow', () async {
+      await r.close();
+      r = await TestReceiver.start(identity: identity, checkpointBytes: mb);
+      final sid = await createSession('a.bin', 4 * mb);
+      final socket = await SecureSocket.connect(
+        '127.0.0.1',
+        r.port,
+        onBadCertificate: (_) => true,
+      );
+      addTearDown(socket.destroy);
+      socket.write(
+        'PUT /v1/sessions/$sid/files/f1?offset=0 HTTP/1.1\r\n'
+        'host: x\r\ncontent-length: ${4 * mb}\r\n\r\n',
+      );
+      socket.add(Uint8List(3 * mb));
+      await socket.flush();
+      await waitFor(
+        () => r.events.whereType<FileProgress>().any(
+          (e) => e.receivedBytes >= 2 * mb,
+        ),
+      );
+      final stored = await r.repo.find(sid, TransferDirection.receive);
+      // Stored without the upload ending.
+      expect(stored!.files.single.transferredBytes, greaterThanOrEqualTo(mb));
+    });
 
-  test('malicious name is sanitized and stays in the save folder', () async {
-    final data = utf8.encode('hello');
-    final sid = await createSession('../../evil.sh', data.length);
-    final files = '/v1/sessions/$sid/files/f1';
-    await send('PUT', '$files?offset=0', bytes: data);
-    final (code, _) = await send(
-      'POST',
-      '$files/complete',
-      json: {'sha256': sha256.convert(data).toString()},
-    );
-    expect(code, 200);
-    expect(File(p.join(root.path, 'save', 'evil.sh')).existsSync(), isTrue);
-    expect(File(p.join(root.path, 'evil.sh')).existsSync(), isFalse);
-  });
+    test('after a restart the session is paused at its checkpoint', () async {
+      final sid = await createSession('a.bin', 10 * mb);
+      final data = randomBytes(3 * mb);
+      await partialPut('/v1/sessions/$sid/files/f1?offset=0', data, 10 * mb);
+      await waitFor(
+        () => r.server.sessions.single.status == SessionStatus.paused,
+      );
+      // Bytes past the checkpoint, as if the app died before saving them.
+      final part = File(p.join(r.tempDir, sid, 'f1.part'));
+      part.writeAsBytesSync(List.filled(500, 9), mode: FileMode.append);
 
-  test('empty file can be completed without a PUT', () async {
-    final sid = await createSession('empty.txt', 0);
-    final (code, _) = await send(
-      'POST',
-      '/v1/sessions/$sid/files/f1/complete',
-      json: {'sha256': sha256.convert(const []).toString()},
-    );
-    expect(code, 200);
-  });
+      await r.restart();
 
-  test('unknown session and bad offer', () async {
-    var (code, body) = await send('GET', '/v1/sessions/nope/files/f1');
-    expect(code, 404);
-    (code, body) = await send('POST', '/v1/sessions', json: {'protocol': 1});
-    expect(code, 400);
-    expect(body['error'], ErrorCodes.badRequest);
-  });
+      expect(r.server.sessions.single.status, SessionStatus.paused);
+      expect(part.lengthSync(), data.length);
+      final (_, status) = await send('GET', '/v1/sessions/$sid/files/f1');
+      expect(status['receivedBytes'], data.length);
 
-  test('emits progress and saved events', () async {
-    final events = <ReceiveEvent>[];
-    final sub = server.events.listen(events.add);
-    final data = randomBytes(2 * 1024 * 1024);
-    final sid = await createSession('a.bin', data.length);
-    final files = '/v1/sessions/$sid/files/f1';
-    await send('PUT', '$files?offset=0', bytes: data);
-    await send(
-      'POST',
-      '$files/complete',
-      json: {'sha256': sha256.convert(data).toString()},
-    );
-    await sub.cancel();
-    expect(events.first, isA<SessionStarted>());
-    expect(events.whereType<FileProgress>().last.receivedBytes, data.length);
-    expect(events.last, isA<FileSaved>());
+      // And the sender can finish it.
+      final rest = randomBytes(10 * mb);
+      final whole = [...data, ...rest.sublist(0, 7 * mb)];
+      await send(
+        'PUT',
+        '/v1/sessions/$sid/files/f1?offset=${data.length}',
+        bytes: whole.sublist(data.length),
+      );
+      final (code, _) = await send(
+        'POST',
+        '/v1/sessions/$sid/files/f1/complete',
+        json: {'sha256': shaOf(whole)},
+      );
+      expect(code, 200);
+      expect(await statusOf(sid), SessionStatus.done);
+    });
+
+    test('an offer still waiting at restart becomes rejected', () async {
+      r.decider = (_) => Completer<bool>().future;
+      final (_, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([const FileOffer(fileId: 'f1', name: 'a', size: 3)]),
+      );
+      final sid = body['sessionId']! as String;
+      await r.restart();
+      expect(r.server.sessions, isEmpty);
+      final stored = await r.repo.find(sid, TransferDirection.receive);
+      expect(stored!.status, SessionStatus.rejected);
+    });
+
+    test('checkpointAll saves progress of a running upload', () async {
+      await r.close();
+      r = await TestReceiver.start(
+        identity: identity,
+        checkpointBytes: 64 * mb,
+      );
+      final sid = await createSession('a.bin', 8 * mb);
+      final socket = await SecureSocket.connect(
+        '127.0.0.1',
+        r.port,
+        onBadCertificate: (_) => true,
+      );
+      addTearDown(socket.destroy);
+      socket.write(
+        'PUT /v1/sessions/$sid/files/f1?offset=0 HTTP/1.1\r\n'
+        'host: x\r\ncontent-length: ${8 * mb}\r\n\r\n',
+      );
+      socket.add(Uint8List(2 * mb));
+      await socket.flush();
+      await waitFor(() => r.events.whereType<FileProgress>().isNotEmpty);
+      final checkpoint = r.server.checkpointAll();
+      socket.add(Uint8List(mb)); // the "current chunk" finishes
+      await socket.flush();
+      await checkpoint;
+      final stored = await r.repo.find(sid, TransferDirection.receive);
+      expect(stored!.files.single.transferredBytes, greaterThan(0));
+    });
   });
 }

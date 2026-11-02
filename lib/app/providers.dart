@@ -5,6 +5,8 @@ import '../core/discovery/bonsoir_backend.dart';
 import '../core/discovery/mdns_backend.dart';
 import '../core/security/device_identity.dart';
 import '../core/storage/database.dart';
+import '../core/storage/transfer_repository.dart';
+import '../platform/free_space.dart';
 import '../platform/local_network.dart';
 
 /// The app's database, open for the app's lifetime.
@@ -13,6 +15,13 @@ final databaseProvider = Provider<AppDatabase>((ref) {
   ref.onDispose(db.close);
   return db;
 });
+
+final transferRepositoryProvider = Provider<TransferRepository>(
+  (ref) => TransferRepository(ref.watch(databaseProvider)),
+);
+
+/// Free bytes on a volume, for the check before accepting an offer.
+final freeSpaceProvider = Provider<FreeSpace>((ref) => ChannelFreeSpace());
 
 final identityProvider =
     AsyncNotifierProvider<IdentityNotifier, DeviceIdentity>(
