@@ -1,6 +1,6 @@
 # CrossDrop Architecture: iPhone ↔ Android File Sharing
 
-Nov 1, 2026 · @yash
+Nov 1, 2026 · updated Nov 3, 2026 (Phase 4) · @yash
 
 CrossDrop v1 is a Flutter app in which each phone runs a small encrypted HTTPS server. The phones find each other over the local network (or connect through a hotspot) and send files straight to each other, with no cloud server. This document covers only iPhone ↔ Android, in both directions.
 
@@ -24,7 +24,7 @@ CrossDrop v1 is a Flutter app in which each phone runs a small encrypted HTTPS s
 
 1. **Receiver is the server.** The phone that receives runs an HTTPS server; the sender is the client. This works the same in every network mode.
 2. **One shared core in Dart.** Protocol, transfer engine, security and UI are shared. Native Swift and Kotlin only where the OS requires it (photo library, hotspot, background, Bonjour).
-3. **Never trust the network.** Every connection uses mutual TLS with pinned certificates, and the receiver always approves unknown senders.
+3. **Never trust the network.** Every connection uses TLS 1.3 pinned to the receiver's certificate, the sender proves its own key, and the receiver always approves unknown senders.
 4. **Every byte is resumable.** Files are written to a partial file and resumed from the last confirmed byte.
 5. **Stream, never buffer.** No file is ever fully loaded into memory.
 6. **Fail loudly and suggest the next mode.** If one connection mode fails, the app tells the user which mode to try next.
@@ -87,13 +87,13 @@ flowchart TD
   D2 -- Yes --> TLS
   D2 -- No --> Hot["Mode 3: hotspot<br/>Android LocalOnlyHotspot with Wi-Fi QR,<br/>or iPhone Personal Hotspot enabled manually"]
   Hot --> TLS
-  Code --> TLS["Mutual-TLS session with pinned certificates"]
+  Code --> TLS["Pinned TLS 1.3 session<br/>sender proves its key"]
   TLS --> Engine([Transfer session])
 ```
 
 > Diagram drafted from the Connectivity scenarios and Failure handling sections. Please review.
 
-The app tries the easiest mode first and moves to the next only when one fails. Every path ends in the same mutual-TLS session, so the transfer engine never cares how the phones are connected.
+The app tries the easiest mode first and moves to the next only when one fails. Every path ends in the same pinned, authenticated TLS session, so the transfer engine never cares how the phones are connected.
 
 ## Transfer session
 
@@ -157,14 +157,18 @@ Payloads over 1024 characters, or with control characters or stray `%` escapes, 
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/v1/info` | `{"id", "name", "platform", "versions": [1]}`. The sender calls it before every connect to check the protocol version and, from the list or a QR code, the device id |
-| POST | `/v1/sessions` | Sender offers a session with a file manifest; returns `sessionId`, status `offered` (D-018). Refusals: 400 `unsupported_version` (with `versions`), 409 `sender_busy`, 503 `busy` (8 sessions open), 507 `no_space` (with `neededBytes`) |
+| GET | `/v1/info` | `{"id", "name", "platform", "versions": [1]}`. The sender calls it before every connect to check the protocol version and, from the list or a QR code, the device id. No token needed |
+| POST | `/v1/auth/challenge` | `{"commit"}` → `{"nonce"}`. Step 1 of sender authentication (see Security model). 429 `rate_limited` |
+| POST | `/v1/auth` | `{"certificate", "nonce", "senderNonce", "signature"}` (certificate and signature base64 DER) → `{"token", "expiresIn"}`. 401 `auth_failed`, 429 `rate_limited` |
+| POST | `/v1/sessions` | Sender offers a session with a file manifest; returns `sessionId`, status `offered` (D-018) and `trusted` (the receiver trusts this sender, so it shows no code). Refusals: 400 `unsupported_version` (with `versions`), 403 `receiving_off`, 409 `sender_busy`, 413 `body_too_large`, 429 `rate_limited`, 503 `busy` (8 sessions open), 507 `no_space` (with `neededBytes`) |
 | GET | `/v1/sessions/{id}` | `{"sessionId", "status", "reason"?, "files": [file status]}`, so a sender that reconnects knows where the session stands |
 | WS | `/v1/sessions/{id}/events` | Live events: `accepted`, `rejected`, `progress`, `file_done`, `cancelled`, `error`. A new socket first gets the current state replayed |
 | PUT | `/v1/sessions/{id}/files/{fileId}?offset=N` | Streams file bytes starting at byte N. 403 `not_accepted` before Accept, 409 `offset_mismatch` (with `receivedBytes`), 410 `session_closed` or `file_failed`, 413 `too_many_bytes`, 507 on a write failure |
 | GET | `/v1/sessions/{id}/files/{fileId}` | `{"fileId", "size", "receivedBytes", "status"}`, status `pending`, `receiving`, `verifying`, `saved` or `failed`, so the sender knows where to resume |
 | POST | `/v1/sessions/{id}/files/{fileId}/complete` | Sender sends the SHA-256; receiver verifies and saves. 422 `hash_mismatch` with `retry: true` (file restarted from zero) or `file_failed` with `retry: false` |
 | DELETE | `/v1/sessions/{id}` | Cancel from the sender's side; idempotent. The receiver's own cancel reaches the sender as the `cancelled` event or a 410 |
+
+Every `/v1/sessions…` request, including the WebSocket upgrade, needs `Authorization: Bearer <token>`; without a valid one: 401 `auth_required` (authenticate again and retry once). A session that belongs to another sender answers 404. Any request with more than 16 KB of headers gets 431 `headers_too_large`.
 
 Errors are JSON: `{"error": code, "message": text, ...details}`.
 
@@ -183,7 +187,7 @@ One JSON text frame per event, with a `type` field. Unknown types are ignored, s
 
 The events are a convenience. Every fact they carry is also in the HTTP replies, so a lost socket never stops a transfer.
 
-**Limits on an offer:** at most 10,000 files, names at most 1,024 characters before sanitizing, one unfinished session per sender, 8 open sessions in total (D-023).
+**Limits on an offer:** at most 10,000 files, names at most 1,024 characters before sanitizing, one unfinished session per sender fingerprint, 8 open sessions in total (D-023), 3 offers at once per IP address then one every 20 s (D-032).
 
 **Offer manifest (POST /v1/sessions)**
 
@@ -197,6 +201,8 @@ The events are a convenience. Every fact they carry is also in the HTTP replies,
   ]
 }
 ```
+
+`sender.id` and `sender.name` are what the sender claims; the receiver uses them only as labels. The proven sender is the fingerprint behind the token.
 
 The SHA-256 is not in the offer, so the sender can start sending before hashing finishes. It hashes in a background isolate alongside the upload and sends the hash in `complete`. `kind` is `photo`, `video` or `file`; an unknown kind from a newer peer reads as `file`. `created` and `livePhotoGroup` are optional.
 
@@ -251,40 +257,87 @@ The sender has its own view (`SendPhase`): `connecting → waitingForAccept → 
 
 ## Security model
 
-Each phone has its own key and certificate, both sides prove their identity with mutual TLS, and a stranger can never push a file without the receiver tapping Accept.
+Each phone has its own key and certificate. The sender pins the receiver's certificate in TLS 1.3, the receiver checks the sender's key with a signed challenge, and a stranger can never push a file without the receiver tapping Accept. Feature details: [device-identity.md](features/device-identity.md), [pairing-and-trust.md](features/pairing-and-trust.md), [abuse-limits.md](features/abuse-limits.md).
 
 **Device identity**
 
-- On first launch the app creates a random device UUID and an ECDSA P-256 key pair with a self-signed certificate. The private key lives in the iOS Keychain or the Android Keystore-protected storage.
-- The certificate's SHA-256 fingerprint is the device's identity. The device name is only a label and can be faked.
+- On first launch the app creates a random device UUID and an ECDSA P-256 key pair with a self-signed certificate (`basic_utils`, D-028). The certificate holds no personal data (subject `CN=CrossDrop`).
+- The private key lives in the iOS Keychain (this device only, readable after first unlock) or in Android Keystore-protected storage (`flutter_secure_storage`, D-030). The certificate is in the `identity` row. The key is in the app's memory while it runs, because Dart's TLS stack needs it as bytes.
+- The certificate's SHA-256 fingerprint (lowercase hex of the DER) is the device's identity. The device name and UUID are labels and can be faked; no decision is ever based on them.
+- A reinstall gives a new identity: the database is gone, so a key left in the iOS Keychain is replaced, and Android backup is off. A lost or broken key also gives a new identity. Either way, peers must pair again.
 
 **Connection security**
 
-- The receiver's server requires a client certificate (mutual TLS). The receiver learns the sender's fingerprint, and the sender checks the receiver's fingerprint against the one from the QR code or a trusted-device record.
-- Dart's TLS stack lets the app pin these self-signed certificates itself, so iOS App Transport Security does not get in the way.
+What `dart:io` can and cannot do was tested on Dart 3.13 before building (D-027):
 
-**Pairing: two ways to trust a device**
+| Need | dart:io | What CrossDrop does |
+| --- | --- | --- |
+| Server presents a self-signed certificate | Yes | Each phone's own certificate, TLS 1.3 minimum (`minimumTlsProtocolVersion`) |
+| Client pins the server certificate | Yes: the callback sees the leaf; a chain with the pinned certificate appended after an attacker's leaf is refused | `pinnedHttpClient` checks the leaf in the handshake and again before any request byte is sent |
+| Server accepts an unknown self-signed **client** certificate | **No.** There is no server-side callback; an untrusted client certificate fails the handshake even in "request" mode | Application-layer sender authentication (below) |
+| Configurable header size limit | No (fixed 1 MB) | Own 16 KB limit in a middleware (431) |
 
-1. **QR scan (strong).** The QR carries the full fingerprint, so the TLS check proves you reached the phone in front of you.
-2. **Tap from the nearby list (needs a check).** The mDNS fingerprint could be spoofed, so both phones show the same 6-digit code derived from both fingerprints, like Bluetooth pairing. The receiver confirms that it matches.
+Sender authentication, inside the pinned TLS connection:
 
-After either method the user can choose "Trust this device". Next time, the app skips the code check but still shows the Accept prompt unless the user turns on auto-accept for that device.
+1. The sender picks a random 32-byte `senderNonce` and sends `commit = SHA-256("crossdrop-commit-v1\n" + senderNonce)` to `POST /v1/auth/challenge`. The receiver answers with a random `nonce` (single use, 60 s).
+2. The sender sends its certificate, `senderNonce`, and an ECDSA P-256 / SHA-256 signature over `"crossdrop-auth-v1\n" + receiverFp + "\n" + senderFp + "\n" + nonce + "\n" + senderNonce` to `POST /v1/auth`.
+3. The receiver checks the commitment, that the certificate holds a P-256 key, and the signature, using its **own** fingerprint as `receiverFp`. It returns a 32-byte bearer token (memory only; expires after 1 hour unused; lost when the server restarts).
+4. Every `/v1/sessions` request carries `Authorization: Bearer <token>`. A session belongs to the fingerprint that offered it; for anyone else it does not exist (404).
+
+Because the signature covers the receiver's fingerprint, a proof made for one receiver is useless at another, so a malicious receiver cannot relay it. The token only travels inside the pinned TLS connection. Nothing ever falls back to an unpinned connection once a fingerprint is known (hard rule 4).
+
+**Where the receiver's fingerprint comes from**
+
+| Path | Pin | Then |
+| --- | --- | --- |
+| QR code | The full fingerprint in the QR. A mismatch fails at once ("This isn't the device you scanned") | Strong: no code check needed for the sender |
+| Trusted device | The fingerprint in the trusted record | A different key under a trusted name or id is a **lookalike**: clear warning, and the user may only go on as untrusted, with the code check |
+| Nearby list or typed address (first contact) | Read from a handshake that sends no request (`probeFingerprint`); from the nearby list it must start with the TXT `fp` hint | The 6-digit code check covers it |
+
+**Pairing code**
+
+When the receiver does not trust the sender, both phones show the same 6-digit code, like Bluetooth numeric comparison, and the receiver confirms it matches before accepting.
+
+```text
+code = SHA-256("crossdrop-code-v1\n" + senderFp + "\n" + receiverFp + "\n"
+               + senderNonce + "\n" + receiverNonce)
+       first 6 bytes as a big-endian integer, mod 1,000,000, zero-padded
+```
+
+The nonces are the ones from sender authentication. A code made from the two fingerprints alone could be forced by a man in the middle: it would generate keys until both of its connections showed the same code (about a million tries, minutes of work). Here the sender commits to its nonce before it sees the receiver's, so each attempt has one chance in a million (D-029). A new code is made for every authentication; the offer shows the code of the authentication that made it. Known answer for tests: senderFp `aa00…00`, receiverFp `bb00…00`, nonces `A`×43 and `B`×43 give `828838`.
+
+**Trust**
+
+1. **QR scan (strong).** The TLS pin proves the sender reached the phone in front of it.
+2. **Tap from the nearby list (needs a check).** The receiver compares the code with the sender's screen before the first transfer from an untrusted device.
+
+After a successful pairing the receiver can tick "Trust this device" in the Accept prompt, and the sender can tap "Trust" after a completed send. Trusted devices are stored by fingerprint, with name, platform, auto-accept, first and last seen. A trusted sender gets no code check, but still gets the Accept prompt unless the user turns on auto-accept for that device in Settings. Auto-accept applies only to that exact fingerprint. If a sender uses a trusted device's name or id with another fingerprint, both screens warn: "This is not the X you trusted."
+
+**Abuse limits and server hygiene** (D-031, D-032)
+
+- **Receiving switch** (Settings and Receive screen, on by default). Off: the phone stops advertising and its QR code, offers from untrusted senders get 403 `receiving_off`, and the server stops as soon as no transfer is running. While the server is still running, offers from trusted devices are allowed. With the switch off, the server does not start at all.
+- **Rate limits per IP address:** `POST /v1/sessions` 3 at once, then one every 20 s; `/v1/auth/challenge` and `/v1/auth` 10 at once, then one every 3 s. Over the limit: 429 `rate_limited` with `retryAfter` and a `Retry-After` header. At most 1,024 addresses, 64 open challenges and 256 tokens are remembered.
+- **Request limits:** 16 KB of headers (431), 16 KB for auth and `complete` bodies, 4 MB for an offer (413); file bodies are limited by the declared size as before.
+- **Server lifetime:** runs only while the Receive screen is open, the app is in the foreground (or, on Android, a transfer runs in the foreground service) and the switch is on. A new random port at every start. Idle keep-alive connections close after 30 s.
 
 **Threats and defenses**
 
 | Threat | Defense |
 | --- | --- |
-| Stranger on the same Wi-Fi sends unwanted files | Accept prompt on every session from an untrusted device; rate limit offers per IP; "Receiving" can be turned off |
-| Someone fakes a device name in the nearby list | Identity is the fingerprint; 6-digit code check for untrusted devices |
-| Eavesdropping on the Wi-Fi | TLS 1.3 encryption on all traffic |
-| Man-in-the-middle | Fingerprint pinning from QR or trusted record; mutual TLS |
+| Stranger on the same Wi-Fi sends unwanted files | Accept prompt with pairing code for every untrusted sender; rate limit per IP; Receiving switch |
+| Someone fakes a device name in the nearby list | Identity is the fingerprint; code check for untrusted devices; lookalike warning for a trusted name with another key |
+| Eavesdropping on the Wi-Fi | TLS 1.3 on all traffic |
+| Man-in-the-middle | Pin from QR or trusted record; code from committed nonces on first contact; proofs bound to the receiver's fingerprint |
+| Another sender hijacks a running session | Sessions belong to the authenticated fingerprint; others get 404 |
 | Malicious file name such as `../../evil` | Sanitize names: strip paths, control characters and reserved names; limit length |
 | Huge offer to fill the disk | Free-space check before accepting; reject if the file is larger than declared |
+| Flood of requests | Rate limits; header and body limits; capped challenge, token and address tables |
 | Corrupted or tampered file | SHA-256 verified before saving |
-| Server left open in public | Server runs only while the app is open; rotate the listening port each launch |
+| Server left open in public | Server runs only while Receive is open and the switch is on; new random port each start |
+| Identity copied to another phone | Key in this-device-only Keychain or Keystore storage; Android backup and device transfer off |
 | Old protocol version with a known bug | Minimum supported version in the app; reject below it |
 
-**Privacy:** no accounts, no analytics on file names or contents, nothing leaves the local network.
+**Privacy:** no accounts, no analytics on file names or contents, nothing leaves the local network. Logs carry at most the first 8 characters of a fingerprint.
 
 ## Platform modules
 
@@ -322,7 +375,11 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | Receiver's Wi-Fi or IP changes | Connectivity event or a changed address list (3 s poll) | Re-advertise and redraw the QR code; the sender's nearby list restarts browsing |
 | Stale entry in the nearby list | `GET /v1/info` fails, or another device id answers | Remove the entry and tell the user; pull to refresh |
 | QR connect times out | TCP connect fails within 5–10 s | Likely client isolation or different networks; suggest hotspot mode |
-| Certificate fingerprint mismatch | TLS handshake fails pinning check | Stop; warn "This isn't the device you scanned"; never fall back to unpinned |
+| Certificate fingerprint mismatch | TLS handshake fails pinning check (`pin_mismatch`) | Stop; warn "This isn't the device you scanned"; never retry and never fall back to unpinned |
+| Trusted name, different key | Trusted record matches the name or id, not the fingerprint | Warn "Not the X you trusted"; the user may go on only as untrusted, with the code check |
+| Receiving is off | 403 `receiving_off` | Sender: "The other phone is not receiving." Receiver: a notice that a transfer was refused |
+| Too many requests | 429 `rate_limited` with `retryAfter` | Sender waits and retries; repeated offers stay refused |
+| Token unknown (receiver restarted) | 401 `auth_required` | Authenticate again and retry once, then continue |
 | Receiver rejects or doesn't answer | `rejected` event, or no answer within 60 s | Tell the sender; nothing is sent |
 | Not enough space on receiver | Free-space check before the prompt and again at Accept, and write errors during transfer | Reject the offer with the needed size; if it runs out mid-transfer, pause and keep the partial file; the sender stops with "free some space, then Resume" |
 | Wi-Fi drops mid-transfer | Socket error or no progress for 15 s | Retry with backoff (1, 2, 4, 8 s, then 8 s, up to about 2 min without progress, D-019); resume from `receivedBytes`. After that, the Send screen offers Resume |
@@ -347,12 +404,12 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | Table | Key fields |
 | --- | --- |
 | `identity` | deviceId, deviceName, certificate (private key stays in Keychain/Keystore) |
-| `trusted_devices` | deviceId, name, platform, certFingerprint, autoAccept, firstSeen, lastSeen |
-| `sessions` | sessionId + direction (unique), peerDeviceId, peerName, peerPlatform, peerHost and peerPort (send), status, reason, totalBytes, createdAt, updatedAt, finishedAt |
+| `trusted_devices` | fingerprint (key), deviceId, name, platform, autoAccept, firstSeen, lastSeen |
+| `sessions` | sessionId + direction (unique), peerDeviceId, peerName, peerPlatform, peerFingerprint, peerHost and peerPort (send), status, reason, totalBytes, createdAt, updatedAt, finishedAt |
 | `session_files` | session row + fileId, position, name, size, mime, kind, created, livePhotoGroup, sha256, transferredBytes, tempPath, sourcePath (send), finalLocation, status, hashAttempts, errorCode |
-| `settings` | receivingEnabled, convertHeicToJpeg, sendLivePhotoVideo, saveLocation (not built yet) |
+| `settings` | receivingEnabled (Phase 4); convertHeicToJpeg, sendLivePhotoVideo, saveLocation (not built yet) |
 
-Session status: see [Session state machine](#session-state-machine). Both directions are stored. A sent session that gave up on the network stays `paused`, so the launch prompt can offer to resume it.
+Schema version 3. Session status: see [Session state machine](#session-state-machine). Both directions are stored. Sessions stored before Phase 4 have no peerFingerprint and cannot resume: a received one is marked failed at start, a sent one asks the user to send again. A sent session that gave up on the network stays `paused`, so the launch prompt can offer to resume it.
 
 **Code structure**
 
@@ -404,6 +461,6 @@ crossdrop/
 - [ ] HEIC default: send original (recommended) or convert to JPEG for Android?
 - [ ] Live Photos default: still only (recommended) or still plus video?
 - [ ] Is iPhone Personal Hotspot mode worth an in-app guide in v1, or Android hotspot mode only?
-- [ ] Trusted devices: allow auto-accept, or always show the Accept prompt?
+- [x] Trusted devices: allow auto-accept, or always show the Accept prompt? Auto-accept is allowed, off by default, per trusted device (Phase 4).
 - [ ] Minimum OS versions (for example iOS 16+ and Android 10+), which decides which APIs you can use without fallbacks. Current project defaults: iOS 15, Android 7.0 (SDK 24); all Phase 2 packages support these.
 - [ ] What speed target counts as success, decided after the Phase 1 proof of concept measures real numbers?

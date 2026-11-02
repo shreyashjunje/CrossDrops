@@ -31,7 +31,7 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 
 ## D-003: Mutual TLS with pinned self-signed certificates
 - Date: 2026-11-01
-- Status: Accepted
+- Status: Superseded in part by D-027 (the sender proves its key inside TLS instead of with a client certificate)
 - Context: There is no server or account to vouch for identity, and the local network cannot be trusted.
 - Decision: Each device creates its own ECDSA P-256 key and self-signed certificate. The certificate's SHA-256 fingerprint is the device identity. Both sides present certificates and pin fingerprints (from QR or trusted record). Untrusted senders need an Accept tap, and tapped-from-list devices also get a 6-digit code check.
 - Consequences: No accounts or CA needed, and encryption plus identity come from one mechanism. We never fall back to unpinned TLS once a fingerprint is known. `dart:io` support for self-signed client certificates may have limits; if so, propose an alternative before building it.
@@ -87,7 +87,7 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 
 ## D-011: Phase 1 client accepts any server certificate, and offers are auto-accepted
 - Date: 2026-11-02
-- Status: Accepted (temporary; superseded when Phase 4 lands)
+- Status: Superseded by D-027 and D-033 (Phase 4)
 - Context: The PoC has no discovery, QR or pairing, so there is no fingerprint to pin and no Accept prompt.
 - Decision: The upload client accepts any server certificate and sends no client certificate (`TODO(phase4)` in `upload_client.dart`); `POST /v1/sessions` is accepted immediately. Traffic is still TLS-encrypted.
 - Consequences: Not safe against a man in the middle or unwanted senders on the same network; acceptable only for development builds on a trusted Wi-Fi. Phase 4 removes the bypass with no fallback (CLAUDE.md hard rule 4), and the session-flow phase adds the Accept prompt and free-space check.
@@ -131,7 +131,7 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 
 ## D-016: Phase 2 advertises only while Receive is open, with the per-launch fingerprint
 - Date: 2026-11-02
-- Status: Accepted (revisit with the Accept prompt and Phase 4)
+- Status: Superseded in part by D-028 (persistent fingerprint) and D-031 (Receiving switch)
 - Context: Offers are still accepted automatically (D-011), so advertising whenever the app is open would let anyone on the Wi-Fi push files. Phase 4 brings the persistent certificate. Until then the server creates a certificate at each launch.
 - Decision: The server and the advertisement run only while the Receive screen is open. TXT `fp` and the QR `fp` use the real fingerprint of the current per-launch certificate, not a placeholder. Nothing checks it yet.
 - Consequences: The formats are final, and Phase 4 only has to start checking the fingerprint. Receiving requires opening Receive first. The fingerprint, port and QR code change at each launch.
@@ -216,3 +216,59 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: The 2 GB test needs about 4 GB of disk and two to three minutes. Running it on every `flutter test` and CI push would be slow.
 - Decision: The test is tagged `large` and skipped in `dart_test.yaml`. Run it with `flutter test --run-skipped --tags large` before a phase is called done. A 50 MB memory test stays in the default run.
 - Consequences: Fast default runs. The 2 GB check only happens when someone runs it.
+
+## D-027: Sender authentication by signed challenge, because dart:io cannot do mutual TLS with unknown certificates
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The design asked for mutual TLS with self-signed certificates (D-003). Tested on Dart 3.13 (Windows; the TLS code is BoringSSL on all platforms): a `SecureServerSocket` with `requestClientCertificate` or `requireClientCertificate` drops the connection when the client presents a self-signed certificate it does not already trust. There is no server-side callback to accept it. It works only when the server's `SecurityContext` already trusts that exact certificate, which is never true on first contact. The client side works: `onBadCertificate` gets the leaf, and a chain with the pinned certificate appended after an attacker's leaf is refused.
+- Decision:
+  - TLS 1.3 authenticates only the server. The sender pins the receiver's fingerprint with a custom `connectionFactory`, checks the leaf in the handshake and again before any request byte, and never retries unpinned.
+  - The sender proves its own key inside that connection: commit to a nonce (`/v1/auth/challenge`), then sign receiver fingerprint, sender fingerprint and both nonces with ECDSA P-256 / SHA-256 (`/v1/auth`). It gets a bearer token (memory only, 1 hour idle) for `/v1/sessions…`. Sessions belong to the authenticated fingerprint.
+  - Considered: native TLS on each platform (a lot of native code, against "no native networking"); pre-loading every trusted certificate into the server context (does not help first contact, needs a restart per change); TLS exporter channel binding (not exposed by dart:io).
+- Consequences: Same security goal as mutual TLS: the receiver learns a proven sender fingerprint, a proof cannot be relayed to another receiver, and the token only travels in pinned TLS. Two extra round trips per connection setup. The token is a bearer secret: anyone who could read the TLS stream could reuse it, which pinning prevents. Revisit if dart:io gains a server-side certificate callback.
+
+## D-028: basic_utils for the persistent device identity
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Phase 4 needs a persistent ECDSA P-256 key, a self-signed certificate that `dart:io` accepts, and ECDSA signing and verification for D-027. D-008 picked `basic_utils` for the per-launch certificate.
+- Decision: Keep `basic_utils` (pure Dart, on pointycastle): key pair, CSR and self-signed certificate (subject `CN=CrossDrop`, 20-year validity, ECDSA with SHA-256), and signing with `SHA-256/DET-ECDSA` (RFC 6979, no random nonce). Peer certificates are parsed, limited to 4 KB and must hold a P-256 key. Considered: `cryptography` (no X.509), raw pointycastle (we would rewrite the ASN.1 code that basic_utils already has), a non-exportable Keystore or Secure Enclave key (cannot be handed to Dart's TLS stack).
+- Consequences: No new package and no native crypto. Pitfall: `CryptoUtils.ecSign` and `ecVerify` default to SHA-1; our code always passes the algorithm, and a test checks the certificate's signature algorithm. Generation takes about 30 ms. Certificate dates are never checked, because identity is the pinned fingerprint.
+
+## D-029: The pairing code includes committed nonces, not only the two fingerprints
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The design said "a 6-digit code derived from both fingerprints". A man in the middle on a first contact chooses its own keys. With a code made only from fingerprints, it can generate keys until its two connections show the same code: about 10^6 tries, minutes on a laptop.
+- Decision: `code = SHA-256("crossdrop-code-v1\n" + senderFp + "\n" + receiverFp + "\n" + senderNonce + "\n" + receiverNonce)`, first 6 bytes as a big-endian number, mod 10^6. The nonces come from sender authentication (D-027). The sender commits to its nonce before it sees the receiver's, as in Bluetooth numeric comparison. A known-answer test pins the formula.
+- Consequences: Each attempt by an attacker has one chance in a million, and failures show up as codes that differ. The code changes at every authentication, so it is shown per offer, not per device. It is still derived from both fingerprints, as the brief asked.
+
+## D-030: flutter_secure_storage for the private key; app backup off
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The private key must be in the iOS Keychain or Keystore-backed storage, never in a plain file or the database. A reinstall must give a new identity, and the key must not move to another phone.
+- Decision: Add `flutter_secure_storage` 11.2. iOS: Keychain, `first_unlock_this_device` (not synced, not restored to another device). Android: AES-GCM with a key wrapped by an Android Keystore key; it resets on keystore errors. The identity row is the source of truth: no certificate in the database means a new key, even if an old one is still in the Keychain, which survives an app delete on iOS. Android `allowBackup="false"`, `fullBackupContent="false"` and data-extraction rules that exclude everything.
+- Consequences: A maintained plugin, no own Swift or Kotlin. App data, transfer history and trusted devices are not in Android backups. An iOS backup restored to a new iPhone brings the database but not the key, so that phone gets a new identity. The key is in Dart memory while the app runs (needed for TLS).
+
+## D-031: The Receiving switch and server lifetime
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The brief asks for a global "Receiving on/off" switch that rejects offers from untrusted devices when off, and for the server to run only while receiving is on and the app is open. Stopping the server mid-transfer would break a transfer the user already accepted.
+- Decision: One setting, on by default, on the Receive screen and in Settings. Off: stop advertising and hide the QR code at once, answer offers from untrusted senders with 403 `receiving_off`, and stop the server as soon as no session is offered or running. With the switch off the server never starts. The server still runs only while the Receive screen is open (D-016), with a new random port at each start.
+- Consequences: Turning the switch off never breaks a running transfer. While the server drains, a trusted device can still make an offer. A paused session keeps the server up until the Receive screen closes.
+
+## D-032: Abuse limits
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Anyone on the Wi-Fi can reach the server while it runs.
+- Decision: Token buckets per remote IP: offers 3 at once, then 1 per 20 s; auth requests 10 at once, then 1 per 3 s; 429 with `retryAfter`. Headers at most 16 KB (431), because the dart:io limit is a fixed 1 MB. Bodies: 16 KB for auth and `complete`, 4 MB for offers (413). Memory caps: 1,024 tracked addresses, 64 open challenges, 256 tokens, oldest dropped first. Idle keep-alive connections close after 30 s. One unfinished session per sender fingerprint (was per claimed id, D-023).
+- Consequences: A flood costs the receiver little and reaches the Accept prompt at most 3 times a minute per address. Someone sharing an address with an honest sender (NAT, hotspot) shares its bucket, which is fine on a home network. The numbers are a first guess; device tests may tune them.
+
+## D-033: First contact, lookalikes and trust records
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Only the QR code carries the full fingerprint. The nearby list has a 16-character hint; a typed address has nothing. Trust must be by fingerprint, and a trusted name with another key must be flagged.
+- Decision:
+  - Without a QR fingerprint, the sender reads the fingerprint from one TLS handshake that sends no request (`probeFingerprint`). From the nearby list it must start with the TXT hint. Everything after that is pinned to it, and the pairing code checks it.
+  - The Send screen runs this check itself for a typed address, so no path sends unpinned.
+  - Trust records hold fingerprint, device id, name, platform, auto-accept, first and last seen. Lookup is by fingerprint only. A trusted name or id with another fingerprint is a lookalike: a warning on both phones, and the user can go on only as untrusted, with the code.
+  - The same table serves both directions. The receiver trusts from the Accept prompt; the sender trusts after a completed send. Auto-accept matters only on the receiving side and is off by default.
+- Consequences: A reinstalled phone shows up as a lookalike until the user forgets the old record or trusts the new one. A wrong QR fingerprint can never be "continued anyway".
