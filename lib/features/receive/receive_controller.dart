@@ -1,12 +1,17 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../../app/app_dirs.dart';
 import '../../app/providers.dart';
+import '../../core/discovery/discovery_service.dart';
+import '../../core/discovery/network_monitor.dart';
+import '../../core/discovery/txt_record.dart';
 import '../../core/engine/speed_meter.dart';
+import '../../core/log.dart';
+import '../../core/protocol/connect_payload.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/ephemeral_identity.dart';
@@ -47,7 +52,11 @@ class IncomingFile {
 class ReceiveState {
   const ReceiveState({
     this.port,
+    this.deviceName,
     this.addresses = const [],
+    this.qrPayload,
+    this.advertising = false,
+    this.advertiseError,
     this.saveDir,
     this.files = const {},
     this.error,
@@ -55,7 +64,18 @@ class ReceiveState {
 
   /// Null while the server is starting.
   final int? port;
-  final List<String> addresses;
+  final String? deviceName;
+
+  /// Addresses other phones may reach (no mobile data or VPN).
+  final List<LocalAddress> addresses;
+
+  /// `crossdrop://connect?...` for the QR code; null without a reachable
+  /// address. Never log it (CLAUDE.md hard rule 7).
+  final String? qrPayload;
+  final bool advertising;
+
+  /// Discovery could not start; the QR code still works.
+  final String? advertiseError;
   final String? saveDir;
 
   /// Keyed by "sessionId/fileId", newest last.
@@ -64,13 +84,23 @@ class ReceiveState {
 
   ReceiveState copyWith({
     int? port,
-    List<String>? addresses,
+    String? deviceName,
+    List<LocalAddress>? addresses,
+    String? Function()? qrPayload,
+    bool? advertising,
+    String? Function()? advertiseError,
     String? saveDir,
     Map<String, IncomingFile>? files,
     String? error,
   }) => ReceiveState(
     port: port ?? this.port,
+    deviceName: deviceName ?? this.deviceName,
     addresses: addresses ?? this.addresses,
+    qrPayload: qrPayload != null ? qrPayload() : this.qrPayload,
+    advertising: advertising ?? this.advertising,
+    advertiseError: advertiseError != null
+        ? advertiseError()
+        : this.advertiseError,
     saveDir: saveDir ?? this.saveDir,
     files: files ?? this.files,
     error: error ?? this.error,
@@ -82,10 +112,17 @@ final receiveControllerProvider =
       ReceiveController.new,
     );
 
-/// Runs the receive server while the Receive screen is open.
+/// Runs the receive server while the Receive screen is open, advertises it
+/// on the local network and keeps the QR code current when the network
+/// changes.
 class ReceiveController extends Notifier<ReceiveState> {
   ReceiveServer? _server;
   StreamSubscription<ReceiveEvent>? _sub;
+  Advertiser? _advertiser;
+  NetworkMonitor? _monitor;
+  StreamSubscription<List<LocalAddress>>? _networkSub;
+  AppLifecycleListener? _lifecycle;
+  ConnectPayload Function(LocalAddress)? _payloadFor;
   final Map<String, SpeedMeter> _meters = {};
   DateTime _lastUiUpdate = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -118,20 +155,95 @@ class ReceiveController extends Notifier<ReceiveState> {
       _server = server;
       _sub = server.events.listen(_onEvent);
       await WakelockPlus.enable();
+
+      _payloadFor = (a) => ConnectPayload(
+        ip: a.ip,
+        port: server.port,
+        fingerprint: identity.fingerprint,
+        deviceId: device.deviceId,
+        name: device.deviceName,
+      );
+      final monitor = _monitor = NetworkMonitor(
+        connectivityEvents: ref.read(connectivityEventsProvider),
+      );
+      await monitor.start();
+      if (!ref.mounted) return;
+      _networkSub = monitor.changes.listen(_onNetworkChanged);
+      _lifecycle = AppLifecycleListener(onResume: _onResume);
       state = state.copyWith(
         port: server.port,
-        addresses: await _localAddresses(),
+        deviceName: device.deviceName,
         saveDir: dirs.received,
       );
+      _showAddresses(monitor.current);
+
+      final advertiser = _advertiser = Advertiser(
+        ref.read(mdnsBackendProvider),
+      );
+      try {
+        await advertiser.start(
+          txt: TxtRecord.forDevice(
+            identity: device,
+            platform: DevicePlatform.current,
+            fingerprint: identity.fingerprint,
+          ),
+          port: server.port,
+        );
+        if (ref.mounted) state = state.copyWith(advertising: true);
+      } catch (e) {
+        logEvent('discovery', 'advertising failed: ${e.runtimeType}');
+        if (ref.mounted) {
+          state = state.copyWith(
+            advertiseError: () =>
+                'Nearby discovery is not available. The QR code still works.',
+          );
+        }
+      }
     } catch (e) {
       if (ref.mounted) state = state.copyWith(error: 'Could not start: $e');
     }
   }
 
   Future<void> _stop() async {
+    _lifecycle?.dispose();
+    await _networkSub?.cancel();
+    await _monitor?.dispose();
+    await _advertiser?.stop();
     await _sub?.cancel();
     await _server?.close();
     await WakelockPlus.disable();
+  }
+
+  void _showAddresses(List<LocalAddress> addresses) {
+    final qr = pickQrAddress(addresses);
+    state = state.copyWith(
+      addresses: addresses,
+      qrPayload: () => qr == null ? null : _payloadFor!(qr).toUri(),
+    );
+  }
+
+  /// Wi-Fi or IP changed: register again so peers learn the new address,
+  /// and redraw the QR code.
+  Future<void> _onNetworkChanged(List<LocalAddress> addresses) async {
+    if (!ref.mounted) return;
+    _showAddresses(addresses);
+    await _restartAdvertising();
+  }
+
+  /// iOS pauses the app when the screen locks; the network may have
+  /// changed meanwhile.
+  Future<void> _onResume() async {
+    if (!ref.mounted) return;
+    _showAddresses(reachableAddresses(await listLocalAddresses()));
+    await _restartAdvertising();
+  }
+
+  Future<void> _restartAdvertising() async {
+    try {
+      await _advertiser?.restart();
+    } catch (e) {
+      logEvent('discovery', 'advertising restart failed: ${e.runtimeType}');
+    }
   }
 
   void _onEvent(ReceiveEvent e) {
@@ -177,17 +289,5 @@ class ReceiveController extends Notifier<ReceiveState> {
         files[key] = current.copyWith(error: code, receivedBytes: 0);
     }
     state = state.copyWith(files: files);
-  }
-
-  static Future<List<String>> _localAddresses() async {
-    final interfaces = await NetworkInterface.list(
-      type: InternetAddressType.IPv4,
-    );
-    // Interface names help pick the Wi-Fi address (e.g. wlan0, en0) over
-    // mobile data or VPN interfaces.
-    return [
-      for (final i in interfaces)
-        for (final a in i.addresses) '${a.address}  (${i.name})',
-    ];
   }
 }

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../transfer/transfer_format.dart';
 import 'receive_controller.dart';
@@ -21,16 +22,56 @@ class ReceiveScreen extends ConsumerWidget {
           else if (state.port == null)
             const Text('Starting…')
           else ...[
-            Text('Ready to receive', style: theme.textTheme.titleLarge),
-            const SizedBox(height: 8),
-            for (final ip in state.addresses)
-              SelectableText(ip, style: theme.textTheme.headlineSmall),
-            if (state.addresses.isEmpty)
-              const Text('No network address. Join a Wi-Fi or hotspot.'),
+            Text(
+              'Ready to receive as ${state.deviceName}',
+              style: theme.textTheme.titleLarge,
+            ),
             const SizedBox(height: 4),
+            Text(
+              state.advertising
+                  ? 'Phones on this Wi-Fi see you in their nearby list.'
+                  : (state.advertiseError ?? 'Starting nearby discovery…'),
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 16),
+            if (state.qrPayload != null) ...[
+              Center(
+                child: Container(
+                  // White background so the code scans in dark mode too.
+                  color: Colors.white,
+                  padding: const EdgeInsets.all(12),
+                  child: QrImageView(
+                    data: state.qrPayload!,
+                    size: 220,
+                    semanticsLabel: 'CrossDrop connection QR code',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Not in the list? On the other phone tap Send, then Scan QR '
+                'code.',
+                textAlign: TextAlign.center,
+              ),
+            ] else
+              Text(
+                'No Wi-Fi or hotspot address. Join the same Wi-Fi as the '
+                'other phone, or use a hotspot.',
+                style: TextStyle(color: theme.colorScheme.error),
+              ),
+            const SizedBox(height: 16),
+            Text(
+              'Or type this on the other phone:',
+              style: theme.textTheme.bodySmall,
+            ),
+            for (final a in state.addresses)
+              SelectableText(
+                '${a.ip}  (${a.interfaceName})',
+                style: theme.textTheme.titleMedium,
+              ),
             SelectableText(
               'Port ${state.port}',
-              style: theme.textTheme.headlineSmall,
+              style: theme.textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             Text(
