@@ -6,7 +6,8 @@ CrossDrop is a Flutter app that sends photos, videos and files directly between 
 - **Phase 1, file transfer proof of concept:** built and tested on devices.
 - **Phase 2, discovery and QR connect:** built and tested on devices.
 - **Phase 3, transfer engine:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 3) are pending.
-- **Phase 4, security:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 4) are pending.
+- **Phase 4, security:** built and tested on devices.
+- **Phase 5, media and sharing:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 5) are pending; the iPhone code is first compiled by the CI build.
 
 What works in the code today:
 
@@ -18,8 +19,14 @@ What works in the code today:
 - Each phone has its own key; its certificate fingerprint is its identity. Every connection is TLS 1.3, pinned to the receiver, and the sender proves its key with a signed challenge (`dart:io` cannot do mutual TLS with unknown certificates, D-027).
 - New devices are checked with a 6-digit code shown on both phones. Trusted devices skip the code, can be set to auto-accept, and a trusted name with another key is flagged.
 - A Receiving switch, rate limits and request size limits keep strangers on the Wi-Fi out.
+- Photos and videos are picked from the library as originals (iCloud originals are downloaded first), other files from Files or the Storage Access Framework.
+- Received photos and videos go to Photos or the gallery, other files to Files or Download/CrossDrop, without an extra copy.
+- HEIC and HEVC are sent as they are. Converting HEIC to JPEG and sending Live Photo videos are settings.
+- Share from Photos, Gallery, Files or any app opens CrossDrop with the files selected.
 
-Not yet built: saving to Photos or the gallery, hotspot mode, and the final transfer UI.
+Requirements: iOS 15 or later, Android 10 or later.
+
+Not yet built: hotspot mode, transfer history and the final transfer UI.
 
 ## Build and test
 

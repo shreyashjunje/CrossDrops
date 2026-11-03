@@ -272,3 +272,105 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - Trust records hold fingerprint, device id, name, platform, auto-accept, first and last seen. Lookup is by fingerprint only. A trusted name or id with another fingerprint is a lookalike: a warning on both phones, and the user can go on only as untrusted, with the code.
   - The same table serves both directions. The receiver trusts from the Accept prompt; the sender trusts after a completed send. Auto-accept matters only on the receiving side and is off by default.
 - Consequences: A reinstalled phone shows up as a lookalike until the user forgets the old record or trusts the new one. A wrong QR fingerprint can never be "continued anyway".
+
+## D-034: The database lives in Application Support, not Documents
+- Date: 2026-11-03
+- Status: Accepted
+- Context: `drift_flutter` puts the database in the Documents folder by default. On iOS that folder is visible in the Files app (`UIFileSharingEnabled`, needed for received files), so the user could open or delete the database, and Phase 5 makes Documents the place for received files.
+- Decision: Pass `databaseDirectory` = Application Support on both platforms. At startup, a database found in Documents is moved there once (side files first, then the main file), never over an existing one.
+- Consequences: Files shows only received files. An interrupted move finishes on the next launch. Android moves too (both folders are private there), so the code path is the same.
+
+## D-035: Android minimum SDK 29 (Android 10)
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Saving straight into the gallery and Downloads (D-040) needs MediaStore `IS_PENDING`, `RELATIVE_PATH` and the Downloads collection, all API 29. Below that, saving needs `WRITE_EXTERNAL_STORAGE`, file paths and a media scan: a second save path with its own bugs. The open decision "minimum OS versions" was waiting for this.
+- Decision: `minSdk = 29`. iOS stays at 15.
+- Consequences: Phones on Android 9 or older cannot install CrossDrop (a small share of active phones in 2026). One save path, no storage permission. `setRequireOriginal` and `ACCESS_MEDIA_LOCATION` (D-037) are available everywhere.
+
+## D-036: Android files are read and written through file descriptors with dart:ffi
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Android hands out files as content URIs (gallery, Files, share intents). Rule 2 forbids file bytes on platform channels, and the brief asks to stream "without copying the file". `dart:io` cannot wrap a raw descriptor. Opening `/proc/self/fd/N` reopens the file by path, which other apps' providers and FUSE passthrough refuse.
+- Decision: Kotlin opens the URI (`ParcelFileDescriptor`, `detachFd`) and passes only the descriptor number. Dart reads and writes it with `pread`, `pwrite`, `ftruncate`, `fsync` and `futimens` through `dart:ffi` (64-bit offset variants on Android). The blocking calls run in one background isolate (`FdWorker`), never on the UI isolate; the hash isolate calls them directly. `ByteSource` (`PathSource` or `FdSource`) flows through the reader, the upload and the hasher. A provider that cannot seek or has no size (some cloud apps) is streamed once into the staging folder by Kotlin. Package `ffi` (Dart team) is added for `calloc`.
+- Consequences: No copy for gallery, Files and shared items; the same mechanism serves receiving (D-040). FFI is POSIX-only: its tests run on the Linux CI job and are skipped on Windows. Considered: copying every pick to a temp file (doubles space and time for big videos), a native reader that pushes chunks over a channel (against rule 2).
+
+## D-037: Read Android originals with setRequireOriginal and ACCESS_MEDIA_LOCATION
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Since Android 10, MediaStore strips GPS from images an app reads, unless the app has `ACCESS_MEDIA_LOCATION` and asks for the original. The received file would then differ from the original, and its hash too.
+- Decision: Declare `ACCESS_MEDIA_LOCATION` and ask for it with the photo permission (photo_manager `mediaLocation: true`). Open MediaStore items with `MediaStore.setRequireOriginal`. If that is refused, send the redacted file rather than nothing; the channel reports `original: false`.
+- Consequences: Photos keep their location, as a user expects of "the original". The user can still remove location in their gallery before sharing.
+
+## D-038: Prepare picked items before the offer; our own iOS exporter
+- Date: 2026-11-03
+- Status: Accepted
+- Context: An iOS library item is not a file; it must be exported, may be in iCloud only, may be converted (D-039), and its exact size is unknown until then. The offer needs exact sizes, and v1 cannot skip a file inside a session. photo_manager's `originFile` exports into its own cache, without cancel, stall detection or a choice of resource.
+- Decision:
+  - On Send, after the receiver is checked, every picked item is prepared first ("Preparing 3 of 12", with iCloud progress and Cancel). Items that fail are left out with a reason (iCloud, no longer in the library or not shared under Limited access, unreadable); running out of space leaves out the rest. Then the offer is made with exact sizes.
+  - iOS: `PHAssetResourceManager.requestData` with network access, written chunk by chunk to `<app support>/crossdrop_outgoing/<batch>/<n>/`, cancellable, failing after 90 s without progress. It exports the current version (edits applied: `fullSizePhoto`/`fullSizeVideo`, else the original resource), named after the original (`IMG_1234.HEIC`, not `FullSizeRender.jpg`).
+  - Android: library items are not exported; their content URI is read in place (D-036).
+  - Staged files live in Application Support (the OS temp folder may be emptied while a paused send waits), and are deleted when the send ends for good. At launch, batches that no unfinished send uses are deleted.
+  - photo_manager stays for permission, Limited access, albums, the grid and thumbnails.
+- Consequences: The offer is always exact, and a file that cannot be read never reaches the receiver. A big iOS video briefly needs its size again in free space (as ARCHITECTURE.md already said). Preparing many large iCloud items takes time before anything is sent; streaming while exporting is a later optimisation. Slow-motion videos arrive as the original high-frame-rate file, without the slow-motion ramp (no transcoding in v1).
+
+## D-039: HEIC, Live Photo and video format rules
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The open decisions asked for HEIC and Live Photo defaults. Most Android galleries open HEIC; older ones do not. Android has no Live Photos.
+- Decision: Defaults: send the original HEIC, and only the still of a Live Photo. Two settings (Settings > Sending photos to Android, iPhone only, schema 4): convert HEIC to JPEG before sending (ImageIO, quality 0.92, EXIF, GPS, orientation and colour profile kept, HDR gain map lost), and send the Live Photo video as a second file named after the still (`IMG_1234.MOV`), with a shared `livePhotoGroup`. They apply only when the receiver is not an iPhone. HEVC and HDR videos are always sent unchanged; nothing else is transcoded.
+- Consequences: Originals by default, with a way out for old galleries. The receiver gets two ordinary files for a Live Photo. Dolby Vision may look washed out on some Androids (documented, not fixed).
+
+## D-040: Android receives straight into a pending MediaStore item
+- Date: 2026-11-03
+- Status: Accepted
+- Context: ARCHITECTURE.md says "insert into MediaStore as a pending item, write directly into it, then publish. No extra copy." Writing to a `.part` file and copying it in at the end would need twice the space for a big video.
+- Decision:
+  - The receive server stores files through a `ReceivedFileStore` interface. On Android the partial file is the pending item itself, created at the first byte (a declined offer leaves nothing). Photos go to `Pictures/CrossDrop`, videos to `Movies/CrossDrop`, other files to `Download/CrossDrop`.
+  - The collection comes from the sanitized name's extension, never from the declared MIME type; a declared kind that contradicts the extension goes to Downloads. If MediaStore refuses the MIME type for the gallery, the item goes to Downloads and the user is told.
+  - The item's URI is stored in `tempPath`. Resume, checkpoints, cut-back after a crash and the hash all work through its descriptor. A hash mismatch truncates the item; cancel, failure and the 24-hour cleanup delete it. An item that disappeared starts the file over. At launch, this app's pending items older than 24 hours that no session uses are deleted.
+  - When verified, the item is published. `FolderStore` keeps the old behaviour for tests, the dev CLI and iOS.
+- Consequences: No copy, no storage permission. Pending items are hidden from other apps until published. Name clashes are resolved by MediaStore ("IMG_1 (1).jpg"). A full disk during a write pauses the session as before.
+
+## D-041: Document pickers: SAF in place on Android, a copy on iOS
+- Date: 2026-11-03
+- Status: Accepted
+- Context: `file_picker` copies every pick into the cache on Android, against "stream without copying". On iOS, keeping security-scoped URLs open across backgrounding, pausing and restarts needs bookmarks and careful access lifetimes. ARCHITECTURE.md said "files arrive as security-scoped URLs".
+- Decision: Android uses our own `ACTION_OPEN_DOCUMENT` (multiple, any type) and takes a persistable read grant per URI, released when the send ends. iOS keeps `file_picker` in import mode: iOS hands over a copy (downloading iCloud Drive files first, with its own UI), which is moved out of the temp folder into staging.
+- Consequences: Android reads in place, and resumes after a restart. On iOS a picked document costs its size in free space while it is being sent, the same as a library export. The architecture row is updated.
+
+## D-042: Creation dates
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The brief asks to keep the creation date where the platform allows.
+- Decision: The sender puts `created` in the offer: the asset's `creationDate` on iOS; `DATE_TAKEN` (else the last modified time) on Android; the file's modification time for documents. The receiver applies it as follows:
+  - iOS Photos: `PHAssetCreationRequest.creationDate`.
+  - iOS Files: the modification date.
+  - Android gallery: `DATE_TAKEN` at insert, and the file time (`futimens`) before publishing.
+  - Android Downloads: the file time only.
+  - In every case the file's own metadata (EXIF, QuickTime) goes along unchanged.
+- Consequences: Photos and videos sort by when they were taken on both phones. Where it cannot be kept: iOS Files has no settable creation date, only the modification date; Android rescans the file when it is published and prefers the file's own metadata, so a PNG screenshot without EXIF may show the time it was received in some galleries; Android Downloads keeps only the modification time; iOS documents picked through the document picker are copies and carry the copy's time.
+
+## D-043: iOS saving: Photos with add-only access, moved; Files as the fallback
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The brief asks to move, not copy, received media into Photos, with add-only permission, and to fall back to Files for formats Photos refuses.
+- Decision: `PHAssetCreationRequest` with `shouldMoveFile`, the original name and the creation date. Add-only access is asked when the user accepts an offer with photos or videos (the accept does not wait for the answer). Formats Photos cannot import (WebM, Matroska, AVI, raw HEVC streams, documents) go straight to Files. Anything Photos refuses at save time, and everything if access is denied, goes to the Documents folder (Files > On My iPhone > CrossDrop) with a note on the Receive screen. The app is named CrossDrop on both platforms.
+- Consequences: No copy and no read access needed to save. Photos may need temporary space while it imports a large moved file; that is not under our control.
+
+## D-044: Android share target: SEND and SEND_MULTIPLE, singleTask
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Sharing from Gallery or Files should open the Send flow with the files preselected. With the default `singleTop`, a share starts a second CrossDrop activity inside the other app's task: a second engine, database connection and server. `receive_sharing_intent` copies shared files into the cache.
+- Decision: Intent filters for `SEND` and `SEND_MULTIPLE` (`*/*`) on `MainActivity`, now `singleTask`, so every share reaches the running instance through `onNewIntent`. Our own small `ShareChannel`. It accepts only `content://` URIs from other apps: a `file://` URI, or one of CrossDrop's own, could make it send private files. It ignores intents redelivered after a configuration change or from Recents. Dart describes the URIs and opens the Send flow on top of whatever is open, so a running receive keeps going. Text-only shares get a message.
+- Consequences: Files are read in place through the intent's read grant, which lasts while the process lives; a send of shared files cannot resume after the app was killed ("source unreadable", share again). `singleTask` also means Back from CrossDrop does not return to the sharing app's task.
+
+## D-045: iOS Share Extension hands files to the app through an App Group inbox
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Share extensions have a memory limit of about 120 MB and must not run a transfer. The brief asks for an App Group hand-off.
+- Decision:
+  - **Extension:** a Share Extension target (UIKit, no Flutter). It loads each item with `loadFileRepresentation`, in its own format, and clones it into `<group>/Inbox/<uuid>/<n>/<name>`; only small image-only items (Markup screenshots) are loaded as data. It writes `manifest.json` last and atomically, then opens `crossdrop://share` through the responder chain. That is not a public API; if it fails, the extension says "Open CrossDrop to send".
+  - **App:** checks the inbox at launch, on that URL and on every return to the foreground. It validates the manifest (version, at most 10,000 items, every path inside its share folder, no links, files present), moves the share into staging and opens the Send flow with the files preselected. Shares without a manifest for an hour are deleted.
+  - **Setup:** the App Group id is the `APP_GROUP_ID` build setting (`group.com.example.crossdrop`), read from Info.plist at run time. The extension is embedded before Flutter's "Thin Binary" phase, which avoids Xcode's build-cycle error.
+  - `receive_sharing_intent` is not used.
+- Consequences: The extension stays far below its memory limit for any file size. If a re-signing tool drops or renames the App Group, sharing says it is not available, and the in-app pickers still work. Shared photos are what Photos hands over, which may be a rendered copy rather than the library original; for exact originals use the in-app picker.

@@ -15,4 +15,8 @@
   - [device-identity.md](features/device-identity.md): Phase 4 key pair and certificate, Keychain / Keystore storage, fingerprint as identity, reinstall.
   - [pairing-and-trust.md](features/pairing-and-trust.md): Phase 4 pinned TLS, sender authentication, 6-digit code, trusted devices, auto-accept, lookalike warnings.
   - [abuse-limits.md](features/abuse-limits.md): Phase 4 Receiving switch, rate limits, request limits, server lifetime.
+  - [media-picking.md](features/media-picking.md): Phase 5 gallery and file pickers, Limited access, iCloud originals, preparing before the offer.
+  - [saving-received-files.md](features/saving-received-files.md): Phase 5 MediaStore pending items on Android, Photos and Files on iPhone, fallbacks.
+  - [format-handling.md](features/format-handling.md): Phase 5 originals, HEIC to JPEG and Live Photo settings, names, kinds and dates.
+  - [share-from-other-apps.md](features/share-from-other-apps.md): Phase 5 iOS Share Extension and Android share intents.
 - [TODAY-2026-11-02.md](TODAY-2026-11-02.md): short list of what was built, tested and left open on day one.

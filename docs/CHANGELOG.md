@@ -4,6 +4,46 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 
 ## 2026-11-03
 
+### Added (Phase 5)
+- Picking ([features/media-picking.md](features/media-picking.md)):
+  - "Photos & videos": a gallery grid on photo_manager with albums, Live and duration badges, Limited access ("Select more", Settings) and a denied screen.
+  - "Files": Storage Access Framework on Android (read in place) and the document picker on iOS.
+  - Picks are prepared before the offer:
+    - iPhone exports the original (edits applied, named after the original), downloads iCloud originals with progress and Cancel.
+    - Items that cannot be prepared are left out with the reason.
+    - Android reads content URIs in place through file descriptors (`dart:ffi`), with the GPS location kept.
+- Saving ([features/saving-received-files.md](features/saving-received-files.md)):
+  - Android writes straight into a pending MediaStore item: Pictures/CrossDrop, Movies/CrossDrop or Download/CrossDrop, published when the hash matches.
+  - iPhone moves photos and videos into Photos (add-only access) and other files into Files > On My iPhone > CrossDrop.
+  - Formats the gallery refuses, or no Photos access, fall back to Files or Downloads with a note.
+  - The Receive screen shows where each file went.
+- Formats ([features/format-handling.md](features/format-handling.md)):
+  - Originals by default.
+  - iPhone settings "Convert HEIC to JPEG" and "Send Live Photo videos" (to Android only).
+  - HEVC sent unchanged.
+  - Creation dates kept where the platform allows (D-042).
+- Share from other apps ([features/share-from-other-apps.md](features/share-from-other-apps.md)):
+  - An iOS Share Extension with an App Group inbox.
+  - Android `SEND`/`SEND_MULTIPLE`.
+  - Both open Send with the files selected.
+- Database schema 4 (format settings), with a tested migration.
+- Tests without phones:
+  - MIME type and kind detection, save collections, format plan and names.
+  - Preparing and skipping, staging cleanup.
+  - Descriptor I/O (Linux CI).
+  - The folder and MediaStore stores over the real server (fake MediaStore).
+  - Share inbox and manifest attacks, settings.
+- Docs: decisions D-034 to D-045, Phase 5 device checks, ARCHITECTURE.md platform modules, transfer rules, failures and data model.
+- Packages: `photo_manager` (gallery grid and permissions, D-038), `ffi` (descriptor I/O, D-036).
+
+### Changed (Phase 5)
+- **Android 10 is now the minimum** (D-035).
+- The database moved from Documents to Application Support; an existing one is moved at first launch (D-034).
+- iPhone received files go to the Documents folder itself instead of `Documents/CrossDrop`. Files from earlier phases stay where they were.
+- Android `MainActivity` is `singleTask`, so a share reaches the running app.
+- The app is named "CrossDrop" on the home screen and in Files.
+- The receive server stores partial and saved files through `ReceivedFileStore`.
+
 ### Added (Phase 4)
 - Device identity ([features/device-identity.md](features/device-identity.md)):
   - An ECDSA P-256 key and self-signed certificate are made on first launch. The certificate's SHA-256 is the device identity.

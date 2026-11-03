@@ -1,6 +1,6 @@
 # CrossDrop Architecture: iPhone ↔ Android File Sharing
 
-Nov 1, 2026 · updated Nov 3, 2026 (Phase 4) · @yash
+Nov 1, 2026 · updated Nov 3, 2026 (Phase 5) · @yash
 
 CrossDrop v1 is a Flutter app in which each phone runs a small encrypted HTTPS server. The phones find each other over the local network (or connect through a hotspot) and send files straight to each other, with no cloud server. This document covers only iPhone ↔ Android, in both directions.
 
@@ -209,12 +209,12 @@ The SHA-256 is not in the offer, so the sender can start sending before hashing 
 **Transfer rules**
 
 1. The receiver checks free space before accepting. The free space must cover the offer, the bytes other open sessions still expect, and a 64 MB reserve, on both the temp and the save volume. It checks again when the user taps Accept.
-2. Data is written to `<app support>/crossdrop_incoming/<sessionId>/<fileId>.part` (D-025). Every 4 MB, and whenever an upload stops, the part file is fsynced and then the received byte count is saved. After a crash the part file is cut back to that count (D-022).
+2. Data is written to a partial file through a `ReceivedFileStore`: on iPhone `<app support>/crossdrop_incoming/<sessionId>/<fileId>.part` (D-025), on Android straight into a pending MediaStore item, created at the first byte (D-040). Every 4 MB, and whenever an upload stops, the partial file is fsynced and then the received byte count is saved. After a crash it is cut back to that count (D-022).
 3. On reconnect, the sender calls GET on the file, then PUT with `offset = receivedBytes`. Retries wait 1, 2, 4, 8 s, then 8 s, and stop after about 2 minutes without progress (D-019).
 4. Files go one at a time on one connection in v1. Parallel streams (2–4) are added only if benchmarks show a gain.
 5. Read and write buffers start at 1 MB; tune after benchmarks.
 6. On `complete`, the receiver compares SHA-256 (computed incrementally while writing, kept across drops; hashed from disk after an app restart, D-021). On mismatch, the file restarts from zero once, then fails.
-7. After verification the file is moved into the gallery or Files (see Platform modules) and the `.part` is removed.
+7. After verification the file is saved without a copy: Android publishes the pending item; iPhone moves the file into Photos or the Documents folder (see Platform modules). Where it goes is decided from the sanitized name's extension, never the declared MIME type.
 8. More bytes than declared, by Content-Length or by count, fails that file and deletes its partial file. The other files continue.
 9. A session ends `done` when every file is saved or failed and at least one was saved, and `failed` when none was.
 
@@ -348,21 +348,22 @@ Most platform risk sits in four areas: how files are read, how they are saved, w
 | Discovery | Bonjour through the `bonsoir` plugin (NWBrowser and DNSServiceRegister). Avoid raw multicast sockets: they need a special Apple entitlement. Requires `NSBonjourServices` and `NSLocalNetworkUsageDescription`. | NsdManager (same plugin). A Wi-Fi multicast lock is held while browsing or advertising: bonsoir takes it on start and releases it on stop, and the app stops browsing in the background. Permissions: `CHANGE_WIFI_MULTICAST_STATE`, `ACCESS_WIFI_STATE`, `ACCESS_NETWORK_STATE`; no location. |
 | Local network permission | System prompt on first discovery. If denied, nothing is found and connections fail. Detection (D-015): after 5 s with no peers, a Swift probe advertises and browses a short-lived Bonjour service; still `PolicyDenied` at 8 s means denied. The app then explains why and links to Settings. | No prompt on same Wi-Fi. `NEARBY_WIFI_DEVICES` on Android 13+ for hotspot features. |
 | QR scanning | `mobile_scanner` (AVFoundation); needs `NSCameraUsageDescription`. | `mobile_scanner` (ML Kit); `CAMERA` asked at runtime. |
-| Picking photos and videos | PhotoKit via `photo_manager`, which gets the original file. The default image picker may convert or compress. Handle "Limited" photo access. | MediaStore via `photo_manager`; `READ_MEDIA_IMAGES` and `READ_MEDIA_VIDEO`, or the system Photo Picker. |
-| iCloud-only originals | If "Optimize iPhone Storage" is on, the original may be in iCloud. Download it first (needs internet) and show "Preparing". | Not applicable. |
-| Picking other files | Document picker; files arrive as security-scoped URLs. | Storage Access Framework; content URIs read through ContentResolver. |
-| Reading for sending | Export the asset to a temp file, then stream from it. A large video briefly needs equal free space. | Open the content URI as a file descriptor and stream it without copying. |
-| Saving received media | `PHAssetCreationRequest` with the received file, moved rather than copied. Needs add-to-photos permission. | Insert into MediaStore as a pending item, write directly into it, then publish. No extra copy. |
-| Saving other files | App Documents folder, visible in the Files app (`UIFileSharingEnabled`, `LSSupportsOpeningDocumentsInPlace`). | MediaStore Downloads collection in `Download/CrossDrop`. |
-| HEIC photos (iPhone → Android) | Default: send the original HEIC. Optional setting: convert to JPEG before sending (costs time, slight quality loss). | Most modern Android galleries open HEIC; older ones may not. Show a hint if a gallery can't open it. |
-| Live Photos (iPhone → Android) | Two resources: still photo and short MOV. Default: send the still; optional: send both. | Saved as a photo, plus a video if both were sent. No Live Photo playback. |
+| Picking photos and videos | Our own grid on `photo_manager` (permission, Limited access with "Select more", albums, thumbnails). It returns ids only; the file is exported when sending (D-038). The automatic Limited prompt is off. | Same grid. `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_VISUAL_USER_SELECTED` (Android 14 partial access) and `ACCESS_MEDIA_LOCATION`, so the original keeps its GPS (`setRequireOriginal`, D-037). |
+| iCloud-only originals | Downloaded while preparing, before the offer, with progress ("Preparing 2 of 5: downloading from iCloud 40%") and Cancel. A failure or 90 s without progress leaves that item out with a message (D-038). | Not applicable. |
+| Picking other files | Document picker (`file_picker`, import mode): iOS hands over a copy, downloading iCloud Drive files first; it is moved into the staging folder (D-041). | Our own `ACTION_OPEN_DOCUMENT`; content URIs read in place, with a persistable read grant released when the send ends. |
+| Reading for sending | `PHAssetResourceManager` exports the current version of the original resource (edits applied, named after the original) chunk by chunk to `<app support>/crossdrop_outgoing/<batch>/`, then Dart streams it. A large video briefly needs equal free space. Staging is deleted when the send ends for good (D-038). | Kotlin opens the content URI and hands over the descriptor number; Dart reads it with `pread` through `dart:ffi` in a background isolate, without copying (D-036). Providers that cannot seek are streamed once into staging. |
+| Saving received media | `PHAssetCreationRequest` with `shouldMoveFile`, the original name and creation date. Add-only access, asked when the user accepts media (D-043). | The pending MediaStore item in `Pictures/CrossDrop` or `Movies/CrossDrop` *is* the partial file; it is published once verified (D-040). No extra copy, no permission. |
+| Saving other files | The Documents folder itself, shown in Files as On My iPhone > CrossDrop (`UIFileSharingEnabled`, `LSSupportsOpeningDocumentsInPlace`). The database is not there (D-034). | Pending item in the MediaStore Downloads collection, `Download/CrossDrop`. |
+| HEIC photos (iPhone → Android) | Default: send the original HEIC. Setting "Convert HEIC to JPEG": ImageIO at quality 0.92 with metadata and colour profile kept, HDR gain map lost (D-039). | Most modern Android galleries open HEIC; older ones may not. The setting's description says so. |
+| Live Photos (iPhone → Android) | Default: send the still. Setting "Send Live Photo videos": also the MOV, named after the still, sharing `livePhotoGroup` (D-039). | Saved as a photo, plus a video if both were sent. No Live Photo playback. |
 | HEVC / HDR video (iPhone → Android) | Send the original. | Most phones play HEVC. Dolby Vision HDR may look washed out on some Androids; note it in help, don't transcode in v1. |
-| Android → iPhone formats | JPEG, PNG, MP4 open fine. WebP opens on recent iOS. Uncommon formats are saved to Files instead of Photos. | Not applicable. |
+| Android → iPhone formats | JPEG, PNG, HEIC, WebP, MP4 and MOV go to Photos. WebM, Matroska, AVI and anything Photos refuses go to Files, with a note on the Receive screen. Motion Photos arrive as stills. | Not applicable. |
 | Screen lock during transfer | Keep the screen on during a transfer (`wakelock_plus`). Use a short background task to finish the current chunk and save progress; resume when the app returns. | Foreground service of type data sync with a progress notification; transfer continues with the screen off. Needs `POST_NOTIFICATIONS`. |
 | Battery and OEM killers | Not applicable. | Some brands (Xiaomi, Oppo, Vivo, OnePlus) kill background apps aggressively. Ask the user to exempt CrossDrop from battery optimization if transfers stop. |
 | Hotspot | Can't create one from an app; the user turns on Personal Hotspot. Can join an Android hotspot in-app via NEHotspotConfiguration (needs the Hotspot Configuration capability). | LocalOnlyHotspot creates one with a random name and password; no internet sharing. |
+| Creation dates | Photos: `creationDate`. Files: modification date only (D-042). | `DATE_TAKEN` and the file time; Downloads keep only the file time. Files without EXIF (PNG) may show the receive time. |
 | Network binding | Local subnet traffic goes over Wi-Fi even without internet. | When the Wi-Fi has no internet, bind the process or socket to that Wi-Fi network, or traffic may go over mobile data. |
-| Share from other apps | Share Extension target; it hands the files to the main app, which does the transfer (extensions have tight memory limits). | Intent filters for `SEND` and `SEND_MULTIPLE`. |
+| Share from other apps | Share Extension target: clones the files into an App Group inbox (no file in memory), writes a manifest, opens `crossdrop://share`. The app checks the manifest, moves the files into staging and opens Send with them selected (D-045). | Intent filters for `SEND` and `SEND_MULTIPLE` on a `singleTask` activity; only content URIs of other apps; read in place (D-044). |
 
 ## Failure handling
 
@@ -392,8 +393,12 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | Peer IP changes (DHCP, reconnect) | Connection refused at the old address | Rediscover by device id via mDNS and continue |
 | Source file gone or changed | Size check before offering and before each file | Cancel the session (v1 cannot skip a file) and say which problem it was |
 | VPN blocks local traffic | Connect fails while a VPN is active | Suggest pausing the VPN |
-| iCloud original won't download | Export fails or times out on iPhone | Skip the file or send the local version, if one exists, with a note |
-| Unsupported format on the receiver | Gallery insert fails | Save to Files or Downloads instead and tell the user |
+| iCloud original won't download | Export fails, or no progress for 90 s, while preparing | That item is left out before the offer, with "only in iCloud and could not be downloaded"; the others are sent (D-038) |
+| Picked item gone before sending | Export or open fails while preparing (deleted, or no longer shared under Limited access) | Left out before the offer, with the reason |
+| Sender out of space while preparing | Export write fails with no space | That item and the rest are left out; "not enough free space on this phone" |
+| Unsupported format on the receiver | Extension not in the gallery list, MediaStore refuses the MIME type, or Photos refuses the file | Save to Files or Downloads instead; the Receive screen says why |
+| No Photos access on the receiver (iPhone) | Add-only access denied | Save to Files; "CrossDrop may not add to Photos" |
+| Shared file no longer readable (Android) | The share intent's grant ended with the process | The send stops with "a file could not be read any more"; share again |
 | Protocol version mismatch | `/v1/info` versions don't overlap | "Update CrossDrop on the other phone" |
 | User cancels | Cancel tap on either side | DELETE the session; receiver deletes partial files; both show "Cancelled" |
 
@@ -407,9 +412,9 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | `trusted_devices` | fingerprint (key), deviceId, name, platform, autoAccept, firstSeen, lastSeen |
 | `sessions` | sessionId + direction (unique), peerDeviceId, peerName, peerPlatform, peerFingerprint, peerHost and peerPort (send), status, reason, totalBytes, createdAt, updatedAt, finishedAt |
 | `session_files` | session row + fileId, position, name, size, mime, kind, created, livePhotoGroup, sha256, transferredBytes, tempPath, sourcePath (send), finalLocation, status, hashAttempts, errorCode |
-| `settings` | receivingEnabled (Phase 4); convertHeicToJpeg, sendLivePhotoVideo, saveLocation (not built yet) |
+| `settings` | receivingEnabled (Phase 4); convertHeicToJpeg, sendLivePhotoVideo (Phase 5) |
 
-Schema version 3. Session status: see [Session state machine](#session-state-machine). Both directions are stored. Sessions stored before Phase 4 have no peerFingerprint and cannot resume: a received one is marked failed at start, a sent one asks the user to send again. A sent session that gave up on the network stays `paused`, so the launch prompt can offer to resume it.
+Schema version 4. The database file is in Application Support, not Documents (D-034). `session_files.tempPath` is a path or an Android MediaStore content URI; `sourcePath` is a path or a content URI; `finalLocation` is a path, a content URI or `photos:<id>`, never shown. Session status: see [Session state machine](#session-state-machine). Both directions are stored. Sessions stored before Phase 4 have no peerFingerprint and cannot resume: a received one is marked failed at start, a sent one asks the user to send again. A sent session that gave up on the network stays `paused`, so the launch prompt can offer to resume it.
 
 **Code structure**
 
@@ -434,10 +439,11 @@ crossdrop/
       discovery/    # bonsoir wrapper, TXT parsing
       security/     # identity, certs, pinning, 6-digit code
       storage/      # database, temp files, cleanup
+      media/        # prepare before offer, format plan, save collection
     platform/       # Dart side of platform channels
   ios/
     Runner/         # PhotoKit export/save, hotspot join, background task
-    ShareExtension/
+    ShareExtension/ # Share Extension: App Group inbox hand-off
   android/
     app/src/main/kotlin/  # MediaStore save, fd streaming, LocalOnlyHotspot,
                           # foreground service, multicast lock, network binding
@@ -458,9 +464,9 @@ crossdrop/
 ## Open decisions
 
 - [ ] Custom protocol (this document) or LocalSend-compatible protocol? Compatibility would let CrossDrop talk to LocalSend users; check its protocol and license first.
-- [ ] HEIC default: send original (recommended) or convert to JPEG for Android?
-- [ ] Live Photos default: still only (recommended) or still plus video?
+- [x] HEIC default: send the original; JPEG is a setting (Phase 5, D-039).
+- [x] Live Photos default: the still only; the video is a setting (Phase 5, D-039).
 - [ ] Is iPhone Personal Hotspot mode worth an in-app guide in v1, or Android hotspot mode only?
 - [x] Trusted devices: allow auto-accept, or always show the Accept prompt? Auto-accept is allowed, off by default, per trusted device (Phase 4).
-- [ ] Minimum OS versions (for example iOS 16+ and Android 10+), which decides which APIs you can use without fallbacks. Current project defaults: iOS 15, Android 7.0 (SDK 24); all Phase 2 packages support these.
+- [x] Minimum OS versions: iOS 15, Android 10 (SDK 29), for MediaStore pending items and the Downloads collection (Phase 5, D-035).
 - [ ] What speed target counts as success, decided after the Phase 1 proof of concept measures real numbers?

@@ -665,3 +665,193 @@ Covered by unit tests, hard to do by hand:
 | P4-6 iPhone reinstall | | | | | | |
 | P4-6 Android reinstall | | | | | | |
 | P4-7 | | | | | | |
+
+## Phase 5: media, saving and sharing from other apps
+
+Feature docs: [features/media-picking.md](features/media-picking.md), [features/saving-received-files.md](features/saving-received-files.md), [features/format-handling.md](features/format-handling.md), [features/share-from-other-apps.md](features/share-from-other-apps.md).
+
+### Preparation (once)
+
+1. **Build both phones from the same commit** and install over the Phase 4 app without deleting it ([Installing the CI builds](#installing-the-ci-builds-no-mac-needed)).
+   - This is the first build with the Share Extension and new Swift files. If the **iPhone unsigned IPA** job fails, paste its red lines and stop: nothing on iOS in Phase 5 has been compiled before this job.
+   - **Android 10 or newer is required now** (D-035).
+   - **Sideloadly and the extension:** the `.ipa` now contains `PlugIns/ShareExtension.appex`, which uses an App Group (`group.com.example.crossdrop`). Sideloadly signs the extension as a second app id; a free Apple ID allows 10 new app ids per 7 days. If Sideloadly reports an error about app groups or the extension, paste its log. If you changed the bundle id in Sideloadly, sharing may say "not available in this installation" (P5-9 step 6); the rest of Phase 5 still works.
+2. **Upgrade check:**
+   - iPhone: open CrossDrop, then the **Files** app > Browse > On My iPhone > **CrossDrop**. Expected: **no** `crossdrop.sqlite` file (it moved to a hidden folder). Files received in earlier phases are still there, in a `CrossDrop` subfolder.
+   - Both: Settings, Trusted devices and the security key are unchanged; the app opens normally.
+   - iPhone: Settings in CrossDrop now has "Sending photos to Android" with two switches, both off.
+3. **Test files.**
+   - On the iPhone (take them fresh, **do not edit** them; an edited photo is sent as its edited version and will not hash-match the original):
+     - a 4K 60 fps video of about 30 s (Settings > Camera > Record Video > 4K at 60 fps, Formats > High Efficiency)
+     - a HEIC photo
+     - a JPEG (Settings > Camera > Formats > Most Compatible, take one, set it back)
+     - a Live Photo
+     - a screenshot (PNG)
+     - a PDF and a ZIP in Files (any; Files can compress a folder into a ZIP)
+   - On Android:
+     - a JPEG photo
+     - a PNG screenshot
+     - a video
+     - if the phone can, a HEIC photo
+     - a PDF and a ZIP in Downloads
+4. **On the PC:**
+   - MediaInfo (mediaarea.net) to compare videos.
+   - `adb` for pulling Android files.
+   - Windows **Photos** (or File Explorer) to import from the iPhone.
+   - On the iPhone, set Settings > Photos > Transfer to Mac or PC > **Keep Originals**, so Windows gets the original HEIC and MOV files.
+5. **Hashes on the PC:** in PowerShell, `Get-FileHash -Algorithm SHA256 <file>` (or `certutil -hashfile <file> SHA256` in cmd).
+6. **Logs:** as in Phase 4. New lines:
+   - `[crossdrop.prepare] item 2 skipped (icloud)`
+   - `[crossdrop.server] file f1: verified and saved (123 bytes, photos)` (the last word is `photos`, `videos` or `files`, then `unsupported` or `permission` if it fell back)
+   - `[crossdrop.store] file f1: pending item gone`
+   - `[crossdrop.photos] save refused (unsupported)`
+   - `[crossdrop.share] …`
+   No file names appear in logs.
+
+### P5-1: 4K iPhone video to Android, same size and quality
+
+1. Android: **Receive**. iPhone: **Send** > the Android phone > **Photos & videos** > the 4K video > **Add 1** > **Send**.
+2. Expected on the iPhone: "Preparing 1 of 1…" briefly, then the code check (if not trusted) and sending. On Android: Accept, progress, then under the file "Saved to Movies/CrossDrop".
+3. Android: open the gallery (Google Photos or the maker's gallery). Expected: the video is there, under its date of recording (not today, unless you recorded it today), and it plays.
+4. Compare:
+   - On the PC, import the original from the iPhone (Keep Originals) and run `adb pull /sdcard/Movies/CrossDrop/IMG_XXXX.MOV`.
+   - Hash both files; expected **equal**.
+   - In MediaInfo, compare on both files: Format (HEVC), Width × Height (3840 × 2160), Frame rate, Bit rate, HDR format (if any) and Duration. Expected **identical**.
+   - On the phone, look at the playback: does HDR look right, or washed out? Write down which.
+
+**Paste back:**
+- Both hashes.
+- MediaInfo "Video" sections of both files (Text view).
+- The Android player and model, and whether HDR looked right.
+- The receiver log line `verified and saved (… videos)`.
+
+### P5-2: Formats, iPhone → Android
+
+Send in one go: HEIC, JPEG, Live Photo, screenshot (Photos & videos), then PDF and ZIP (**Files**). Both settings off.
+
+Expected on Android:
+
+| Item | Received as | Where (shown under the file) | Gallery |
+| --- | --- | --- | --- |
+| HEIC | `IMG_….HEIC`, same hash as the original | Pictures/CrossDrop | Opens (most phones; write down if not) |
+| JPEG | `IMG_….JPG`, same hash | Pictures/CrossDrop | Opens |
+| Live Photo | only the still, `IMG_….HEIC` | Pictures/CrossDrop | A still photo |
+| Screenshot | `IMG_….PNG` | Pictures/CrossDrop | Opens; note its date |
+| PDF, ZIP | same names, same hash | Download/CrossDrop | In Files > Downloads > CrossDrop |
+
+Then turn on both settings on the iPhone (Settings > Sending photos to Android) and send the HEIC and the Live Photo again. Expected: `IMG_….JPG` for the HEIC (opens everywhere, location and date kept: check photo details), and for the Live Photo both `IMG_….JPG` and `IMG_….MOV` (the 3-second video plays). Turn both settings off again.
+
+**Paste back:** a screenshot of the Receive screen with the "Saved to …" lines, and the gallery's details (date, location) of the converted JPEG.
+
+### P5-3: Formats, Android → iPhone
+
+Send in one go from Android: JPEG, PNG screenshot, video, HEIC (if you have one), PDF, ZIP. If you have a `.webm` or `.mkv` file, add it.
+
+Expected on the iPhone:
+- Photos and the video appear in **Photos** (Recents), under their original date.
+- PDF and ZIP are in Files > On My iPhone > CrossDrop.
+- A WebM/MKV is in the same Files folder, with the note "(Photos cannot import this format)" under it on the Receive screen.
+- The first time, iOS asks "CrossDrop would like to add to your Photos" right after you tap Accept. Tap **Allow**.
+
+Then: iPhone Settings > Privacy & Security > Photos > CrossDrop > **None**. Send a JPEG again. Expected: it lands in Files with the note "(CrossDrop may not add to Photos)". Set it back to **Add Photos Only**.
+
+**Paste back:** screenshots of the Receive screen and of the Files folder, and the log lines `verified and saved (…)`.
+
+### P5-4: iCloud-only photo
+
+Needs iCloud Photos with **Optimize iPhone Storage** on, and a photo whose original is only in iCloud (an older one, or one taken on another device). A small thumbnail and a cloud icon in Photos > info is a good sign.
+
+1. **Offline:** turn on Airplane Mode, then turn Wi-Fi back on (same Wi-Fi as Android, so no internet if your router has none, otherwise use the Android hotspot without mobile data). Pick that photo plus one local photo > Send.
+   Expected: "Preparing 1 of 2…", then after at most about 90 s: "1 item is not sent: IMG_…: only in iCloud and could not be downloaded…". The local photo is sent. Log: `item 0 skipped (icloud)`.
+2. **Online:** with internet, send the iCloud photo again. Expected: "Preparing 1 of 1: downloading from iCloud 40%" rising, then it sends. The received file is the full-size original (several MB, not a thumbnail).
+3. **Cancel while downloading:** pick a large iCloud-only video, Send, and tap **Cancel** during "downloading from iCloud". Expected: back to the selection, nothing offered to Android.
+
+**Paste back:** screenshots of the skip message and of the download progress, and the sizes of the received file and the original.
+
+### P5-5: Limited photo access
+
+1. iPhone Settings > Privacy & Security > Photos > CrossDrop > **Limited Access**, choose 2 photos.
+2. CrossDrop: Send > **Photos & videos**. Expected: only those 2, and the banner "CrossDrop can see only the photos you allowed" with **Select more** and **Settings**.
+3. **Select more** > add a third > Done. Expected: the grid shows 3 at once, without reopening.
+4. Pick one, go back, then in iOS Settings remove that photo from the allowed set, and Send. Expected: "1 item is not sent: …: no longer in your library, or not shared with CrossDrop."
+5. Set access to **None**, open Photos & videos. Expected: "CrossDrop has no access to your photos" with **Open Settings**; Files still works.
+6. Android 14+: Settings > Apps > CrossDrop > Permissions > Photos and videos > **Allow limited access**. Repeat 2–3; and **Don't allow** for step 5.
+
+Set access back to Full afterwards.
+
+**Paste back:** screenshots of the banner, of the denied screen, and of the skip message.
+
+### P5-6: Original hash, both directions
+
+Proves that the sent file is the library original, not a copy made for sharing.
+
+1. iPhone → Android: one HEIC photo (unedited). PC: import the original from the iPhone, `adb pull /sdcard/Pictures/CrossDrop/IMG_….HEIC`. Hash both. Expected **equal**.
+2. Android → iPhone: one JPEG from the camera. PC: `adb pull /sdcard/DCIM/Camera/<name>.jpg`; on the iPhone it is in Photos; import it on the PC (Keep Originals). Hash both. Expected **equal**.
+   - If not equal, check whether the photo has a location. Expected: the received photo has the **same location**. CrossDrop asks Android for the unredacted original (D-037).
+
+**Paste back:** the four hashes, and whether the location was kept.
+
+### P5-7: Interruptions while saving to the gallery
+
+1. **Android receiver killed mid-video:** iPhone sends the 4K video. At about 50%, swipe CrossDrop away on Android. Reopen it, open Receive. iPhone resumes (Phase 3 behaviour). Expected: the video completes, plays, has the same hash, and there is **one** copy in Movies/CrossDrop (no half file left).
+2. **Cancel mid-video:** send again, cancel on either phone at about 50%. Expected: nothing in Movies/CrossDrop or the gallery. Check also with a file manager that shows hidden files: no `.pending-…` file left in Movies/CrossDrop.
+3. **Android full:** fill the Android phone until less than the video's size is free (a big file in Downloads), then send the video. Expected: refused before Accept ("not enough space"). Free some space so it just fits the offer check, fill the rest during the transfer if you can. Expected: "The other phone ran out of space…" and Resume after freeing space.
+
+**Paste back:** screenshots of the gallery and file manager after 1 and 2, and the logs.
+
+### P5-8: Creation dates
+
+For P5-2 and P5-3, open each received item's details:
+- **Android gallery:** the date of HEIC, JPEG and video is the original's date. The PNG screenshot: write down whether it shows the screenshot's date or the receive time (a known limit, D-042).
+- **Android Files (Downloads):** the PDF's modified time is the original's modified time.
+- **iPhone Photos:** every photo and video has its original date (Photos > info).
+- **iPhone Files:** "Modified" of the PDF is the original's.
+
+**Paste back:** a short list: item, original date, date shown on the receiver.
+
+### P5-9: Sharing from Photos and Gallery
+
+1. **iPhone Photos:** select 3 items (a photo, a video, a Live Photo) > Share > **CrossDrop** (first time: More > add CrossDrop).
+   - Expected: a sheet "Preparing files for CrossDrop…", then CrossDrop opens on the Nearby screen with "3 files ready. Choose the phone to send to." Pick Android > Send screen shows "2 photos, 1 video"… > Send.
+   - If CrossDrop does not open by itself, the sheet says "3 files are ready. Open CrossDrop…": tap Done, open CrossDrop; expected the same Nearby screen. Write down which happened.
+2. **iPhone Files:** share a PDF from Files > CrossDrop. Same as step 1.
+3. **Text:** in Safari, Share a web page > CrossDrop (if listed). Expected: "CrossDrop sends files…".
+4. **Android Gallery:** select 3 items > Share > **CrossDrop**. Expected: CrossDrop opens on Nearby with "3 files ready". Send to the iPhone.
+5. **Android while receiving:** open Receive on Android, then go to Gallery and share a photo to CrossDrop. Expected: Nearby opens **on top**; going back returns to the Receive screen, still running.
+6. If the iPhone share sheet says "Sharing to CrossDrop is not available in this installation", the App Group did not survive sideloading. Paste the Sideloadly log; the in-app pickers are the fallback.
+7. **Memory:** share a large video (1 GB or more) from iPhone Photos. Expected: the sheet does not crash; CrossDrop receives it.
+
+**Paste back:** which of the two iPhone outcomes in step 1, screenshots, and the receiver's "Saved to …" lines.
+
+### P5-10: A share from Photos versus the in-app picker
+
+Send the same HEIC photo twice from the iPhone: once with **Photos & videos** in CrossDrop, once via Share from Photos. Hash both on Android. Expected: the in-app one equals the original (P5-6). The shared one may differ (Photos can hand over a JPEG rendering); write down its name and hash.
+
+**Paste back:** both names and hashes.
+
+### Not checked on devices
+
+Covered by unit tests:
+- Manifest attacks on the iOS inbox (paths outside the share, links, too many items).
+- Refused `file://` and own-package URIs in Android shares: the Kotlin check itself only runs on a phone. To try it, `adb shell am start -a android.intent.action.SEND -t text/plain --eu android.intent.extra.STREAM file:///sdcard/x.txt com.example.crossdrop/.MainActivity` should give "1 shared item(s) could not be used."
+- A pending item that disappears, MIME types MediaStore refuses, and storage full at insert (fake MediaStore).
+
+### Results
+
+| Check | Date | iPhone, iOS | Android, version | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Build and Sideloadly install with extension (prep 1) | | | | | | |
+| Upgrade check (prep 2) | | | | | | |
+| P5-1 4K video, hash and MediaInfo | | | | | | |
+| P5-2 iPhone → Android formats | | | | | | |
+| P5-2 with HEIC→JPEG and Live video on | | | | | | |
+| P5-3 Android → iPhone formats | | | | | | |
+| P5-3 Photos access None → Files | | | | | | |
+| P5-4 iCloud offline, online, cancel | | | | | | |
+| P5-5 Limited access, iPhone | | | | | | |
+| P5-5 Limited access, Android 14 | | | | | | |
+| P5-6 hashes both ways | | | | | | |
+| P5-7 kill, cancel, full | | | | | | |
+| P5-8 dates | | | | | | |
+| P5-9 share from Photos, Files, Gallery | | | | | | |
+| P5-10 share vs picker | | | | | | |
