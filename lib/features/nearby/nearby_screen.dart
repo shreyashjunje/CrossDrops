@@ -31,6 +31,9 @@ class NearbyScreen extends ConsumerStatefulWidget {
 class _NearbyScreenState extends ConsumerState<NearbyScreen> {
   bool _connecting = false;
 
+  /// A QR code or typed address did not answer (network error).
+  bool _addressUnreachable = false;
+
   NearbyController get _controller =>
       ref.read(nearbyControllerProvider.notifier);
 
@@ -48,6 +51,9 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       Navigator.of(context).pop(target);
     } on UploadException catch (e) {
       if (!mounted) return;
+      if (e.code == 'network' && !_addressUnreachable) {
+        setState(() => _addressUnreachable = true);
+      }
       _showError(describeConnectError(e.code, fromQr: fromQr));
     } finally {
       if (mounted) setState(() => _connecting = false);
@@ -137,6 +143,18 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
               ),
             if (state.error != null)
               _Banner(icon: Icons.error_outline, text: state.error!),
+            if (suggestHotspot(
+              searchedLong: state.searchedLong,
+              peerCount: peers.length,
+              addressUnreachable: _addressUnreachable,
+            ))
+              HotspotSuggestion(
+                onOpen: () => pushScreen<void>(
+                  context,
+                  Routes.hotspot,
+                  const HotspotModeScreen(),
+                ),
+              ),
             for (final p in peers)
               _PeerTile(
                 peer: p,

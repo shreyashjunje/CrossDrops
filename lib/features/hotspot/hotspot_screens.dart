@@ -84,6 +84,56 @@ class HotspotModeScreen extends StatelessWidget {
   }
 }
 
+/// Suggest hotspot mode when nothing was found nearby and a QR code or
+/// typed address did not answer either: the Wi-Fi likely keeps phones
+/// apart (ARCHITECTURE.md, scenario 3).
+bool suggestHotspot({
+  required bool searchedLong,
+  required int peerCount,
+  required bool addressUnreachable,
+}) => searchedLong && peerCount == 0 && addressUnreachable;
+
+/// The card shown when [suggestHotspot] is true.
+class HotspotSuggestion extends StatelessWidget {
+  const HotspotSuggestion({super.key, required this.onOpen});
+
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              "The phones can't reach each other on this Wi-Fi",
+              style: theme.textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Guest and public Wi-Fi (cafés, hotels, airports, many '
+              'offices) often keeps phones apart, so they cannot see or '
+              'reach each other. Hotspot mode makes a small network between '
+              'the two phones. It needs no internet and the transfer uses no '
+              'mobile data.',
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              icon: const Icon(Icons.wifi_tethering),
+              label: const Text('Use hotspot mode'),
+              onPressed: onOpen,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _Choice extends StatelessWidget {
   const _Choice({
     required this.icon,

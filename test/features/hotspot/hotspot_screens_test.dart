@@ -258,6 +258,55 @@ void main() {
     });
   });
 
+  group('hotspot suggestion', () {
+    test('only when discovery and an address both failed', () {
+      expect(
+        suggestHotspot(
+          searchedLong: true,
+          peerCount: 0,
+          addressUnreachable: true,
+        ),
+        isTrue,
+      );
+      expect(
+        suggestHotspot(
+          searchedLong: true,
+          peerCount: 0,
+          addressUnreachable: false,
+        ),
+        isFalse,
+      );
+      expect(
+        suggestHotspot(
+          searchedLong: false,
+          peerCount: 0,
+          addressUnreachable: true,
+        ),
+        isFalse,
+      );
+      expect(
+        suggestHotspot(
+          searchedLong: true,
+          peerCount: 1,
+          addressUnreachable: true,
+        ),
+        isFalse,
+      );
+    });
+
+    testWidgets('explains guest Wi-Fi and opens hotspot mode', (tester) async {
+      var opened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: HotspotSuggestion(onOpen: () => opened++)),
+        ),
+      );
+      expect(find.textContaining('Guest and public Wi-Fi'), findsOneWidget);
+      await tester.tap(find.text('Use hotspot mode'));
+      expect(opened, 1);
+    });
+  });
+
   test('error messages never fall back to an empty string', () {
     for (final code in [
       HotspotErrors.permission,
