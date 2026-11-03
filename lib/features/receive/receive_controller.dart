@@ -669,13 +669,27 @@ class ReceiveController extends Notifier<ReceiveState> {
         );
         return;
       case SessionStateChanged(:final sessionId, :final status, :final reason):
+        final before = state.sessions[sessionId]?.status;
         if (status != SessionStatus.offered) {
           // Timed out or withdrawn while the prompt was open.
           _decisions.remove(sessionId)?.complete(false);
           _offers.remove(sessionId);
           _dropPending(sessionId);
         }
-        _update(sessionId, (s) => s.copyWith(status: status, reason: reason));
+        if (status.isTerminal && before == SessionStatus.offered) {
+          // Declined, timed out or withdrawn before Accept: no screen shows
+          // it, and keeping every offer's file list would let any phone on
+          // the network grow this map (review M1).
+          _trackers.remove(sessionId);
+          state = state.copyWith(
+            sessions: {...state.sessions}..remove(sessionId),
+          );
+        } else {
+          _update(
+            sessionId,
+            (s) => s.copyWith(status: status, reason: reason),
+          );
+        }
         unawaited(_trackKeepAlive(sessionId, status));
         if (status.isTerminal) unawaited(_stopIfIdle());
         if (_hidden && !_busy) {

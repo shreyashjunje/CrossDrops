@@ -90,6 +90,11 @@ class TestReceiver {
   /// Holds partial files; null for the default [FolderStore].
   ReceivedFileStore? store;
 
+  /// The server's clock; tests move [now] to age sessions.
+  DateTime now = DateTime.now();
+  bool fakeClock = false;
+  Duration endedRetention = const Duration(minutes: 5);
+
   String get tempDir => p.join(root.path, 'tmp');
   String get saveDir => p.join(root.path, 'save');
   TransferRepository get repo => TransferRepository(db);
@@ -104,6 +109,8 @@ class TestReceiver {
     int? freeBytes,
     ServerLimits limits = testLimits,
     ReceivedFileStore Function(TestReceiver r)? store,
+    bool fakeClock = false,
+    Duration endedRetention = const Duration(minutes: 5),
   }) async {
     final r = TestReceiver._(
       Directory.systemTemp.createTempSync('cd_recv'),
@@ -114,6 +121,8 @@ class TestReceiver {
     r.limits = limits;
     r.freeBytes = freeBytes;
     r.store = store?.call(r);
+    r.fakeClock = fakeClock;
+    r.endedRetention = endedRetention;
     await r._startServer(bodyIdleTimeout, acceptTimeout, checkpointBytes);
     return r;
   }
@@ -141,6 +150,8 @@ class TestReceiver {
       bodyIdleTimeout: bodyIdleTimeout,
       acceptTimeout: acceptTimeout,
       checkpointBytes: checkpointBytes,
+      endedRetention: endedRetention,
+      clock: fakeClock ? () => now : null,
     );
     _sub = server.events.listen(events.add);
   }

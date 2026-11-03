@@ -39,6 +39,9 @@ ARCHITECTURE.md, "Abuse limits and server hygiene"; D-031, D-032.
   - Headers over 16 KB: 431 `headers_too_large`. `dart:io` itself only stops at 1 MB and cannot be configured.
   - Bodies: 16 KB for auth and `complete`, 4 MB for offers (413 `body_too_large`). The declared length is checked first, then the bytes as they arrive.
 - **Memory caps:** 64 open challenges (60 s each), 256 tokens (1 hour idle), oldest dropped first.
+- **Sessions are freed** (review M1): an ended session is forgotten 5 minutes after it ended, or at once beyond 32 ended sessions (`ReceiveServer.prune`, every 30 s and at each offer). An offer that was never accepted is deleted from the database at that point, so a stranger cannot grow the database or History with offers. A paused session with no activity for 24 hours fails as `expired`. `ReceiveController` drops a never-accepted offer from its state as soon as it ends.
+- **One hash isolate per session** (review M2): starting an upload stops the running hash of every other file in the session; such a file is hashed from disk at `complete`.
+- **Offer slots are reserved before the first await** (review L3), so parallel offers from one sender get one session and 409 for the rest, and the 8-session cap counts offers still being stored. Their declared bytes count in the free-space check of the others.
 - **Unchanged from Phase 3:**
   - One unfinished session per sender, now by proven fingerprint.
   - 8 open sessions.

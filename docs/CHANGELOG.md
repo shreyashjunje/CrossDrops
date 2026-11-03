@@ -9,6 +9,7 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 - **Security (H2):** declared file sizes are capped at 1 TiB and an offer at 4 TiB, so sizes can no longer wrap the 64-bit total and slip past the free-space check.
 - **Hotspot (H3):** leaving the hotspot screen, or tapping Stop, while the hotspot is still starting no longer leaves it running with no screen.
 - **Sharing (H4):** on an iPhone cold start, files shared from another app could be deleted by the launch cleanup before Send used them. The share is now taken after the cleanup, and the cleanup keeps staging folders younger than 10 minutes.
+- **Receiver resources (M1, M2, L3):** ended sessions are forgotten after 5 minutes (at most 32 kept), offers never accepted are removed from the database, paused sessions expire after 24 h, at most one hash isolate runs per session, and parallel offers can no longer slip past the one-per-sender and 8-open-sessions limits.
 
 ### Added (Phase 7)
 - Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.

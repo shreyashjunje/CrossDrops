@@ -229,6 +229,16 @@ class TransferRepository {
     });
   }
 
+  /// Removes a session and its files.
+  Future<void> deleteSession(int rowId) => _db.transaction(() async {
+    await (_db.delete(
+      _db.sessionFiles,
+    )..where((t) => t.sessionRowId.equals(rowId))).go();
+    await (_db.delete(
+      _db.transferSessions,
+    )..where((t) => t.id.equals(rowId))).go();
+  });
+
   Future<StoredSession?> find(
     String sessionId,
     TransferDirection direction,

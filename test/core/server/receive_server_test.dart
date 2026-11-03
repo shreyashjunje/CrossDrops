@@ -9,6 +9,7 @@ import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
+import 'package:crossdrop/core/storage/trust_repository.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -647,6 +648,163 @@ void main() {
       );
       expect(code, 200);
       expect(await statusOf(sid), SessionStatus.done);
+    });
+  });
+
+  group('memory and limits (review M1, M2, L3)', () {
+    Future<TestReceiver> withClock() async {
+      await r.close();
+      return r = await TestReceiver.start(
+        identity: identity,
+        bodyIdleTimeout: const Duration(seconds: 2),
+        fakeClock: true,
+      );
+    }
+
+    Future<String> offerAndWithdraw() async {
+      r.decider = (_) => Completer<bool>().future;
+      final (_, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([const FileOffer(fileId: 'f1', name: 'a', size: 3)]),
+      );
+      final sid = body['sessionId']! as String;
+      await send('DELETE', '/v1/sessions/$sid');
+      return sid;
+    }
+
+    test(
+      'an offer never accepted is forgotten and leaves the database',
+      () async {
+        await withClock();
+        final sid = await offerAndWithdraw();
+        expect(r.server.sessions, hasLength(1));
+        await r.server.prune();
+        expect(r.server.sessions, hasLength(1), reason: 'kept for 5 minutes');
+        r.now = r.now.add(const Duration(minutes: 6));
+        await r.server.prune();
+        expect(r.server.sessions, isEmpty);
+        expect(await r.repo.find(sid, TransferDirection.receive), isNull);
+        expect((await send('GET', '/v1/sessions/$sid')).$1, 404);
+      },
+    );
+
+    test('an accepted session that ended stays in history', () async {
+      await withClock();
+      final sid = await createSession('a', 0);
+      await send(
+        'POST',
+        '/v1/sessions/$sid/files/f1/complete',
+        json: {'sha256': shaOf(const [])},
+      );
+      r.now = r.now.add(const Duration(minutes: 6));
+      await r.server.prune();
+      expect(r.server.sessions, isEmpty);
+      final stored = await r.repo.find(sid, TransferDirection.receive);
+      expect(stored?.status, SessionStatus.done);
+    });
+
+    test('at most maxRetainedSessions ended sessions stay in memory', () async {
+      final ids = [
+        for (var i = 0; i < ReceiveServer.maxRetainedSessions + 8; i++)
+          await offerAndWithdraw(),
+      ];
+      await r.server.prune();
+      expect(
+        r.server.sessions.length,
+        lessThanOrEqualTo(ReceiveServer.maxRetainedSessions),
+      );
+      // The oldest went first, with their rows.
+      await waitFor(
+        () => r.server.sessions.every((s) => s.sessionId != ids.first),
+      );
+      expect(await r.repo.find(ids.first, TransferDirection.receive), isNull);
+      expect(await r.repo.find(ids.last, TransferDirection.receive), isNotNull);
+    });
+
+    test('a paused session expires after 24 h without activity', () async {
+      await withClock();
+      final sid = await createSession('a.bin', 10 * mb);
+      await partialPut('/v1/sessions/$sid/files/f1?offset=0', [
+        1,
+        2,
+        3,
+      ], 10 * mb);
+      await waitFor(
+        () => r.server.sessions.single.status == SessionStatus.paused,
+      );
+      r.now = r.now.add(const Duration(hours: 23));
+      await r.server.prune();
+      expect(r.server.sessions.single.status, SessionStatus.paused);
+      r.now = r.now.add(const Duration(hours: 2));
+      await r.server.prune();
+      final s = r.server.sessions.single;
+      expect(s.status, SessionStatus.failed);
+      expect(s.reason, 'expired');
+      expect(Directory(p.join(r.tempDir, sid)).existsSync(), isFalse);
+    });
+
+    test('parallel offers from one sender: only one gets through', () async {
+      // Review L3: the checks ran before any await and the session was
+      // stored after several, so parallel offers all passed.
+      await auth();
+      final gate = Completer<void>();
+      r.decider = (_) => Completer<bool>().future;
+      r.trustLookup = (_, _) async {
+        await gate.future;
+        return PeerTrust.unknown;
+      };
+      final offers = [
+        for (var i = 0; i < 5; i++)
+          send(
+            'POST',
+            '/v1/sessions',
+            json: offerJson([FileOffer(fileId: 'f1', name: 'a$i', size: 3)]),
+          ),
+      ];
+      await waitFor(() => r.server.sessions.isEmpty);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      gate.complete();
+      final codes = [for (final (code, _) in await Future.wait(offers)) code];
+      expect(codes.where((c) => c == 200), hasLength(1), reason: '$codes');
+      expect(codes.where((c) => c == 409), hasLength(4), reason: '$codes');
+      expect(r.server.sessions, hasLength(1));
+    });
+
+    test('one running hash per session, however the sender hops', () async {
+      // Review M2: a PUT that ended short kept its hash isolate, one per
+      // file; 10,000 files gave 10,000 isolates.
+      final data = randomBytes(10);
+      final sid = await createSession(
+        '',
+        0,
+        files: [
+          for (var i = 1; i <= 4; i++)
+            FileOffer(fileId: 'f$i', name: 'f$i.bin', size: data.length),
+        ],
+      );
+      for (var i = 1; i <= 4; i++) {
+        final (code, _) = await send(
+          'PUT',
+          '/v1/sessions/$sid/files/f$i?offset=0',
+          bytes: data.sublist(0, 4),
+        );
+        expect(code, 200);
+        expect(r.server.liveHashes, 1);
+      }
+      // f1 lost its running hash; it is hashed from disk at the end.
+      await send(
+        'PUT',
+        '/v1/sessions/$sid/files/f1?offset=4',
+        bytes: data.sublist(4),
+      );
+      final (code, body) = await send(
+        'POST',
+        '/v1/sessions/$sid/files/f1/complete',
+        json: {'sha256': shaOf(data)},
+      );
+      expect(code, 200, reason: '$body');
+      expect(body['status'], 'saved');
     });
   });
 

@@ -18,6 +18,7 @@ import '../protocol/auth_messages.dart';
 import '../protocol/events.dart';
 import '../protocol/models.dart';
 import '../security/device_credentials.dart';
+import '../storage/partial_cleanup.dart' show expiredReason;
 import '../storage/transfer_repository.dart';
 import '../storage/trust_repository.dart';
 import 'rate_limiter.dart';
@@ -271,8 +272,10 @@ class _Session {
     required this.senderFingerprint,
     required this.files,
     required this.machine,
+    required this.lastActivity,
     this.pairingCode = '',
     this.trust = PeerTrust.unknown,
+    this.accepted = false,
   });
 
   final String id;
@@ -295,7 +298,20 @@ class _Session {
   final Set<_EventSocket> sockets = {};
   Timer? acceptTimer;
 
+  /// The user accepted it at some point (restored sessions always were).
+  /// An offer that ended without it is not a transfer the user agreed to.
+  bool accepted;
+
+  /// Last state change or upload; a paused session expires after
+  /// [ReceiveServer.pausedExpiry] without any.
+  DateTime lastActivity;
+
+  /// When it reached a final state; it is forgotten some time after.
+  DateTime? endedAt;
+
   SessionStatus get status => machine.state;
+
+  bool get anyBusy => files.values.any((f) => f.busy);
 
   int get remainingBytes => files.values
       .where((f) => !f.status.isTerminal)
@@ -328,6 +344,8 @@ class ReceiveServer {
     this._acceptTimeout,
     this._checkpointBytes,
     this._freeSpaceReserve,
+    this._endedRetention,
+    this._clock,
   );
 
   final DeviceInfo _info;
@@ -355,12 +373,30 @@ class ReceiveServer {
   final Duration _acceptTimeout;
   final int _checkpointBytes;
   final int _freeSpaceReserve;
+  final Duration _endedRetention;
+  final DateTime Function() _clock;
   final Map<String, _Session> _sessions = {};
+
+  /// Offers that passed the sender and open-session checks but are not in
+  /// [_sessions] yet, by sender fingerprint, with their declared bytes.
+  /// They count as open sessions, so parallel offers cannot all slip
+  /// through the limits (review L3).
+  final Map<String, int> _offering = {};
   final StreamController<ReceiveEvent> _events = StreamController.broadcast();
   late final HttpServer _server;
+  Timer? _pruneTimer;
+  bool _pruning = false;
+  bool _closed = false;
 
   /// Unfinished sessions at once, from all senders. More offers get 503.
   static const int maxOpenSessions = 8;
+
+  /// Ended sessions kept in memory at most, however recent (review M1).
+  static const int maxRetainedSessions = 32;
+
+  /// A paused session with no activity for this long fails as `expired`,
+  /// as the launch cleanup does with stored ones.
+  static const Duration pausedExpiry = Duration(hours: 24);
 
   /// Starts listening on [port] (0 = random, as ARCHITECTURE.md asks) and
   /// restores unfinished sessions from [repository].
@@ -372,6 +408,10 @@ class ReceiveServer {
   /// Session folders are `<tempDir>/<sessionId>`. [store] holds partial
   /// files and saves verified ones; by default a [FolderStore] that moves
   /// them into [saveDir].
+  ///
+  /// An ended session stays visible to its sender for [endedRetention], so
+  /// a sender that lost the connection can still learn the outcome; then
+  /// it is forgotten ([prune]).
   static Future<ReceiveServer> start({
     required DeviceInfo info,
     required DeviceCredentials credentials,
@@ -391,6 +431,8 @@ class ReceiveServer {
     Duration acceptTimeout = const Duration(seconds: 60),
     int checkpointBytes = 4 * 1024 * 1024,
     int freeSpaceReserve = 64 * 1024 * 1024,
+    Duration endedRetention = const Duration(minutes: 5),
+    DateTime Function()? clock,
   }) async {
     final server = ReceiveServer._(
       info,
@@ -409,6 +451,8 @@ class ReceiveServer {
       acceptTimeout,
       checkpointBytes,
       freeSpaceReserve,
+      endedRetention,
+      clock ?? DateTime.now,
     );
     await Directory(tempDir).create(recursive: true);
     if (store == null) await Directory(saveDir).create(recursive: true);
@@ -421,6 +465,10 @@ class ReceiveServer {
     );
     // Idle keep-alive connections are closed sooner than dart:io's 120 s.
     server._server.idleTimeout = const Duration(seconds: 30);
+    server._pruneTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(server.prune()),
+    );
     _log('listening on port ${server.port}');
     return server;
   }
@@ -456,7 +504,16 @@ class ReceiveServer {
   bool get isReceiving =>
       _sessions.values.any((s) => s.files.values.any((f) => f.busy));
 
+  /// Incremental hashes kept alive between uploads; at most one per
+  /// session. For tests and diagnostics.
+  int get liveHashes => _sessions.values.fold(
+    0,
+    (n, s) => n + s.files.values.where((f) => f.hasher != null).length,
+  );
+
   Future<void> close() async {
+    _closed = true;
+    _pruneTimer?.cancel();
     await checkpointAll();
     for (final s in _sessions.values) {
       s.acceptTimer?.cancel();
@@ -502,6 +559,71 @@ class ReceiveServer {
       await _reject(s, RejectReasons.declined);
     } else {
       await _cancel(s, 'receiver');
+    }
+  }
+
+  /// Memory and database hygiene (review M1). Runs every 30 s; offers run
+  /// the memory part too.
+  ///
+  /// - A paused session idle for [pausedExpiry] fails as `expired`.
+  /// - An ended session is forgotten [endedRetention] after it ended, or
+  ///   at once beyond [maxRetainedSessions]; its sender then gets 404.
+  /// - A forgotten offer that was never accepted is deleted from the
+  ///   database: the user never agreed to it, and anyone on the network
+  ///   could fill the database with them.
+  Future<void> prune() async {
+    if (_closed || _pruning) return;
+    _pruning = true;
+    try {
+      final now = _clock();
+      for (final s in _sessions.values.toList()) {
+        if (s.status != SessionStatus.paused || s.anyBusy) continue;
+        if (now.difference(s.lastActivity) < pausedExpiry) continue;
+        _log('session ${s.id}: paused for 24 h, expired');
+        s.reason = expiredReason;
+        await _setStatus(s, SessionStatus.failed, expiredReason);
+        for (final f in s.files.values) {
+          f.dropHasher();
+        }
+        await _closeSockets(s);
+        await _discardParts(s);
+      }
+      await _deleteRows(_forgetEnded(now));
+    } finally {
+      _pruning = false;
+    }
+  }
+
+  /// Drops ended sessions from memory, oldest first; returns the database
+  /// rows of those that were never accepted.
+  List<int> _forgetEnded(DateTime now) {
+    final ended = [
+      for (final s in _sessions.values)
+        if (s.endedAt != null && !s.anyBusy) s,
+    ]..sort((a, b) => a.endedAt!.compareTo(b.endedAt!));
+    var excess = ended.length - maxRetainedSessions;
+    final rows = <int>[];
+    for (final s in ended) {
+      final young = now.difference(s.endedAt!) < _endedRetention;
+      if (young && excess <= 0) break; // the rest are younger still
+      excess--;
+      _sessions.remove(s.id);
+      s.acceptTimer?.cancel();
+      for (final f in s.files.values) {
+        f.dropHasher();
+      }
+      if (!s.accepted) rows.add(s.rowId);
+    }
+    return rows;
+  }
+
+  Future<void> _deleteRows(List<int> rows) async {
+    for (final row in rows) {
+      try {
+        await _repo.deleteSession(row);
+      } catch (e) {
+        _log('could not delete an old offer: ${e.runtimeType}');
+      }
     }
   }
 
@@ -702,6 +824,8 @@ class ReceiveServer {
         senderFingerprint: senderFp,
         files: files,
         machine: SessionStateMachine(stored.status),
+        lastActivity: _clock(),
+        accepted: true,
       );
       session.machine.tryMoveTo(SessionStatus.paused);
       if (stored.status != SessionStatus.paused) {
@@ -762,9 +886,13 @@ class ReceiveServer {
         'receiving is turned off on this device',
       );
     }
+    unawaited(_deleteRows(_forgetEnded(_clock())));
     final open = _sessions.values.where((s) => !s.status.isTerminal);
-    // One unfinished session per sender, by proven fingerprint.
-    if (open.any((s) => s.senderFingerprint == peer.fingerprint)) {
+    // One unfinished session per sender, by proven fingerprint. From here
+    // to the reservation below there is no await, so parallel offers see
+    // each other (review L3).
+    if (_offering.containsKey(peer.fingerprint) ||
+        open.any((s) => s.senderFingerprint == peer.fingerprint)) {
       _events.add(OfferRefused(offer.sender, RejectReasons.senderBusy));
       return _error(
         409,
@@ -772,51 +900,65 @@ class ReceiveServer {
         'finish or cancel the unfinished transfer first',
       );
     }
-    if (open.length >= maxOpenSessions) {
+    if (open.length + _offering.length >= maxOpenSessions) {
       return _error(503, ErrorCodes.busy, 'too many open sessions');
     }
-    final needed = await _neededBytes(offer.totalBytes);
-    if (needed != null) {
-      _events.add(
-        OfferRefused(
-          offer.sender,
-          RejectReasons.noSpace,
-          neededBytes: offer.totalBytes,
-        ),
+    _offering[peer.fingerprint] = offer.totalBytes;
+    final _Session session;
+    try {
+      final needed = await _neededBytes(
+        offer.totalBytes,
+        offeringAs: peer.fingerprint,
       );
-      return _error(507, ErrorCodes.noSpace, 'not enough free space', {
-        'neededBytes': offer.totalBytes,
-      });
-    }
+      if (needed != null) {
+        _events.add(
+          OfferRefused(
+            offer.sender,
+            RejectReasons.noSpace,
+            neededBytes: offer.totalBytes,
+          ),
+        );
+        return _error(507, ErrorCodes.noSpace, 'not enough free space', {
+          'neededBytes': offer.totalBytes,
+        });
+      }
 
-    final id = _randomId();
-    final dir = p.join(_tempDir, id);
-    final rowId = await _repo.createSession(
-      sessionId: id,
-      direction: TransferDirection.receive,
-      peer: offer.sender,
-      peerFingerprint: peer.fingerprint,
-      status: SessionStatus.offered,
-      files: [
-        for (final f in offer.files)
-          StoredFile.fromOffer(f, tempPath: _store.initialLocation(dir, f)),
-      ],
-    );
-    final session = _Session(
-      id: id,
-      rowId: rowId,
-      dir: dir,
-      sender: offer.sender,
-      senderFingerprint: peer.fingerprint,
-      pairingCode: peer.pairingCode,
-      trust: trust,
-      files: Map.fromEntries([
-        for (final f in offer.files)
-          MapEntry(f.fileId, _ReceivingFile(f, _store.initialLocation(dir, f))),
-      ]),
-      machine: SessionStateMachine(),
-    );
-    _sessions[id] = session;
+      final id = _randomId();
+      final dir = p.join(_tempDir, id);
+      final rowId = await _repo.createSession(
+        sessionId: id,
+        direction: TransferDirection.receive,
+        peer: offer.sender,
+        peerFingerprint: peer.fingerprint,
+        status: SessionStatus.offered,
+        files: [
+          for (final f in offer.files)
+            StoredFile.fromOffer(f, tempPath: _store.initialLocation(dir, f)),
+        ],
+      );
+      session = _Session(
+        id: id,
+        rowId: rowId,
+        dir: dir,
+        sender: offer.sender,
+        senderFingerprint: peer.fingerprint,
+        pairingCode: peer.pairingCode,
+        trust: trust,
+        files: Map.fromEntries([
+          for (final f in offer.files)
+            MapEntry(
+              f.fileId,
+              _ReceivingFile(f, _store.initialLocation(dir, f)),
+            ),
+        ]),
+        machine: SessionStateMachine(),
+        lastActivity: _clock(),
+      );
+      _sessions[id] = session;
+    } finally {
+      _offering.remove(peer.fingerprint);
+    }
+    final id = session.id;
     _log('session $id: offered, ${offer.files.length} file(s)');
     _events.add(SessionOffered(id, offer.sender, offer.files));
     unawaited(_decide(session));
@@ -831,12 +973,21 @@ class ReceiveServer {
   }
 
   /// Null if the space is there (or unknown); otherwise the bytes needed.
-  Future<int?> _neededBytes(int offered, {_Session? excluding}) async {
+  /// Other offers still being stored count as committed; [offeringAs] is
+  /// the caller's own entry in [_offering].
+  Future<int?> _neededBytes(
+    int offered, {
+    _Session? excluding,
+    String? offeringAs,
+  }) async {
     final probe = _freeSpace;
     if (probe == null) return null;
-    final committed = _sessions.values
+    var committed = _sessions.values
         .where((s) => s != excluding && !s.status.isTerminal)
         .fold(0, (sum, s) => sum + s.remainingBytes);
+    _offering.forEach((fp, bytes) {
+      if (fp != offeringAs) committed += bytes;
+    });
     final needed = offered + committed + _freeSpaceReserve;
     int? free;
     try {
@@ -1099,6 +1250,14 @@ class ReceiveServer {
     }
 
     f.digest = null;
+    s.lastActivity = _clock();
+    // At most one running hash per session: senders send one file at a
+    // time, and one that hops between files must not leave an isolate
+    // behind for each (review M2). A file whose hash was dropped is hashed
+    // from disk at /complete.
+    for (final other in s.files.values) {
+      if (!identical(other, f)) other.dropHasher();
+    }
     // Keep hashing where the last upload stopped. Without a hash that
     // matches the bytes on disk (after a restart) don't hash here: hashing
     // a large prefix would stall the upload. /complete hashes from disk.
@@ -1456,6 +1615,10 @@ class ReceiveServer {
       _log('session ${s.id}: ignored ${s.status.name} -> ${to.name}');
       return;
     }
+    final now = _clock();
+    s.lastActivity = now;
+    if (to == SessionStatus.accepted) s.accepted = true;
+    if (to.isTerminal) s.endedAt = now;
     await _repo.updateSession(s.rowId, status: to, reason: reason);
     _events.add(SessionStateChanged(s.id, to, reason));
   }
