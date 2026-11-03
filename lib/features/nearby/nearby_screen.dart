@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -7,6 +9,7 @@ import '../../core/client/peer_check.dart';
 import '../../core/client/upload_client.dart';
 import '../../core/discovery/peer_list.dart';
 import '../../core/protocol/connect_payload.dart';
+import '../hotspot/hotspot_screens.dart';
 import '../transfer/failure_messages.dart';
 import '../transfer/widgets.dart';
 import 'find_help_screen.dart';
@@ -82,6 +85,15 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       MaterialPageRoute(builder: (_) => const QrScanScreen()),
     );
     if (payload == null || !mounted) return;
+    // An Android hotspot code: join its network first (D-055).
+    if (payload.wifi != null && Platform.isIOS) {
+      final joined = await pushScreen<bool>(
+        context,
+        Routes.hotspot,
+        JoinHotspotScreen(payload: payload, popWhenConnected: true),
+      );
+      if (joined != true || !mounted) return;
+    }
     await _connect(() => _controller.connectToQr(payload), fromQr: true);
   }
 

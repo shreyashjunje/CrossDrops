@@ -292,6 +292,12 @@ class ReceiveController extends Notifier<ReceiveState> {
     _dropPending(sessionId);
   }
 
+  /// The QR payload for this phone at [ip], e.g. its hotspot address;
+  /// null while the server is not running. Never log it (CLAUDE.md hard
+  /// rule 7).
+  ConnectPayload? payloadFor(String ip) =>
+      _server == null ? null : _payloadFor?.call(LocalAddress(ip, ''));
+
   /// Sets the global "Receiving" switch.
   Future<void> setReceiving(bool on) =>
       ref.read(settingsRepositoryProvider).setReceivingEnabled(on);

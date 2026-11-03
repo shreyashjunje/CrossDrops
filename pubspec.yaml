@@ -68,6 +68,9 @@ dev_dependencies:
   drift_dev: ^2.35.2
   build_runner: ^2.17.1
   qr: 3.0.3
+  # Timer tests (hotspot stop countdown) without real waiting. Already
+  # pulled in by flutter_test.
+  fake_async: ^1.3.3
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec

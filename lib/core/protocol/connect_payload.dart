@@ -113,6 +113,9 @@ class WifiCredentials {
 // WPA passphrase: 8-63 printable ASCII characters (IEEE 802.11i).
 final RegExp _wpaPassphrase = RegExp(r'^[\x20-\x7e]{8,63}$');
 
+/// True if [password] is a WPA passphrase CrossDrop accepts.
+bool isValidWpaPassphrase(String password) => _wpaPassphrase.hasMatch(password);
+
 /// True if [ssid] is 1-32 bytes of UTF-8 with no control characters.
 bool isValidSsid(String ssid) {
   if (ssid.isEmpty) return false;
@@ -247,7 +250,7 @@ class ConnectPayload {
       if (ssid == null || !isValidSsid(ssid)) {
         fail(ConnectPayloadError.invalid, 'ws');
       }
-      if (password == null || !_wpaPassphrase.hasMatch(password)) {
+      if (password == null || !isValidWpaPassphrase(password)) {
         fail(ConnectPayloadError.invalid, 'wp');
       }
       final security = securityCode == null
