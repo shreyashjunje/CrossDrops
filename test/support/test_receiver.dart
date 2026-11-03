@@ -51,11 +51,13 @@ UploadClient clientFor(
   int? port,
   Duration connectTimeout = const Duration(seconds: 10),
   Duration stallTimeout = const Duration(seconds: 15),
+  int chunkSize = defaultChunkSize,
 }) => UploadClient(
   host: host,
   port: port ?? r.port,
   fingerprint: r.identity.fingerprint,
   credentials: sender,
+  chunkSize: chunkSize,
   connectTimeout: connectTimeout,
   stallTimeout: stallTimeout,
 );

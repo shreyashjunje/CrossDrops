@@ -7,6 +7,7 @@ import '../protocol/models.dart';
 import '../security/device_credentials.dart';
 import '../storage/transfer_repository.dart';
 import 'backoff.dart';
+import 'chunked_reader.dart';
 import 'progress_tracker.dart';
 import 'sha256_isolate.dart';
 import 'source_opener.dart';
@@ -193,6 +194,7 @@ class SendSession {
     SourceOpener? opener,
     this.acceptTimeout = const Duration(seconds: 75),
     this.pollInterval = const Duration(seconds: 2),
+    int chunkSize = defaultChunkSize,
   }) : _host = host,
        _port = port,
        _repo = repository,
@@ -204,6 +206,7 @@ class SendSession {
              port: p,
              fingerprint: receiverFingerprint,
              credentials: credentials,
+             chunkSize: chunkSize,
            )),
        _newBackoff = backoff ?? Backoff.new,
        _opener = opener ?? const FileSourceOpener(),

@@ -58,6 +58,21 @@ void main() {
     expect(progress.last.bytesPerSecond, greaterThan(0));
   }, timeout: const Timeout(Duration(minutes: 2)));
 
+  for (final kb in [256, 4096]) {
+    test('a $kb KB buffer writes in $kb KB steps', () async {
+      final client = clientFor(r, me, chunkSize: kb * 1024);
+      addTearDown(client.close);
+      final progress = <TransferProgress>[];
+      final target = await client.offerFile(sourcePath);
+      expect(
+        await client.transfer(target, onProgress: progress.add),
+        sourceSha,
+      );
+      expect(progress.first.sentBytes, kb * 1024);
+      expect(progress.length, (fileSize / (kb * 1024)).ceil());
+    }, timeout: const Timeout(Duration(minutes: 2)));
+  }
+
   test('memory stays flat while sending 50 MB', () async {
     final client = newClient();
     addTearDown(client.close);

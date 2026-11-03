@@ -121,6 +121,7 @@ class UploadClient {
     required this.credentials,
     this.connectTimeout = const Duration(seconds: 10),
     this.stallTimeout = const Duration(seconds: 15),
+    this.chunkSize = defaultChunkSize,
   }) {
     _http = _newHttpClient();
   }
@@ -137,6 +138,10 @@ class UploadClient {
   /// timeout for control requests.
   final Duration stallTimeout;
   final Duration connectTimeout;
+
+  /// Bytes read and written per step of an upload. 1 MB by default; the
+  /// benchmark compares 256 KB, 1 MB and 4 MB (docs/BENCHMARKS.md).
+  final int chunkSize;
   late HttpClient _http;
   HttpClientRequest? _active;
   Completer<Never>? _abort;
@@ -436,6 +441,7 @@ class UploadClient {
           t.source,
           start: offset,
           end: t.size,
+          chunkSize: chunkSize,
         )) {
           req.add(chunk);
           // At most one chunk waits in the socket buffer.
