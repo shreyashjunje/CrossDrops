@@ -478,7 +478,7 @@ crossdrop/
 
 ## Open decisions
 
-- [ ] Custom protocol (this document) or LocalSend-compatible protocol? Compatibility would let CrossDrop talk to LocalSend users; check its protocol and license first.
+- [x] Custom protocol or LocalSend-compatible? Custom for v1; LocalSend can be looked at after v1 (D-060).
 - [x] HEIC default: send the original; JPEG is a setting (Phase 5, D-039).
 - [x] Live Photos default: the still only; the video is a setting (Phase 5, D-039).
 - [x] iPhone Personal Hotspot: an in-app guide in v1, next to Android hotspot mode (Phase 6).

@@ -489,3 +489,10 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: Parallel streams can help on lossy or high-latency links, but cost complexity in resume, hashing and the receiver.
 - Decision: Keep one TLS connection and one file at a time. Consider parallel streams only if the Phase 7 benchmark shows a single stream clearly below the link's capacity while neither phone's CPU is the limit: CPU well under one core, and MB/s well under an iperf3 baseline on the same network. The measurements come first, then a proposal.
 - Consequences: Nothing changes now.
+
+## D-060: No LocalSend compatibility in v1
+- Date: 2026-11-03
+- Status: Accepted
+- Context: ARCHITECTURE.md left open whether to use the LocalSend protocol, so CrossDrop could talk to LocalSend users. Phases 1–7 built the custom protocol, including mutual pinned TLS, the signed sender challenge, resume by offset and the 6-digit code, and all of it is unit-tested.
+- Decision: v1 keeps the custom protocol. LocalSend compatibility can be looked at again after v1 passes its device tests, as a separate adapter. It must not weaken the pinning rules.
+- Consequences: CrossDrop does not see LocalSend devices. The open decision in ARCHITECTURE.md is closed.

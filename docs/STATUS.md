@@ -19,7 +19,7 @@ All v1 features in CLAUDE.md are now in the code: transfer engine, discovery, QR
   - multiple streams per transfer (D-059: one stream until a benchmark shows a clear gain).
 
 ### 3. Open decisions
-- **LocalSend compatibility:** decision is no for v1. The custom protocol and its security model are built and tested, and changing now would mean redoing Phases 3 and 4. Look at it again after v1. To be recorded in DECISIONS.md.
+- **LocalSend compatibility:** no for v1 (D-060). Look at it again after v1.
 - **Speed target:** set from the benchmark results (see 2).
 
 ### 4. Deferred until device tests show a need
