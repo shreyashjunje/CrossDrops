@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../features/home/home_screen.dart';
+import '../features/receive/receive_host.dart';
 import '../features/send/share_listener.dart';
 import 'navigation.dart';
 import 'theme.dart';
@@ -18,6 +19,8 @@ class CrossDropApp extends StatelessWidget {
       navigatorKey: navigatorKey,
       scaffoldMessengerKey: scaffoldMessengerKey,
       navigatorObservers: [topRouteObserver],
+      // Above the navigator, so receiving runs on every screen (D-046).
+      builder: (_, navigator) => ReceiveHost(child: navigator!),
       home: const ShareListener(child: HomeScreen()),
     );
   }

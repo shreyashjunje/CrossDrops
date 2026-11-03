@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/navigation.dart';
 import '../../app/providers.dart';
 import '../nearby/nearby_screen.dart';
-import '../receive/receive_screen.dart';
-import '../../app/navigation.dart';
+import '../receive/my_qr_screen.dart';
 import '../settings/settings_screen.dart';
 import '../transfer/unfinished_transfers.dart';
+import 'active_transfers.dart';
+import 'receive_status_card.dart';
 
+/// "Ready to receive" with this phone's name and the Receiving switch, the
+/// transfers in progress, and one large Send button.
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
@@ -17,13 +21,6 @@ class HomeScreen extends ConsumerStatefulWidget {
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _askedAboutUnfinished = false;
-
-  void _open(Widget screen, {String? name}) => Navigator.of(context).push(
-    MaterialPageRoute<void>(
-      settings: RouteSettings(name: name),
-      builder: (_) => screen,
-    ),
-  );
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +36,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         builder: (_) => UnfinishedTransfersDialog(sessions: sessions),
       );
     });
-    final name = ref.watch(identityProvider).value?.deviceName;
     // Creates the key pair and certificate on first launch, before the
     // user needs them (ARCHITECTURE.md, "Device identity").
     ref.watch(credentialsProvider);
@@ -50,43 +46,67 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
         actions: [
           IconButton(
             tooltip: 'Settings',
-            onPressed: () => _open(const SettingsScreen()),
-            icon: const Icon(Icons.settings),
+            onPressed: () => pushScreen<void>(
+              context,
+              Routes.settings,
+              const SettingsScreen(),
+            ),
+            icon: const Icon(Icons.settings_outlined),
           ),
         ],
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(24),
+      body: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            if (name != null) ...[
-              Text(
-                'This phone: $name',
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 24),
-            ],
-            FilledButton(
-              onPressed: () => _open(const ReceiveScreen()),
-              child: const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('Receive'),
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  ReceiveStatusCard(
+                    onShowQr: () => pushScreen<void>(
+                      context,
+                      Routes.myQr,
+                      const MyQrScreen(),
+                    ),
+                  ),
+                  const ActiveTransfers(),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-            OutlinedButton(
-              onPressed: () => _open(const NearbyScreen(), name: Routes.nearby),
-              child: const Padding(
-                padding: EdgeInsets.all(16),
-                child: Text('Send'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+              child: _SendButton(
+                onPressed: () => pushScreen<void>(
+                  context,
+                  Routes.nearby,
+                  const NearbyScreen(),
+                ),
               ),
             ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _SendButton extends StatelessWidget {
+  const _SendButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = Theme.of(context).textTheme.headlineSmall;
+    return FilledButton.icon(
+      onPressed: onPressed,
+      style: FilledButton.styleFrom(
+        minimumSize: const Size.fromHeight(72),
+        textStyle: text,
+      ),
+      icon: const Icon(Icons.send, size: 28),
+      label: const Text('Send'),
     );
   }
 }

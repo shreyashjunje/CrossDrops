@@ -15,7 +15,6 @@ import '../../core/protocol/models.dart';
 import '../../core/storage/partial_cleanup.dart';
 import '../../platform/android_store.dart';
 import '../../core/storage/transfer_repository.dart';
-import '../receive/receive_screen.dart';
 import '../send/send_controller.dart';
 import '../send/send_screen.dart';
 import '../../app/navigation.dart';
@@ -134,10 +133,14 @@ class UnfinishedTransfersDialog extends ConsumerWidget {
                       ),
                     );
                   } else {
-                    // The sender resumes once this phone is receiving again.
-                    navigator.push(
-                      MaterialPageRoute<void>(
-                        builder: (_) => const ReceiveScreen(),
+                    // This phone is receiving already; the sender resumes
+                    // when it reconnects.
+                    scaffoldMessengerKey.currentState?.showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          'Ready. ${s.peer.name} continues the transfer when '
+                          'it reconnects. Keep CrossDrop open.',
+                        ),
                       ),
                     );
                   }
@@ -188,9 +191,7 @@ class _Entry extends StatelessWidget {
         ),
         Text('$percent% of ${formatSize(s.totalBytes)} done'),
         if (!sending)
-          const Text(
-            'Opens Receive; the other phone resumes when it reconnects.',
-          ),
+          const Text('The other phone continues when it reconnects.'),
         Row(
           mainAxisAlignment: MainAxisAlignment.end,
           children: [

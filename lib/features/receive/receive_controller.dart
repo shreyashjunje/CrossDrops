@@ -199,17 +199,29 @@ final receiveControllerProvider =
       ReceiveController.new,
     );
 
-/// Runs the receive server while the Receive screen is open and the
-/// "Receiving" switch is on, advertises it on the local network, asks the
-/// user about each offer and tracks progress.
+/// Runs the receive server while the app is open and the "Receiving"
+/// switch is on (D-046), advertises it on the local network, asks the user
+/// about each offer and tracks progress. Kept alive by `ReceiveHost` at
+/// the app root.
 ///
 /// Turning the switch off stops advertising and refuses offers from
 /// untrusted devices at once; the server stops as soon as no transfer is
-/// running (D-031). A new random port is used at every start.
+/// running (D-031). When the app has been hidden for [idleInBackground]
+/// with nothing in flight, the server stops too and starts again when the
+/// app is back. A new random port is used at every start.
 class ReceiveController extends Notifier<ReceiveState> {
+  /// How long the app may be hidden, idle, before the server stops.
+  static const idleInBackground = Duration(seconds: 30);
+
   ReceiveServer? _server;
   bool _receivingOn = true;
   bool _starting = false;
+
+  /// Stopped because the app is hidden; starts again when it is shown.
+  bool _suspended = false;
+  bool _hidden = false;
+  Timer? _idleTimer;
+  AppLifecycleListener? _visibility;
   final Map<String, IncomingOffer> _offers = {};
   StreamSubscription<ReceiveEvent>? _sub;
   Advertiser? _advertiser;
@@ -228,7 +240,12 @@ class ReceiveController extends Notifier<ReceiveState> {
   @override
   ReceiveState build() {
     _keepAlive = ref.read(keepAliveProvider);
-    ref.onDispose(_stop);
+    _visibility = AppLifecycleListener(onHide: _onHide, onShow: _onShow);
+    ref.onDispose(() {
+      _idleTimer?.cancel();
+      _visibility?.dispose();
+      unawaited(_stop());
+    });
     ref.listen(receivingEnabledProvider, (_, next) {
       final on = next.value;
       if (on != null) unawaited(_onSwitch(on));
@@ -275,7 +292,7 @@ class ReceiveController extends Notifier<ReceiveState> {
     _receivingOn = on;
     state = state.copyWith(receivingOff: !on);
     if (on) {
-      if (_server == null) await _start();
+      if (_server == null && !_suspended) await _start();
       return;
     }
     // Off: nobody new should find this phone.
@@ -294,6 +311,52 @@ class ReceiveController extends Notifier<ReceiveState> {
     if (busy) return;
     await _stopServer();
     if (ref.mounted) state = state.copyWith(clearPort: true);
+  }
+
+  /// Something the server must stay up for: an offer waiting for an
+  /// answer, or bytes moving. A paused session does not count: its sender
+  /// finds this phone again by id when it is back.
+  bool get _busy =>
+      state.pendingOffers.isNotEmpty ||
+      state.sessions.values.any(
+        (s) => switch (s.status) {
+          SessionStatus.offered ||
+          SessionStatus.accepted ||
+          SessionStatus.transferring ||
+          SessionStatus.verifying => true,
+          _ => false,
+        },
+      );
+
+  void _onHide() {
+    _hidden = true;
+    _idleTimer?.cancel();
+    _idleTimer = Timer(idleInBackground, _suspendIfIdle);
+  }
+
+  Future<void> _onShow() async {
+    _hidden = false;
+    _idleTimer?.cancel();
+    if (!_suspended || !ref.mounted) return;
+    _suspended = false;
+    if (_receivingOn) await _start();
+  }
+
+  /// Hidden for a while: nobody should find a phone whose owner is not
+  /// looking at it (ARCHITECTURE.md, "Server lifetime").
+  Future<void> _suspendIfIdle() async {
+    if (!_hidden || _suspended || _server == null || !ref.mounted) return;
+    if (_busy) return;
+    _suspended = true;
+    logEvent('receive', 'hidden and idle: server stopped');
+    await _stopServer();
+    if (ref.mounted) {
+      state = state.copyWith(
+        clearPort: true,
+        advertising: false,
+        qrPayload: () => null,
+      );
+    }
   }
 
   /// The pairing code and trust are checked by the server; this answers
@@ -357,8 +420,6 @@ class ReceiveController extends Notifier<ReceiveState> {
       _server = server;
       _sub = server.events.listen(_onEvent);
       _restoreSessions(server.sessions);
-      // Stay discoverable: iOS stops advertising when the screen locks.
-      await _keepAlive.holdScreen(this);
 
       _payloadFor = (a) => ConnectPayload(
         ip: a.ip,
@@ -437,7 +498,6 @@ class ReceiveController extends Notifier<ReceiveState> {
       await _keepAlive.end(sid);
     }
     _kept.clear();
-    await _keepAlive.releaseScreen(this);
   }
 
   /// Keeps the app alive while [sessionId] moves bytes, and stops when it
@@ -591,6 +651,11 @@ class ReceiveController extends Notifier<ReceiveState> {
         _update(sessionId, (s) => s.copyWith(status: status, reason: reason));
         unawaited(_trackKeepAlive(sessionId, status));
         if (status.isTerminal) unawaited(_stopIfIdle());
+        if (_hidden && !_busy) {
+          // The last transfer ended while the app was hidden.
+          _idleTimer?.cancel();
+          _idleTimer = Timer(idleInBackground, _suspendIfIdle);
+        }
         return;
       case FileProgress(:final sessionId, :final fileId, :final receivedBytes):
         final tracker = _trackers[sessionId];
