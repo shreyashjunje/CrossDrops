@@ -8,6 +8,7 @@ import '../../app/media_providers.dart';
 import '../../app/navigation.dart';
 import '../../core/log.dart';
 import '../../platform/share_inbox.dart';
+import '../transfer/unfinished_transfers.dart';
 import 'send_screen.dart';
 import 'send_controller.dart';
 
@@ -70,6 +71,15 @@ class _ShareListenerState extends ConsumerState<ShareListener>
     if (inbox == null || _taking) return;
     _taking = true;
     try {
+      // The launch cleanup deletes staging folders that no unfinished send
+      // uses. A share moved into staging before it ran would go with them
+      // ("N files ready", then nothing to send; review H4).
+      try {
+        await ref.read(unfinishedTransfersProvider.future);
+      } catch (_) {
+        // The cleanup logs its own failures; take the share anyway.
+      }
+      if (!mounted) return;
       final shared = await inbox.takePending();
       if (!mounted || shared.isEmpty) return;
       _handle(shared);

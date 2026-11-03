@@ -225,10 +225,22 @@ void main() {
         p.join(staging, 'keep', '0', 'still.heic'),
         '/elsewhere/file.jpg',
         'content://media/1',
-      ]);
+      ], now: DateTime.now().add(const Duration(hours: 1)));
       expect(deleted, 2);
       expect(Directory(p.join(staging, 'keep')).existsSync(), isTrue);
       expect(Directory(p.join(staging, 'old')).existsSync(), isFalse);
+    });
+
+    test('keeps a batch made moments ago, such as a new share', () async {
+      // Review H4: a share taken from the iOS inbox at launch is in no
+      // unfinished send yet.
+      File(p.join(staging, 'share-1A2B', 'IMG_1.HEIC'))
+          .createSync(recursive: true);
+      expect(await cleanStaging(staging, const []), 0);
+      expect(Directory(p.join(staging, 'share-1A2B')).existsSync(), isTrue);
+      final later = DateTime.now().add(const Duration(minutes: 11));
+      expect(await cleanStaging(staging, const [], now: later), 1);
+      expect(Directory(p.join(staging, 'share-1A2B')).existsSync(), isFalse);
     });
 
     test('no staging folder is fine', () async {

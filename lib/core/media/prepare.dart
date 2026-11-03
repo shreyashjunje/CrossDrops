@@ -400,14 +400,26 @@ String? stagingBatchOf(String path, String stagingRoot) {
 
 /// Deletes staging batches that no unfinished send still reads from.
 /// Run at app start, before anything prepares. Returns how many went.
-Future<int> cleanStaging(String stagingRoot, Iterable<String> inUse) async {
+///
+/// Batches changed within [minAge] of [now] are kept: this run may have
+/// just made them (a share taken from the iOS inbox, a picked document),
+/// and no unfinished send knows them yet (review H4). A leftover from a
+/// crash a minute ago goes at the next launch instead.
+Future<int> cleanStaging(
+  String stagingRoot,
+  Iterable<String> inUse, {
+  Duration minAge = const Duration(minutes: 10),
+  DateTime? now,
+}) async {
   final keep = {for (final path in inUse) ?stagingBatchOf(path, stagingRoot)};
   final root = Directory(stagingRoot);
   if (!await root.exists()) return 0;
+  final cutoff = (now ?? DateTime.now()).subtract(minAge);
   var deleted = 0;
   await for (final entry in root.list(followLinks: false)) {
     if (keep.any((k) => p.equals(k, entry.path))) continue;
     try {
+      if ((await entry.stat()).modified.isAfter(cutoff)) continue;
       await entry.delete(recursive: true);
       deleted++;
     } on FileSystemException {
