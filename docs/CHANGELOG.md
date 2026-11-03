@@ -25,6 +25,7 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 - The receiver reads the socket up to 8 MB ahead of the disk, so writing, hashing and checkpoints no longer stall the sender (D-064).
 - Checkpoints (fsync and a database write) every 2 s or 64 MB instead of every 4 MB (D-065).
 - The sender reads the next 1 MB while the current one is being sent, so disk reads and the network overlap.
+- Android descriptor reads and writes reuse one native buffer in the I/O worker and copy once, straight into transferable memory, instead of allocating, zero-filling and copying twice per megabyte.
 
 ### Changed (release preparation, code review 2026-11-03)
 - **App id** `io.github.shreyashjunje.crossdrop` on Android and iOS (extension `.ShareExtension`, App Group `group.io.github.shreyashjunje.crossdrop`) instead of `com.example.crossdrop` (D-063). Test phones get it as a new app; uninstall the old one.

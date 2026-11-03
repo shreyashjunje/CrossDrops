@@ -39,42 +39,71 @@ final class FdFile {
   /// Reads up to [count] bytes at [offset]. Shorter only at end of file.
   Uint8List readAt(int offset, int count) {
     if (count <= 0) return Uint8List(0);
-    final buf = calloc<Uint8>(count);
+    final buf = malloc<Uint8>(count); // pread fills it: no need to zero
     try {
-      var got = 0;
-      while (got < count) {
-        final n = _c.pread(fd, buf + got, count - got, offset + got);
-        if (n < 0) {
-          if (_c.errno == _eintr) continue;
-          throw _error('pread');
-        }
-        if (n == 0) break;
-        got += n;
-      }
-      return Uint8List.fromList(buf.asTypedList(got));
+      return Uint8List.fromList(buf.asTypedList(readInto(buf, offset, count)));
     } finally {
-      calloc.free(buf);
+      malloc.free(buf);
     }
+  }
+
+  /// Reads up to [count] bytes at [offset] into [buf]; returns how many.
+  /// Shorter only at end of file.
+  int readInto(Pointer<Uint8> buf, int offset, int count) {
+    var got = 0;
+    while (got < count) {
+      final n = _c.pread(fd, buf + got, count - got, offset + got);
+      if (n < 0) {
+        if (_c.errno == _eintr) continue;
+        throw _error('pread');
+      }
+      if (n == 0) break;
+      got += n;
+    }
+    return got;
   }
 
   /// Writes all of [bytes] at [offset].
   void writeAt(int offset, Uint8List bytes) {
     if (bytes.isEmpty) return;
-    final buf = calloc<Uint8>(bytes.length);
+    final buf = malloc<Uint8>(bytes.length);
     try {
       buf.asTypedList(bytes.length).setAll(0, bytes);
-      var put = 0;
-      while (put < bytes.length) {
-        final n = _c.pwrite(fd, buf + put, bytes.length - put, offset + put);
-        if (n < 0) {
-          if (_c.errno == _eintr) continue;
-          throw _error('pwrite');
-        }
-        put += n;
-      }
+      _writeFrom(buf, offset, bytes.length);
     } finally {
-      calloc.free(buf);
+      malloc.free(buf);
     }
+  }
+
+  void _writeFrom(Pointer<Uint8> buf, int offset, int length) {
+    var put = 0;
+    while (put < length) {
+      final n = _c.pwrite(fd, buf + put, length - put, offset + put);
+      if (n < 0) {
+        if (_c.errno == _eintr) continue;
+        throw _error('pwrite');
+      }
+      put += n;
+    }
+  }
+
+  /// [readAt] for [FdWorker]: reads into the worker's kept buffer and
+  /// copies once, straight into memory that moves to the caller without
+  /// another copy (review, speed item 5). Worker isolate only: the buffer
+  /// lives as long as the isolate.
+  TransferableTypedData readTransferable(int offset, int count) {
+    if (count <= 0) return TransferableTypedData.fromList(const []);
+    final buf = _WorkerBuffer.atLeast(count);
+    final got = readInto(buf, offset, count);
+    return TransferableTypedData.fromList([buf.asTypedList(got)]);
+  }
+
+  /// [writeAt] for [FdWorker], through the worker's kept buffer.
+  void writeAtWithWorkerBuffer(int offset, Uint8List bytes) {
+    if (bytes.isEmpty) return;
+    final buf = _WorkerBuffer.atLeast(bytes.length);
+    buf.asTypedList(bytes.length).setAll(0, bytes);
+    _writeFrom(buf, offset, bytes.length);
   }
 
   void truncate(int length) {
@@ -172,16 +201,16 @@ final class FdWorker {
   Future<int> length(int fd) => _run(() => FdFile(fd).length());
 
   Future<Uint8List> readAt(int fd, int offset, int count) async {
-    final t = await _run(
-      () => TransferableTypedData.fromList([FdFile(fd).readAt(offset, count)]),
-    );
+    final t = await _run(() => FdFile(fd).readTransferable(offset, count));
     return t.materialize().asUint8List();
   }
 
   Future<void> writeAt(int fd, int offset, Uint8List bytes) {
     final t = TransferableTypedData.fromList([bytes]);
     return _run(
-      () => FdFile(fd).writeAt(offset, t.materialize().asUint8List()),
+      () =>
+          FdFile(fd)
+              .writeAtWithWorkerBuffer(offset, t.materialize().asUint8List()),
     );
   }
 
@@ -207,6 +236,23 @@ final class FdWorker {
         reply.send([e, st]);
       }
     });
+  }
+}
+
+/// One native buffer per isolate, grown when needed and never freed, for
+/// the long-lived [FdWorker] isolate: mapping and unmapping 1 MB for each
+/// read or write costs page faults every time.
+abstract final class _WorkerBuffer {
+  static Pointer<Uint8> _buf = nullptr;
+  static int _size = 0;
+
+  static Pointer<Uint8> atLeast(int size) {
+    if (size > _size) {
+      if (_buf != nullptr) malloc.free(_buf);
+      _buf = malloc<Uint8>(size);
+      _size = size;
+    }
+    return _buf;
   }
 }
 

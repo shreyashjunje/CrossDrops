@@ -91,4 +91,45 @@ void main() {
     await io.close(fd);
     expect(File(path).readAsBytesSync(), bytes(1000));
   });
+
+  test('the worker buffer grows and is reused without mixing data', () async {
+    // Review, speed item 5: reads and writes go through one kept buffer.
+    final path = p.join(dir.path, 'd.bin');
+    final fd = FdFile.openPath(path, write: true);
+    final io = await FdWorker.instance;
+    try {
+      final big = bytes(3 * 1024 * 1024);
+      final small = Uint8List.fromList(List.filled(100, 0xAB));
+      await io.writeAt(fd, 0, small); // buffer of 100
+      await io.writeAt(fd, 100, big); // grows
+      await io.writeAt(fd, 100 + big.length, small); // reused, larger
+      final a = await io.readAt(fd, 0, 100);
+      final b = await io.readAt(fd, 100, big.length);
+      final c = await io.readAt(fd, 100 + big.length, 1000); // short at EOF
+      expect(a, small);
+      expect(b, big);
+      expect(c, small);
+      // An earlier result is its own memory, not a view of the buffer.
+      expect(a, small);
+    } finally {
+      await io.close(fd);
+    }
+  });
+
+  test('in-isolate chunks stay valid after the next one is read', () async {
+    final path = p.join(dir.path, 'e.bin');
+    final data = bytes(2 * 1024 * 1024 + 5);
+    File(path).writeAsBytesSync(data);
+    final fd = FdFile.openPath(path);
+    try {
+      final chunks = await readSourceChunksInIsolate(
+        FdSource(fd),
+        chunkSize: 1 << 20,
+      ).toList();
+      expect(chunks.map((c) => c.length), [1 << 20, 1 << 20, 5]);
+      expect([for (final c in chunks) ...c], data);
+    } finally {
+      FdFile(fd).close();
+    }
+  });
 }

@@ -1,5 +1,8 @@
+import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
 
 import 'fd_file.dart';
 
@@ -121,16 +124,23 @@ Stream<Uint8List> readSourceChunksInIsolate(
     case FdSource(:final fd):
       final file = FdFile(fd);
       final stop = end ?? file.length();
-      var pos = start;
-      while (pos < stop) {
-        final want = stop - pos < chunkSize ? stop - pos : chunkSize;
-        final chunk = file.readAt(pos, want);
-        if (chunk.isEmpty) {
-          throw const FileSystemException('file shorter than expected');
+      // One native buffer for the whole read instead of one per chunk
+      // (review, speed item 5). Chunks are copies, so none outlives it.
+      final buf = malloc<Uint8>(chunkSize);
+      try {
+        var pos = start;
+        while (pos < stop) {
+          final want = stop - pos < chunkSize ? stop - pos : chunkSize;
+          final got = file.readInto(buf, pos, want);
+          if (got == 0) {
+            throw const FileSystemException('file shorter than expected');
+          }
+          pos += got;
+          yield Uint8List.fromList(buf.asTypedList(got));
+          await Future<void>.delayed(Duration.zero);
         }
-        pos += chunk.length;
-        yield chunk;
-        await Future<void>.delayed(Duration.zero);
+      } finally {
+        malloc.free(buf);
       }
   }
 }
