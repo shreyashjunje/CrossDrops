@@ -27,7 +27,7 @@ When an Android phone joins a Wi-Fi without internet (an iPhone Personal Hotspot
   - a VPN that is the default must keep routing (scenario 6);
   - a Wi-Fi without internet that is still the default (mobile data off) needs nothing.
 - **How:** `ConnectivityManager.bindProcessToNetwork(network)`. Android's recommended per-socket way (`Network.getSocketFactory()`) cannot reach sockets that `dart:io` creates itself. The binding covers every socket CrossDrop opens afterwards, including the HTTPS client, the WebSocket and the server's listening socket. CrossDrop makes no calls outside the local network (CLAUDE.md hard rule 8), so nothing else is affected.
-- **Changes:** a `NetworkCallback` on Wi-Fi and a default-network callback report every change to Dart. When the Wi-Fi is lost, Kotlin clears the binding at once (a binding to a lost network breaks every new socket), and Dart binds again when a matching Wi-Fi returns. A failed bind is tried again at the next change.
+- **Changes:** a `NetworkCallback` on Wi-Fi and a default-network callback report every change to Dart. When the Wi-Fi is lost, Kotlin clears the binding at once (a binding to a lost network breaks every new socket), and Dart binds again when a matching Wi-Fi returns. A failed bind is tried again at the next change. Dart applies changes one at a time, newest last, so a loss reported while a bind is still running is applied after it (review L7).
 - **Logs:** `[crossdrop.network] bound to Wi-Fi (no internet there)`, `binding cleared`, `binding to Wi-Fi failed`.
 
 ## Code

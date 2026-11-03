@@ -18,6 +18,7 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 - **Complete (L2):** `/complete` checks the session and file again after reading its body, so two completes of an empty file no longer save it twice and a cancel during the body read no longer leaves a part and folder behind.
 - **Cancel (L4):** Cancel while a typed address is being checked now stops the send; it used to do nothing and the send went on.
 - **Resume (L5):** picking new files after a send failed but could still resume deleted that send's staged files but left it marked resumable, so the next launch offered a Resume that could only fail, and the receiver kept the old session (the next send to it got "busy"). The old send is now discarded properly: marked cancelled and withdrawn from the receiver.
+- **Android network binding (L7):** a Wi-Fi loss reported while a bind was running could leave the binder thinking it was bound, so the next Wi-Fi without internet was not bound. Changes are now applied one at a time.
 
 ### Added (Phase 7)
 - Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.

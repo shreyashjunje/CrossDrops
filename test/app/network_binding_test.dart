@@ -12,6 +12,9 @@ class FakeNetwork implements NetworkPlatform {
   final binds = <bool>[];
   bool bindWorks = true;
 
+  /// When set, a bind waits for it, as the platform call does.
+  Completer<void>? bindGate;
+
   @override
   Future<List<InterfaceAddress>> interfaces() async => const [];
 
@@ -24,6 +27,7 @@ class FakeNetwork implements NetworkPlatform {
   @override
   Future<bool> bindToWifi(bool on) async {
     binds.add(on);
+    await bindGate?.future;
     return bindWorks;
   }
 }
@@ -89,6 +93,48 @@ void main() {
     net.changes.add(_noInternet);
     await settle();
     expect(net.binds, [true, true]);
+    await binder.stop();
+  });
+
+  test('Wi-Fi lost while a bind runs: the next such Wi-Fi is bound', () async {
+    // Review L7: the loss cleared the flag, then the late bind result set
+    // it again, so the next Wi-Fi without internet was skipped.
+    final net = FakeNetwork(null);
+    final binder = NetworkBinder(net);
+    await binder.start();
+    final gate = net.bindGate = Completer<void>();
+    net.changes.add(_noInternet);
+    await settle();
+    expect(net.binds, [true]);
+    net.changes.add(const WifiState()); // lost while the bind runs
+    await settle();
+    gate.complete();
+    net.bindGate = null;
+    await pumpEventQueue();
+    net.changes.add(_noInternet);
+    await pumpEventQueue();
+    expect(net.binds, [true, true]);
+    await binder.stop();
+  });
+
+  test('changes never run side by side; a burst ends at the newest', () async {
+    final net = FakeNetwork(null);
+    final binder = NetworkBinder(net);
+    await binder.start();
+    final gate = net.bindGate = Completer<void>();
+    net.changes.add(_noInternet);
+    await settle();
+    // While that bind runs: internet, none, internet again.
+    net.changes
+      ..add(_home)
+      ..add(_noInternet)
+      ..add(_home);
+    await settle();
+    expect(net.binds, [true], reason: 'one call at a time');
+    gate.complete();
+    net.bindGate = null;
+    await pumpEventQueue();
+    expect(net.binds, [true, false]);
     await binder.stop();
   });
 
