@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../platform/keep_alive.dart';
 import 'keep_alive.dart';
@@ -15,6 +16,7 @@ import '../core/security/device_credentials.dart';
 import '../core/security/device_identity.dart';
 import '../core/security/secret_store.dart';
 import '../core/storage/database.dart';
+import '../core/storage/database_location.dart';
 import '../core/storage/settings_repository.dart';
 import '../core/storage/transfer_repository.dart';
 import '../core/storage/trust_repository.dart';
@@ -24,10 +26,28 @@ import '../platform/secure_secret_store.dart';
 
 /// The app's database, open for the app's lifetime.
 final databaseProvider = Provider<AppDatabase>((ref) {
-  final db = AppDatabase(driftDatabase(name: 'crossdrop'));
+  final db = AppDatabase(
+    driftDatabase(
+      name: 'crossdrop',
+      native: DriftNativeOptions(databaseDirectory: _databaseDirectory),
+    ),
+  );
   ref.onDispose(db.close);
   return db;
 });
+
+/// Application Support, never Documents: iOS shows Documents in the Files
+/// app (D-034). Moves a database left there by Phase 4 or earlier.
+Future<Directory> _databaseDirectory() async {
+  final support = await getApplicationSupportDirectory();
+  final documents = await getApplicationDocumentsDirectory();
+  await moveDatabaseFiles(
+    fromDir: documents.path,
+    toDir: support.path,
+    name: 'crossdrop',
+  );
+  return support;
+}
 
 final transferRepositoryProvider = Provider<TransferRepository>(
   (ref) => TransferRepository(ref.watch(databaseProvider)),
