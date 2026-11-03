@@ -187,7 +187,7 @@ One JSON text frame per event, with a `type` field. Unknown types are ignored, s
 | --- | --- | --- |
 | `accepted` | none | The user tapped Accept |
 | `rejected` | `reason` (`declined`, `timeout`, `no_space`), `neededBytes`? | The offer was refused |
-| `progress` | `fileId`, `receivedBytes` | At each 4 MB checkpoint, so these bytes are on disk |
+| `progress` | `fileId`, `receivedBytes` | At each checkpoint (every 2 s or 64 MB, D-065), so these bytes are on disk |
 | `file_done` | `fileId` | The file was verified and saved |
 | `cancelled` | `by` (`sender` or `receiver`) | Either side cancelled |
 | `error` | `code`, `fileId`? | A file failed (`too_many_bytes`, `hash_mismatch`, `file_failed`), or the disk filled up (`no_space`) |
@@ -216,7 +216,7 @@ The SHA-256 is not in the offer, so the sender can start sending before hashing 
 **Transfer rules**
 
 1. The receiver checks free space before accepting. The free space must cover the offer, the bytes other open sessions still expect, and a 64 MB reserve, on both the temp and the save volume. It checks again when the user taps Accept.
-2. Data is written to a partial file through a `ReceivedFileStore`: on iPhone `<app support>/crossdrop_incoming/<sessionId>/<fileId>.part` (D-025), on Android straight into a pending MediaStore item, created at the first byte (D-040). Every 4 MB, and whenever an upload stops, the partial file is fsynced and then the received byte count is saved. After a crash it is cut back to that count (D-022).
+2. Data is written to a partial file through a `ReceivedFileStore`: on iPhone `<app support>/crossdrop_incoming/<sessionId>/<fileId>.part` (D-025), on Android straight into a pending MediaStore item, created at the first byte (D-040). Every 2 s or 64 MB, whichever comes first, and whenever an upload stops, the partial file is fsynced and then the received byte count is saved. After a crash it is cut back to that count, so about 2 s of data is sent again (D-022, D-065).
 3. On reconnect, the sender calls GET on the file, then PUT with `offset = receivedBytes`. Retries wait 1, 2, 4, 8 s, then 8 s, and stop after about 2 minutes without progress (D-019).
 4. Files go one at a time on one connection in v1. Parallel streams (2–4) are added only if benchmarks show a gain.
 5. Read and write buffers start at 1 MB; tune after benchmarks. The receiver reads the socket into a queue of at most 8 MB that a separate writer empties (write, hash, checkpoint), so disk work does not stall the connection (D-064).
@@ -472,7 +472,7 @@ crossdrop/
 - Stream reads and writes with 1 MB buffers to start; benchmark 256 KB, 1 MB and 4 MB.
 - Hash with SHA-256 incrementally in a background isolate, so the UI never stutters.
 - Don't pass file bytes through platform channels: Dart reads files directly (temp file on iPhone, file descriptor on Android).
-- Save progress every 4 MB, not every write, to keep database writes low.
+- Save progress every 2 s or 64 MB, whichever comes first, not every write, to keep fsyncs and database writes low (D-065).
 - Calculate speed as a moving average over the last 3 seconds.
 - Benchmark matrix: 10 MB, 100 MB, 1 GB, 2 GB files × router 2.4 GHz, router 5 GHz, Android hotspot, iPhone hotspot × both directions. Compare with LocalSend on the same phones.
 - Benchmark builds (`--dart-define=CROSSDROP_BENCH=true`, release mode) run that matrix through the real engine and write CSV ([features/benchmark-mode.md](features/benchmark-mode.md), D-058). One stream per transfer until the measurements show a clear gain from more (D-059).

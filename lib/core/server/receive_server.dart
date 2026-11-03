@@ -352,6 +352,7 @@ class ReceiveServer {
     this._bodyIdleTimeout,
     this._acceptTimeout,
     this._checkpointBytes,
+    this._checkpointInterval,
     this._freeSpaceReserve,
     this._endedRetention,
     this._clock,
@@ -380,7 +381,12 @@ class ReceiveServer {
   final FreeSpaceProbe? _freeSpace;
   final Duration _bodyIdleTimeout;
   final Duration _acceptTimeout;
+
+  /// A running upload is checkpointed (fsync, then the byte count is
+  /// stored) after [_checkpointBytes] or [_checkpointInterval], whichever
+  /// comes first, and whenever it stops (D-065).
   final int _checkpointBytes;
+  final Duration _checkpointInterval;
   final int _freeSpaceReserve;
   final Duration _endedRetention;
   final DateTime Function() _clock;
@@ -442,7 +448,8 @@ class ReceiveServer {
     int port = 0,
     Duration bodyIdleTimeout = const Duration(seconds: 15),
     Duration acceptTimeout = const Duration(seconds: 60),
-    int checkpointBytes = 4 * 1024 * 1024,
+    int checkpointBytes = 64 * 1024 * 1024,
+    Duration checkpointInterval = const Duration(seconds: 2),
     int freeSpaceReserve = 64 * 1024 * 1024,
     Duration endedRetention = const Duration(minutes: 5),
     DateTime Function()? clock,
@@ -463,6 +470,7 @@ class ReceiveServer {
       bodyIdleTimeout,
       acceptTimeout,
       checkpointBytes,
+      checkpointInterval,
       freeSpaceReserve,
       endedRetention,
       clock ?? DateTime.now,
@@ -1413,9 +1421,11 @@ class ReceiveServer {
       return out.takeBytes();
     }
 
+    final sinceCheckpoint = Stopwatch()..start();
     Future<void> checkpoint() async {
       await raf.sync(); // the count we store must be on disk
       checkpointed = written;
+      sinceCheckpoint.reset();
       await _repo.updateFile(
         s.rowId,
         f.offer.fileId,
@@ -1440,7 +1450,10 @@ class ReceiveServer {
       f.received = written;
       _events.add(FileProgress(s.id, f.offer.fileId, written, size));
       final request = f.checkpointRequest;
-      if (written - checkpointed >= _checkpointBytes || request != null) {
+      final due =
+          written - checkpointed >= _checkpointBytes ||
+          sinceCheckpoint.elapsed >= _checkpointInterval;
+      if (due || request != null) {
         await checkpoint();
         f.checkpointRequest = null;
         request?.complete();

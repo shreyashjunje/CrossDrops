@@ -177,7 +177,7 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 
 ## D-022: Checkpoint = fsync, then store receivedBytes; restore cuts back
 - Date: 2026-11-02
-- Status: Accepted
+- Status: Superseded by D-065 (the interval; the mechanism stands)
 - Context: After a crash, a part file may be longer than what really reached the disk, and the tail may hold garbage.
 - Decision: Every 4 MB, and whenever an upload stops, the receiver fsyncs the part file and then stores `receivedBytes`. On restart the part file is truncated to that value.
 - Consequences: A crash never turns into a silently corrupt resume; the hash check would catch it, but only at the very end. At most 4 MB is sent again. Some fsync cost, to be measured in benchmarks.
@@ -530,4 +530,11 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: The code review (speed) found the receive loop serial: inside one `await for` it wrote 1 MB, handed it to the hasher and, every 4 MB, fsynced and wrote the database. While any of these was awaited the body stream was paused, the TCP window filled and the sender stalled. Disk and network never overlapped.
 - Decision: the request body is read into a queue that a writer loop empties in about 1 MB writes. Reading pauses at 8 MB queued and resumes at 4 MB. The size limit is checked as bytes arrive (hard rule 6); a stalled or dropped client still keeps every byte that arrived; `checkpointAll` wakes an idle writer so it saves progress even with less than 1 MB queued.
 - Consequences: up to 8 MB more memory per running upload (one at a time per session, eight sessions at most), still bounded and still streamed (hard rule 1). The gain is measured in the Phase 7 benchmark; a test shows the socket is read while a write is stuck, and that the queue stays bounded.
+
+## D-065: Checkpoint every 2 s or 64 MB, not every 4 MB
+- Date: 2026-11-03
+- Status: Accepted
+- Context: D-022 fsynced the part file and wrote the database every 4 MB. The code review (speed item 3) pointed out that fsync plus a SQLite write that often is costly on phone flash and through Android's FUSE layer, and with D-064 it still competes with the writer for the disk.
+- Decision: the mechanism of D-022 stays (fsync first, then store the byte count; restore cuts the part back). A running upload is checkpointed after 64 MB or 2 s, whichever comes first, and whenever it stops (drop, stall, pause, `checkpointAll` when iOS backgrounds the app). Both are `ReceiveServer.start` parameters, so the benchmark can compare.
+- Consequences: after a crash or a kill, about 2 s of data is sent again instead of at most 4 MB; on a fast link that is more bytes, but it costs seconds, and drops (not crashes) still checkpoint at the exact byte. The `progress` event comes at the same pace.
 

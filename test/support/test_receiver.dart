@@ -95,6 +95,9 @@ class TestReceiver {
   bool fakeClock = false;
   Duration endedRetention = const Duration(minutes: 5);
 
+  /// Long by default, so tests checkpoint by bytes only.
+  Duration checkpointInterval = const Duration(minutes: 10);
+
   String get tempDir => p.join(root.path, 'tmp');
   String get saveDir => p.join(root.path, 'save');
   TransferRepository get repo => TransferRepository(db);
@@ -111,6 +114,7 @@ class TestReceiver {
     ReceivedFileStore Function(TestReceiver r)? store,
     bool fakeClock = false,
     Duration endedRetention = const Duration(minutes: 5),
+    Duration checkpointInterval = const Duration(minutes: 10),
   }) async {
     final r = TestReceiver._(
       Directory.systemTemp.createTempSync('cd_recv'),
@@ -123,6 +127,7 @@ class TestReceiver {
     r.store = store?.call(r);
     r.fakeClock = fakeClock;
     r.endedRetention = endedRetention;
+    r.checkpointInterval = checkpointInterval;
     await r._startServer(bodyIdleTimeout, acceptTimeout, checkpointBytes);
     return r;
   }
@@ -151,6 +156,7 @@ class TestReceiver {
       acceptTimeout: acceptTimeout,
       checkpointBytes: checkpointBytes,
       endedRetention: endedRetention,
+      checkpointInterval: checkpointInterval,
       clock: fakeClock ? () => now : null,
     );
     _sub = server.events.listen(events.add);

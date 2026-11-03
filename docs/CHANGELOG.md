@@ -23,6 +23,7 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 
 ### Changed (speed, code review 2026-11-03)
 - The receiver reads the socket up to 8 MB ahead of the disk, so writing, hashing and checkpoints no longer stall the sender (D-064).
+- Checkpoints (fsync and a database write) every 2 s or 64 MB instead of every 4 MB (D-065).
 
 ### Changed (release preparation, code review 2026-11-03)
 - **App id** `io.github.shreyashjunje.crossdrop` on Android and iOS (extension `.ShareExtension`, App Group `group.io.github.shreyashjunje.crossdrop`) instead of `com.example.crossdrop` (D-063). Test phones get it as a new app; uninstall the old one.

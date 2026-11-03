@@ -27,7 +27,7 @@ A transfer survives Wi-Fi drops, the receiver's IP or port changing, and either 
 
 ARCHITECTURE.md transfer rules 2 and 3 and the "Failure handling" table describe the flow. The details:
 
-**What the receiver saves (checkpoint).** Bytes go to `<app support>/crossdrop_incoming/<sessionId>/<fileId>.part`. Every 4 MB, and whenever an upload stops (drop, stall, pause, background), the file is fsynced and only then is `receivedBytes` written to the database. After a crash, the part file is cut back to the last checkpoint. Bytes written after it might not have reached the disk, and trusting them could corrupt the file silently (D-022). Partial files live in the app support folder, not the OS temp or cache folder, because those can be purged while the app is closed (D-025).
+**What the receiver saves (checkpoint).** Bytes go to `<app support>/crossdrop_incoming/<sessionId>/<fileId>.part`. Every 2 s or 64 MB, whichever comes first (D-065; every 4 MB before the code review), and whenever an upload stops (drop, stall, pause, background), the file is fsynced and only then is `receivedBytes` written to the database. After a crash, the part file is cut back to the last checkpoint. Bytes written after it might not have reached the disk, and trusting them could corrupt the file silently (D-022). Partial files live in the app support folder, not the OS temp or cache folder, because those can be purged while the app is closed (D-025).
 
 **What the sender does after a drop.**
 
@@ -84,7 +84,7 @@ No new endpoints beyond [transfer-engine.md](transfer-engine.md). Resume uses `G
 
 - The receiver must have Receive open for a sender to find it again (D-016). If it does not, the sender keeps trying for 2 minutes, then offers Resume.
 - After an app restart, a large receiver file costs one full hash from disk at `complete`. That was not measured on phones.
-- One fsync every 4 MB may cost throughput on some Android storage. Measure it in the benchmarks; the interval is a constructor parameter.
+- The checkpoint pace (2 s or 64 MB, D-065) trades resent bytes after a crash for fewer fsyncs. Measure it in the benchmarks; both are `ReceiveServer.start` parameters.
 
 ## Open questions
 

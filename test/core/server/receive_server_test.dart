@@ -1136,6 +1136,41 @@ void main() {
       expect(stored!.files.single.transferredBytes, greaterThanOrEqualTo(mb));
     });
 
+    test('a slow upload is checkpointed by time, not only by bytes', () async {
+      // D-065: every 2 s or 64 MB, whichever first; here 200 ms or 1 GB.
+      await r.close();
+      r = await TestReceiver.start(
+        identity: identity,
+        checkpointBytes: 1024 * mb,
+        checkpointInterval: const Duration(milliseconds: 200),
+      );
+      final sid = await createSession('a.bin', 8 * mb);
+      final socket = await SecureSocket.connect(
+        '127.0.0.1',
+        r.port,
+        onBadCertificate: (_) => true,
+      );
+      addTearDown(socket.destroy);
+      socket.write(
+        'PUT /v1/sessions/$sid/files/f1?offset=0 HTTP/1.1\r\n'
+        'host: x\r\n${await authLine()}content-length: ${8 * mb}\r\n\r\n',
+      );
+      socket.add(Uint8List(2 * mb));
+      await socket.flush();
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      socket.add(Uint8List(2 * mb));
+      await socket.flush();
+      // Stored while the upload is still open, long before 1 GB.
+      final end = DateTime.now().add(const Duration(seconds: 10));
+      var stored = 0;
+      while (stored < 2 * mb && DateTime.now().isBefore(end)) {
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        final s = await r.repo.find(sid, TransferDirection.receive);
+        stored = s!.files.single.transferredBytes;
+      }
+      expect(stored, greaterThanOrEqualTo(2 * mb));
+    });
+
     test('after a restart the session is paused at its checkpoint', () async {
       final sid = await createSession('a.bin', 10 * mb);
       final data = randomBytes(3 * mb);
