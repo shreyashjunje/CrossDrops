@@ -78,5 +78,11 @@
 	<true/>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>CrossDrop shows your photos and videos so you can pick which ones to send. They go only to the phone you choose.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>CrossDrop saves photos and videos you receive to your library.</string>
+	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
+	<true/>
 </dict>
 </plist>

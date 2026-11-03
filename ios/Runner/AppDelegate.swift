@@ -7,6 +7,7 @@ import UIKit
   private var localNetwork: LocalNetworkChannel?
   private var storage: StorageChannel?
   private var background: BackgroundTaskChannel?
+  private var export: ExportChannel?
 
   override func application(
     _ application: UIApplication,
@@ -25,6 +26,9 @@ import UIKit
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "BackgroundTaskChannel") {
       background = BackgroundTaskChannel(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ExportChannel") {
+      export = ExportChannel(messenger: registrar.messenger())
     }
   }
 }

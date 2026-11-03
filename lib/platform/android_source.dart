@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 import '../core/engine/chunked_reader.dart';
 import '../core/engine/fd_file.dart';
 import '../core/engine/source_opener.dart';
+import '../core/media/format_plan.dart';
+import '../core/media/prepare.dart';
+import '../core/protocol/models.dart';
 
 /// What Android reports about a content URI before it is opened.
 class ContentInfo {
@@ -129,6 +132,73 @@ class AndroidSourceOpener implements SourceOpener {
       );
     } on PlatformException catch (e) {
       throw SourceUnavailable(e.code);
+    }
+  }
+}
+
+/// Android library items are read in place through their content URI;
+/// nothing is exported (D-036).
+class AndroidMedia implements MediaPlatform {
+  AndroidMedia(this._sources, {required this.uriFor});
+
+  final AndroidSources _sources;
+
+  /// The MediaStore content URI for a photo_manager asset id.
+  final Future<String?> Function(String assetId) uriFor;
+
+  @override
+  Future<List<ResolvedFile>> resolveAsset(
+    LibraryAsset asset,
+    ExportPlan plan,
+    String dir,
+    PrepareControl control,
+    void Function(double fraction) onProgress,
+  ) async {
+    final uri = await uriFor(asset.id);
+    if (uri == null) throw const MediaUnavailable('not_found');
+    final ContentInfo info;
+    final int size;
+    try {
+      info = (await _sources.describe([uri])).single;
+      // The descriptor's size is the truth; the column can be stale.
+      final o = await _sources.open(uri);
+      size = o.size;
+      await (await FdWorker.instance).close(o.fd);
+    } on PlatformException catch (e) {
+      throw MediaUnavailable(e.code);
+    } on StateError {
+      throw const MediaUnavailable('not_found');
+    }
+    final name = info.name ?? asset.originalName;
+    return [
+      ResolvedFile(
+        ref: uri,
+        size: size,
+        role: asset.kind == FileKind.video
+            ? ResolvedRole.video
+            : ResolvedRole.still,
+        resourceName: name,
+        originalName: name,
+        mime: info.mime,
+        created: info.created,
+      ),
+    ];
+  }
+
+  @override
+  Future<int> copyIntoStaging(
+    String ref,
+    String dest,
+    PrepareControl control,
+  ) async {
+    final id = '${DateTime.now().microsecondsSinceEpoch}';
+    final remove = control.onCancel(() => _sources.cancelCopy(id));
+    try {
+      return await _sources.copy(ref, dest, id);
+    } on PlatformException catch (e) {
+      throw MediaUnavailable(e.code);
+    } finally {
+      remove();
     }
   }
 }

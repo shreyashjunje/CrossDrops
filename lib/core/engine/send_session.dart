@@ -64,6 +64,7 @@ class SendItem {
     this.mime,
     this.kind = FileKind.file,
     this.created,
+    this.livePhotoGroup,
   });
 
   /// A file path, or a `content://` URI on Android, opened by the
@@ -74,6 +75,10 @@ class SendItem {
   final String? mime;
   final String kind;
   final DateTime? created;
+
+  /// Same value on a Live Photo's still and video (ARCHITECTURE.md,
+  /// "Offer manifest").
+  final String? livePhotoGroup;
 }
 
 class SendFileProgress {
@@ -240,6 +245,7 @@ class SendSession {
             mime: f.mime,
             kind: f.kind,
             created: f.created,
+            livePhotoGroup: f.livePhotoGroup,
           ),
       ],
       repository: repository,
@@ -461,6 +467,7 @@ class SendSession {
                 mime: f.item.mime,
                 kind: f.item.kind,
                 created: f.item.created,
+                livePhotoGroup: f.item.livePhotoGroup,
               ),
           ],
         ),
@@ -511,6 +518,7 @@ class SendSession {
               mime: f.item.mime,
               kind: f.item.kind,
               created: f.item.created,
+              livePhotoGroup: f.item.livePhotoGroup,
               status: FileTransferStatus.pending,
               sourcePath: f.item.path,
             ),
