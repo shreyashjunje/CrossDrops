@@ -2,11 +2,26 @@
     <!-- Local HTTPS server and client for transfers. -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Discovery (NsdManager). bonsoir holds a Wi-Fi multicast lock while
-         browsing or advertising. No location or NEARBY_WIFI_DEVICES needed. -->
+         browsing or advertising. Discovery needs no location or
+         NEARBY_WIFI_DEVICES; only hotspot mode does (below). -->
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <!-- Network change events (connectivity_plus). -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+    <!-- Hotspot mode (D-054): LocalOnlyHotspot. Asked when the user taps
+         Start. Android 13+: NEARBY_WIFI_DEVICES, never used for location.
+         Android 10-12: fine location (Android 12 wants coarse in the same
+         request). -->
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE"/>
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation"/>
+    <uses-permission
+        android:name="android.permission.ACCESS_FINE_LOCATION"
+        android:maxSdkVersion="32"/>
+    <uses-permission
+        android:name="android.permission.ACCESS_COARSE_LOCATION"
+        android:maxSdkVersion="32"/>
     <!-- QR scanning; asked at runtime when the scanner opens. -->
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-feature android:name="android.hardware.camera" android:required="false"/>

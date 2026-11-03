@@ -16,12 +16,16 @@ class MainActivity : FlutterActivity() {
     private var source: SourceChannel? = null
     private var save: SaveChannel? = null
     private var share: ShareChannel? = null
+    private var hotspot: HotspotChannel? = null
+    private var network: NetworkChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         source = SourceChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         save = SaveChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         share = ShareChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        hotspot = HotspotChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        network = NetworkChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         // Dart side: lib/platform/local_network.dart. Android has no Local
         // Network permission, so `probe` always answers "granted".
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "crossdrop/local_network")
@@ -101,6 +105,22 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         share?.handle(intent)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        if (hotspot?.onRequestPermissionsResult(requestCode) == true) return
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        // The hotspot and the network binding belong to this engine.
+        hotspot?.stop()
+        network?.dispose()
+        super.cleanUpFlutterEngine(flutterEngine)
     }
 
     // FlutterActivity is not a ComponentActivity, so the document picker
