@@ -1,5 +1,6 @@
 # Docs
 
+- [STATUS.md](STATUS.md): what is left after Phase 7 and what to do next.
 - [ARCHITECTURE.md](ARCHITECTURE.md): full v1 design: scope, connection modes, protocol, security, platform modules, failure handling.
 - [DECISIONS.md](DECISIONS.md): log of key design decisions and why they were made.
 - [CHANGELOG.md](CHANGELOG.md): notable changes to the project and docs.
