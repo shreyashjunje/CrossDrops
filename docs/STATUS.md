@@ -27,8 +27,9 @@ All v1 features in CLAUDE.md are now in the code: transfer engine, discovery, QR
 - Fixes for whatever the device tests turn up.
 
 ### 5. Before giving it to anyone (after testing)
-- A real bundle id and application id instead of `com.example.crossdrop`.
-- App icon, a signed Android release build, and an iPhone distribution route (TestFlight needs a paid account).
+- ~~A real bundle id and application id~~: `io.github.shreyashjunje.crossdrop` (D-063).
+- ~~Release signing~~: set up; create the key and add the CI secrets ([RELEASE.md](RELEASE.md)).
+- App icon and an iPhone distribution route (TestFlight needs a paid account).
 - Privacy text (no data leaves the local network) and a store listing, if it goes to the stores.
 
 ## What to do next, in order

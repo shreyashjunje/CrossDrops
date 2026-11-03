@@ -513,3 +513,14 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: The code review (M3, L6) found that a paused received session kept the wake lock and the Android foreground service for good, and kept the server up with Receiving off. Releasing them at the first pause is worse: a Wi-Fi drop of a second would let an iPhone receiver whose auto-lock time has passed lock at once and be suspended, ending the transfer that the sender was about to resume.
 - Decision: a session that was moving bytes and pauses stays held for 150 s (the sender's retry deadline of about 2 minutes, D-019, plus a margin), then releases the keep-alive and stops counting for the server's lifetime. Any new upload holds it again. A session restored as paused is not held. The policy is a small pure class, `SessionKeepAlive`, tested with fake timers.
 - Consequences: after a sender goes to the background or gives up, the receiver's screen may sleep and its server may stop 150 s later (30 s more if hidden). The sender then finds it again by device id when both are open.
+
+## D-063: App id under the owner's GitHub namespace; no debug-signed release builds; all rights reserved
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The code review listed release blockers: the app id was still `com.example.crossdrop` on Android and iOS, Android release builds were signed with the debug key, there was no LICENSE, and the pubspec description was the template's.
+- Decision:
+  - The id is `io.github.shreyashjunje.crossdrop` (iOS extension `.ShareExtension`, App Group `group.io.github.shreyashjunje.crossdrop`): a reverse-DNS name under a domain the owner controls (their GitHub Pages namespace), without buying a domain. The Kotlin package moved with the Android namespace.
+  - Android release builds take the key from `android/key.properties` or `CROSSDROP_KEYSTORE_*` variables (CI secrets). Without a key a release build fails with a clear message; `CROSSDROP_ALLOW_DEBUG_SIGNING=true` marks a test build that may use the debug key. CI does that only while the repository has no key secrets, and names the APK `*-debugsigned`.
+  - LICENSE says all rights reserved. Choosing an open-source licence is the owner's call before any public source release; this keeps every option open.
+- Consequences: test phones get the new id as a separate app (uninstall the old one once). Losing the release key means no updates under this id, so it must be backed up. Steps are in RELEASE.md.
+

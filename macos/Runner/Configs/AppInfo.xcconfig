@@ -8,7 +8,7 @@
 PRODUCT_NAME = crossdrop
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = com.example.crossdrop
+PRODUCT_BUNDLE_IDENTIFIER = io.github.shreyashjunje.crossdrop
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 com.example. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 Shreyash Junje. All rights reserved.

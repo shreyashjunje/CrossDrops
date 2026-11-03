@@ -71,11 +71,35 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: flutter pub get
-      # Signed with the debug key (android/app/build.gradle.kts), so it
-      # installs with `adb install` or by opening the file on the phone.
+      # Release signing (D-063, docs/RELEASE.md): with the repository
+      # secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+      # ANDROID_KEY_ALIAS and ANDROID_KEY_PASSWORD the APK is signed with
+      # the release key. Without them it is a test build signed with this
+      # runner's debug key, named *-debugsigned; it installs, but cannot
+      # update or be updated by any other build.
+      - name: Release key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            echo "CROSSDROP_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+            echo "SIGNING_SUFFIX=" >> "$GITHUB_ENV"
+          else
+            echo "::warning::No release key in the repository secrets: debug-signed test build."
+            echo "CROSSDROP_ALLOW_DEBUG_SIGNING=true" >> "$GITHUB_ENV"
+            echo "SIGNING_SUFFIX=-debugsigned" >> "$GITHUB_ENV"
+          fi
       - run: flutter build apk --release $BENCH_DEFINE
+        env:
+          CROSSDROP_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          CROSSDROP_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          CROSSDROP_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
       - name: Name the APK after the commit
-        run: mv build/app/outputs/flutter-apk/app-release.apk "crossdrop-${GITHUB_SHA::7}${BENCH_SUFFIX}.apk"
+        run: mv build/app/outputs/flutter-apk/app-release.apk "crossdrop-${GITHUB_SHA::7}${BENCH_SUFFIX}${SIGNING_SUFFIX}.apk"
+      - name: Remove the key file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks"
       - uses: actions/upload-artifact@v4
         with:
           name: crossdrop-android-${{ github.sha }}${{ env.BENCH_SUFFIX }}

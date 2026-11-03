@@ -21,7 +21,7 @@ The **Build** workflow (`.github/workflows/build.yml`) runs analyze and tests on
    - **Or with the GitHub CLI:** `gh workflow run build.yml --ref main`.
 3. Wait until all three jobs are green: Analyze and test, Android APK, iPhone unsigned IPA. The iPhone job takes about 10–20 min.
 4. Open the run and download the artifacts at the bottom of the page:
-   - `crossdrop-android-<sha>`, which contains `crossdrop-<sha7>.apk`
+   - `crossdrop-android-<sha>`, which contains `crossdrop-<sha7>.apk`, or `crossdrop-<sha7>-debugsigned.apk` while the repository has no release key secrets ([RELEASE.md](RELEASE.md))
    - `crossdrop-ios-unsigned-<sha>`, which contains `crossdrop-<sha7>-unsigned.ipa`
 
    Unzip both. Note the 7-character commit id for the Results tables.
@@ -32,6 +32,8 @@ If a job fails, open it, copy the red error lines and paste them back.
 
 - **USB:** `adb install -r crossdrop-<sha7>.apk`
 - **Or without USB:** copy the APK to the phone, open it, and allow "Install unknown apps" for the file manager when asked.
+- **After the app id change (2026-11-03):** the app is now `io.github.shreyashjunje.crossdrop`, so it installs next to an older `com.example.crossdrop` build instead of replacing it. Uninstall the old one (`adb uninstall com.example.crossdrop`) so two CrossDrops do not both answer on the network.
+- **"App not installed" / signatures do not match:** each `-debugsigned` APK is signed with a new debug key. `adb uninstall io.github.shreyashjunje.crossdrop`, then install again.
 
 ### 3. Install on iPhone from Windows (free Apple ID)
 
@@ -52,7 +54,7 @@ For each build:
 Limits of a free Apple ID:
 - The app stops opening after **7 days**. Install it again with Sideloadly, or turn on its auto-refresh.
 - Only about 3 sideloaded apps can be active at once.
-- Bundle id: Sideloadly may change it. If it says the id `com.example.crossdrop` is unavailable, use its "Bundle ID" option to set something unique, for example `com.<yourname>.crossdrop`.
+- Bundle id: Sideloadly may change it. If it says the id `io.github.shreyashjunje.crossdrop` is unavailable, use its "Bundle ID" option to set something unique, for example `com.<yourname>.crossdrop`.
 
 **Paste back if it fails:** the Sideloadly log (its Log window) and the iOS version.
 
@@ -63,8 +65,8 @@ Feature doc: [features/file-transfer-poc.md](features/file-transfer-poc.md). Spe
 ### Preparation (once)
 
 1. **Build in release mode** on both phones from the same commit. The easiest way: run the Build workflow and install both artifacts ([Installing the CI builds](#installing-the-ci-builds-no-mac-needed)). Other ways:
-   - Android (from this PC): `flutter run --release -d <android-device-id>` (`flutter devices` lists ids).
-   - iPhone (from a Mac with Xcode): open `ios/Runner.xcworkspace`, set your signing team under Runner > Signing & Capabilities (change the bundle id from `com.example.crossdrop` if Xcode says it is taken), then `flutter run --release -d <iphone-id>`.
+   - Android (from this PC): `flutter run --release -d <android-device-id>` (`flutter devices` lists ids). Without `android/key.properties`, first set `$env:CROSSDROP_ALLOW_DEBUG_SIGNING='true'` (PowerShell) for a debug-signed test build.
+   - iPhone (from a Mac with Xcode): open `ios/Runner.xcworkspace`, set your signing team under Runner > Signing & Capabilities (change the bundle id from `io.github.shreyashjunje.crossdrop` if Xcode says it is taken), then `flutter run --release -d <iphone-id>`.
 2. **Create test files** on the PC (PowerShell, random content so nothing can be compressed or deduplicated):
 
    ```powershell
@@ -102,8 +104,8 @@ Feature doc: [features/file-transfer-poc.md](features/file-transfer-poc.md). Spe
 **Expected**
 - iPhone: progress bar and live MB/s move smoothly; ends with "Done, SHA-256 verified by receiver" and `Time X s · average Y MB/s`.
 - Android: the file row ends with "Saved, SHA-256 verified".
-- `adb shell ls -l /sdcard/Android/data/com.example.crossdrop/files/CrossDrop/` shows `crossdrop-100MB.bin` with size exactly 104857600.
-- Optional: `adb shell sha256sum /sdcard/Android/data/com.example.crossdrop/files/CrossDrop/crossdrop-100MB.bin` equals the PC hash (some Android versions block shell access to this folder; then note "not checked").
+- `adb shell ls -l /sdcard/Android/data/io.github.shreyashjunje.crossdrop/files/CrossDrop/` shows `crossdrop-100MB.bin` with size exactly 104857600.
+- Optional: `adb shell sha256sum /sdcard/Android/data/io.github.shreyashjunje.crossdrop/files/CrossDrop/crossdrop-100MB.bin` equals the PC hash (some Android versions block shell access to this folder; then note "not checked").
 
 **Paste back:** screenshot of both screens at the end, the iPhone result line, the `ls -l` line, and `adb logcat -s flutter` output for the run.
 
@@ -348,7 +350,7 @@ Wording below:
 - "**Send to X**" means CrossDrop > Send > tap X in the list > **Add files** > pick > **Send**.
 
 To check a received file's hash on Android:
-- `adb shell sha256sum /sdcard/Android/data/com.example.crossdrop/files/CrossDrop/<name>`
+- `adb shell sha256sum /sdcard/Android/data/io.github.shreyashjunje.crossdrop/files/CrossDrop/<name>`
 - Or send it back to the PC with `adb pull` and use `Get-FileHash`.
 
 On iPhone, received files are in Files > On My iPhone > crossdrop > CrossDrop.
@@ -675,7 +677,7 @@ Feature docs: [features/media-picking.md](features/media-picking.md), [features/
 1. **Build both phones from the same commit** and install over the Phase 4 app without deleting it ([Installing the CI builds](#installing-the-ci-builds-no-mac-needed)).
    - This is the first build with the Share Extension and new Swift files. If the **iPhone unsigned IPA** job fails, paste its red lines and stop: nothing on iOS in Phase 5 has been compiled before this job.
    - **Android 10 or newer is required now** (D-035).
-   - **Sideloadly and the extension:** the `.ipa` now contains `PlugIns/ShareExtension.appex`, which uses an App Group (`group.com.example.crossdrop`). Sideloadly signs the extension as a second app id; a free Apple ID allows 10 new app ids per 7 days. If Sideloadly reports an error about app groups or the extension, paste its log. If you changed the bundle id in Sideloadly, sharing may say "not available in this installation" (P5-9 step 6); the rest of Phase 5 still works.
+   - **Sideloadly and the extension:** the `.ipa` now contains `PlugIns/ShareExtension.appex`, which uses an App Group (`group.io.github.shreyashjunje.crossdrop`). Sideloadly signs the extension as a second app id; a free Apple ID allows 10 new app ids per 7 days. If Sideloadly reports an error about app groups or the extension, paste its log. If you changed the bundle id in Sideloadly, sharing may say "not available in this installation" (P5-9 step 6); the rest of Phase 5 still works.
 2. **Upgrade check:**
    - iPhone: open CrossDrop, then the **Files** app > Browse > On My iPhone > **CrossDrop**. Expected: **no** `crossdrop.sqlite` file (it moved to a hidden folder). Files received in earlier phases are still there, in a `CrossDrop` subfolder.
    - Both: Settings, Trusted devices and the security key are unchanged; the app opens normally.
@@ -833,7 +835,7 @@ Send the same HEIC photo twice from the iPhone: once with **Photos & videos** in
 
 Covered by unit tests:
 - Manifest attacks on the iOS inbox (paths outside the share, links, too many items).
-- Refused `file://` and own-package URIs in Android shares: the Kotlin check itself only runs on a phone. To try it, `adb shell am start -a android.intent.action.SEND -t text/plain --eu android.intent.extra.STREAM file:///sdcard/x.txt com.example.crossdrop/.MainActivity` should give "1 shared item(s) could not be used."
+- Refused `file://` and own-package URIs in Android shares: the Kotlin check itself only runs on a phone. To try it, `adb shell am start -a android.intent.action.SEND -t text/plain --eu android.intent.extra.STREAM file:///sdcard/x.txt io.github.shreyashjunje.crossdrop/.MainActivity` should give "1 shared item(s) could not be used."
 - A pending item that disappears, MIME types MediaStore refuses, and storage full at insert (fake MediaStore).
 
 ### Results

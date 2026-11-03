@@ -1,4 +1,4 @@
-package com.example.crossdrop
+package io.github.shreyashjunje.crossdrop
 
 import android.Manifest
 import android.app.Activity
