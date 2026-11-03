@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/navigation.dart';
 import '../../app/providers.dart';
-import '../nearby/nearby_screen.dart';
 import '../receive/my_qr_screen.dart';
+import '../send/send_screen.dart';
 import '../settings/settings_screen.dart';
 import '../transfer/transfer_screen.dart';
 import '../transfer/unfinished_transfers.dart';
@@ -84,11 +84,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
               child: _SendButton(
-                onPressed: () => pushScreen<void>(
-                  context,
-                  Routes.nearby,
-                  const NearbyScreen(),
-                ),
+                onPressed: () =>
+                    pushScreen<void>(context, Routes.send, const SendScreen()),
               ),
             ),
           ],

@@ -167,6 +167,18 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     );
   }
 
+  /// Takes one item out of the selection.
+  Future<void> removePicked(PickedItem item) async {
+    if (state.isRunning) return;
+    final left = [
+      for (final p in state.picked)
+        if (!identical(p, item)) p,
+    ];
+    if (left.length == state.picked.length) return;
+    state = state.copyWith(picked: left);
+    if (item is PickedFile) await _releaseDocs([item]);
+  }
+
   Future<void> clearFiles() async {
     if (state.isRunning) return;
     final docs = [
@@ -184,13 +196,24 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   /// receiver's fingerprint.
   Future<void> send(ConnectTarget target) async {
     if (!state.canSend) return;
+    // Running from now on, so the transfer screen never shows the last
+    // send's result.
+    state = state.copyWith(
+      snapshot: () => null,
+      error: () => null,
+      skipped: const [],
+      preparing: () => PrepareProgress(0, state.picked.length, null),
+    );
     var checked = target;
     if (target.pinSource == null) {
       try {
         checked = await ref.read(peerCheckProvider)(target);
       } on UploadException catch (e) {
         if (ref.mounted) {
-          state = state.copyWith(error: () => _checkError(e));
+          state = state.copyWith(
+            preparing: () => null,
+            error: () => _checkError(e),
+          );
         }
         return;
       }

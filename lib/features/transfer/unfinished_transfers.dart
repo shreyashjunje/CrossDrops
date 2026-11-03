@@ -16,9 +16,9 @@ import '../../core/storage/partial_cleanup.dart';
 import '../../platform/android_store.dart';
 import '../../core/storage/transfer_repository.dart';
 import '../send/send_controller.dart';
-import '../send/send_screen.dart';
 import '../../app/navigation.dart';
 import 'transfer_format.dart';
+import 'transfer_screen.dart';
 
 /// Runs once per app launch: deletes partial files older than 24 hours,
 /// then lists the transfers that can still be resumed.
@@ -128,8 +128,8 @@ class UnfinishedTransfersDialog extends ConsumerWidget {
                     );
                     navigator.push(
                       MaterialPageRoute<void>(
-                        settings: const RouteSettings(name: Routes.send),
-                        builder: (_) => const SendScreen(),
+                        settings: const RouteSettings(name: Routes.transfer),
+                        builder: (_) => const TransferScreen(),
                       ),
                     );
                   } else {

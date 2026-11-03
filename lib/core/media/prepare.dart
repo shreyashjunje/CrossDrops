@@ -38,6 +38,7 @@ final class PickedFile extends PickedItem {
     this.mime,
     this.created,
     this.platformKind,
+    this.size,
   });
 
   /// A file path, or a `content://` URI on Android.
@@ -48,6 +49,10 @@ final class PickedFile extends PickedItem {
 
   /// "photo" or "video" when the OS says so (a share from a gallery).
   final String? platformKind;
+
+  /// For the Send screen's total, when the platform said; the size sent
+  /// is measured again when preparing.
+  final int? size;
 
   @override
   String get label => name;

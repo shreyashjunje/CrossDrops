@@ -7,8 +7,6 @@ import '../../core/client/upload_client.dart';
 import '../../core/discovery/peer_list.dart';
 import '../../core/protocol/connect_payload.dart';
 import '../../core/security/device_identity.dart';
-import '../send/send_screen.dart';
-import '../../app/navigation.dart';
 import 'local_network_denied_view.dart';
 import 'lookalike_dialog.dart';
 import 'manual_address_dialog.dart';
@@ -16,6 +14,7 @@ import 'nearby_controller.dart';
 import 'qr_scan_screen.dart';
 
 /// Pick who to send to: nearby devices, a QR code, or a typed address.
+/// Pops with the checked [ConnectTarget].
 class NearbyScreen extends ConsumerStatefulWidget {
   const NearbyScreen({super.key});
 
@@ -29,7 +28,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
   NearbyController get _controller =>
       ref.read(nearbyControllerProvider.notifier);
 
-  /// Runs a peer check, then opens Send for the target.
+  /// Runs a peer check, then returns the target to the Send screen.
   Future<void> _connect(
     Future<ConnectTarget> Function() check, {
     required bool fromQr,
@@ -40,12 +39,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       final target = await check();
       if (!mounted) return;
       if (!await confirmLookalike(context, target) || !mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute<void>(
-          settings: const RouteSettings(name: Routes.send),
-          builder: (_) => SendScreen(target: target),
-        ),
-      );
+      Navigator.of(context).pop(target);
     } on UploadException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)

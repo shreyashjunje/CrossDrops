@@ -37,6 +37,7 @@ class AndroidDocumentPicker implements DocumentPicker {
           name: i.name ?? 'file',
           mime: i.mime,
           created: i.modified,
+          size: i.size,
         ),
     ];
   }
@@ -72,10 +73,24 @@ class IosDocumentPicker implements DocumentPicker {
       } on FileSystemException catch (e) {
         // Keep reading from where the picker left it.
         logEvent('picker', 'could not move a pick (${e.osError?.errorCode})');
-        out.add(PickedFile(ref: from, name: f.name, created: _modified(from)));
+        out.add(
+          PickedFile(
+            ref: from,
+            name: f.name,
+            created: _modified(from),
+            size: _length(from),
+          ),
+        );
         continue;
       }
-      out.add(PickedFile(ref: dest, name: f.name, created: _modified(dest)));
+      out.add(
+        PickedFile(
+          ref: dest,
+          name: f.name,
+          created: _modified(dest),
+          size: _length(dest),
+        ),
+      );
     }
     return out;
   }
@@ -93,6 +108,14 @@ class IosDocumentPicker implements DocumentPicker {
   static DateTime? _modified(String path) {
     try {
       return File(path).lastModifiedSync().toUtc();
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  static int? _length(String path) {
+    try {
+      return File(path).lengthSync();
     } on FileSystemException {
       return null;
     }

@@ -3,15 +3,17 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/media_providers.dart';
 import '../../app/navigation.dart';
+import '../../core/media/prepare.dart';
 import '../../core/media/save_target.dart';
 import '../../core/security/device_identity.dart';
-import '../nearby/nearby_screen.dart';
 import '../receive/receive_controller.dart';
 import '../receive/receive_host.dart';
 import '../send/send_controller.dart';
+import '../send/send_screen.dart';
 import 'failure_messages.dart';
 import 'progress_view.dart';
 import 'result_view.dart';
+import 'skipped_notice.dart';
 import 'transfer_format.dart';
 import 'transfer_view.dart';
 
@@ -43,6 +45,11 @@ class TransferScreen extends ConsumerWidget {
                     'from iCloud ${(prep.fraction! * 100).floor()}%',
           fraction: prep.fraction,
           onCancel: send.cancel,
+        );
+      } else if (view == null && !s.isRunning) {
+        body = _NotSent(
+          message: s.error ?? 'Nothing was sent.',
+          onBack: () => Navigator.of(context).pop(),
         );
       } else if (view == null) {
         body = const Center(child: CircularProgressIndicator());
@@ -89,9 +96,23 @@ class TransferScreen extends ConsumerWidget {
         );
       }
     }
+    final skipped = id == null
+        ? ref.watch(sendControllerProvider.select((s) => s.skipped))
+        : const <SkippedItem>[];
     return Scaffold(
       appBar: AppBar(title: const Text('Transfer')),
-      body: body,
+      body: skipped.isEmpty
+          ? body
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                  child: SkippedNotice(skipped),
+                ),
+                Expanded(child: body),
+              ],
+            ),
     );
   }
 
@@ -129,8 +150,8 @@ class TransferScreen extends ConsumerWidget {
         navigator.popUntil((r) => r.isFirst);
         navigator.push(
           MaterialPageRoute<void>(
-            settings: const RouteSettings(name: Routes.nearby),
-            builder: (_) => const NearbyScreen(),
+            settings: const RouteSettings(name: Routes.send),
+            builder: (_) => const SendScreen(),
           ),
         );
       case NextAction.none:
@@ -196,6 +217,37 @@ class _Preparing extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         OutlinedButton(onPressed: onCancel, child: const Text('Cancel')),
+      ],
+    ),
+  );
+}
+
+class _NotSent extends StatelessWidget {
+  const _NotSent({required this.message, required this.onBack});
+
+  final String message;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.all(24),
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Icon(
+          Icons.info_outline,
+          size: 56,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 24),
+        FilledButton(onPressed: onBack, child: const Text('Back')),
       ],
     ),
   );

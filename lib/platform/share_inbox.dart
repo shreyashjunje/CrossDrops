@@ -117,6 +117,7 @@ class AndroidShareInbox implements ShareInbox {
                 mime: i.mime,
                 created: i.created,
                 platformKind: _kindFromMime(i.mime),
+                size: i.size,
               ),
           ],
           textOnly: b['textOnly'] == true,

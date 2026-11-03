@@ -8,7 +8,7 @@ import '../../app/media_providers.dart';
 import '../../app/navigation.dart';
 import '../../core/log.dart';
 import '../../platform/share_inbox.dart';
-import '../nearby/nearby_screen.dart';
+import 'send_screen.dart';
 import 'send_controller.dart';
 
 final shareInboxProvider = Provider<ShareInbox?>((ref) {
@@ -106,15 +106,15 @@ class _ShareListenerState extends ConsumerState<ShareListener>
       // On top of whatever is open, so a running receive keeps going.
       navigatorKey.currentState?.push(
         MaterialPageRoute<void>(
-          settings: const RouteSettings(name: Routes.nearby),
-          builder: (_) => const NearbyScreen(),
+          settings: const RouteSettings(name: Routes.send),
+          builder: (_) => const SendScreen(),
         ),
       );
     }
     final n = shared.files.length;
     _snack(
       [
-        '$n ${n == 1 ? 'file' : 'files'} ready. Choose the phone to send to.',
+        '$n ${n == 1 ? 'file' : 'files'} ready. Tap Send to choose the phone.',
         ...notes,
       ].join(' '),
     );
