@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/navigation.dart';
 import '../../core/server/receive_server.dart';
-import 'accept_dialog.dart';
+import 'incoming_request_screen.dart';
 import 'receive_controller.dart';
 
 /// Receiving may start: false until onboarding has explained the Local
@@ -109,11 +109,12 @@ class _ReceiveHostState extends ConsumerState<ReceiveHost> {
   }
 
   Future<AcceptDecision?> _ask(NavigatorState navigator, IncomingOffer offer) =>
-      showDialog<AcceptDecision>(
-        context: navigator.context,
-        barrierDismissible: false,
-        routeSettings: const RouteSettings(name: Routes.incoming),
-        builder: (_) => AcceptOfferDialog(offer: offer),
+      navigator.push<AcceptDecision>(
+        MaterialPageRoute(
+          settings: const RouteSettings(name: Routes.incoming),
+          fullscreenDialog: true,
+          builder: (_) => IncomingRequestScreen(offer: offer),
+        ),
       );
 
   @override
