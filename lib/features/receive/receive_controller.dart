@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -252,6 +253,14 @@ class ReceiveController extends Notifier<ReceiveState> {
               platform: offer.sender.platform,
             ),
       );
+    }
+    if (accept &&
+        Platform.isIOS &&
+        offer != null &&
+        offer.files.any((f) => f.kind != FileKind.file)) {
+      // Ask now, while the user is looking, not at the first save. The
+      // accept does not wait; a save waits for the answer.
+      unawaited(ref.read(photosSaverProvider).requestAccess());
     }
     _decisions.remove(sessionId)?.complete(accept);
     _dropPending(sessionId);

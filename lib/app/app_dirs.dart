@@ -8,12 +8,13 @@ import 'package:path_provider/path_provider.dart';
 /// Partial files: `<app support>/crossdrop_incoming/<sessionId>/`, kept
 /// across restarts for resume and removed by the 24-hour cleanup.
 ///
-/// Received files are saved in an app folder, not the gallery or Downloads
-/// (that comes with the platform modules in a later phase):
-/// - iOS: Documents/CrossDrop, visible in the Files app under
-///   On My iPhone > crossdrop.
-/// - Android: the app's external files folder
-///   (`Android/data/<package>/files/CrossDrop`), visible over USB.
+/// Received files (D-040, D-043):
+/// - iOS: photos and videos go to the Photos library; everything else to
+///   the Documents folder itself, shown in the Files app as
+///   On My iPhone > CrossDrop. The database is not there (D-034).
+/// - Android: MediaStore (Pictures, Movies and Download, each in a
+///   CrossDrop folder). [received] is then the app's external files
+///   folder, used only to check free space on that volume.
 ///
 /// Files prepared for sending (iOS exports, copies of iOS documents and of
 /// Android providers that cannot seek):
@@ -44,7 +45,7 @@ class AppDirs {
     }
     return AppDirs(
       incomingTemp: p.join(support.path, 'crossdrop_incoming'),
-      received: p.join(base.path, 'CrossDrop'),
+      received: Platform.isIOS ? base.path : p.join(base.path, 'CrossDrop'),
       outgoingStaging: p.join(support.path, 'crossdrop_outgoing'),
     );
   }

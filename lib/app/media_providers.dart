@@ -10,6 +10,7 @@ import '../platform/android_source.dart';
 import '../platform/android_store.dart';
 import '../platform/document_picker.dart';
 import '../platform/ios_export.dart';
+import '../platform/ios_photos.dart';
 import 'app_dirs.dart';
 
 /// App folders, resolved once.
@@ -53,5 +54,8 @@ final receivedFileStoreProvider = FutureProvider<ReceivedFileStore>((
 ) async {
   if (Platform.isAndroid) return MediaStoreFileStore(ChannelMediaStore());
   final dirs = await ref.read(appDirsProvider.future);
-  return FolderStore(dirs.received);
+  return FolderStore(dirs.received, mediaSaver: ref.read(photosSaverProvider));
 });
+
+/// iOS Photos library saving (D-043); unused on Android.
+final photosSaverProvider = Provider<IosPhotosSaver>((ref) => IosPhotosSaver());

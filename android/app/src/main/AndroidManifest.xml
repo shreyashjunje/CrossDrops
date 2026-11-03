@@ -35,7 +35,7 @@
     <!-- No backup (D-030): the identity key must not move to another
          phone, and a reinstall must get a new identity. -->
     <application
-        android:label="crossdrop"
+        android:label="CrossDrop"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:allowBackup="false"

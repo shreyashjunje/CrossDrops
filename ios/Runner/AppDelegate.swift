@@ -8,6 +8,7 @@ import UIKit
   private var storage: StorageChannel?
   private var background: BackgroundTaskChannel?
   private var export: ExportChannel?
+  private var photos: PhotosSaveChannel?
 
   override func application(
     _ application: UIApplication,
@@ -29,6 +30,9 @@ import UIKit
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ExportChannel") {
       export = ExportChannel(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "PhotosSaveChannel") {
+      photos = PhotosSaveChannel(messenger: registrar.messenger())
     }
   }
 }
