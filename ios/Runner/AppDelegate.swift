@@ -11,6 +11,8 @@ import UIKit
   private var photos: PhotosSaveChannel?
   private var share: ShareInboxChannel?
   private var open: OpenFileChannel?
+  private var hotspotJoin: HotspotJoinChannel?
+  private var networkInfo: NetworkInfoChannel?
 
   override func application(
     _ application: UIApplication,
@@ -41,6 +43,12 @@ import UIKit
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "OpenFileChannel") {
       open = OpenFileChannel(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "HotspotJoinChannel") {
+      hotspotJoin = HotspotJoinChannel(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NetworkInfoChannel") {
+      networkInfo = NetworkInfoChannel(messenger: registrar.messenger())
     }
   }
 }
