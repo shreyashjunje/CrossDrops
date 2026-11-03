@@ -2688,8 +2688,42 @@ class $SettingsTable extends Settings
     ),
     defaultValue: const Constant(true),
   );
+  static const VerificationMeta _convertHeicToJpegMeta = const VerificationMeta(
+    'convertHeicToJpeg',
+  );
   @override
-  List<GeneratedColumn> get $columns => [slot, receivingEnabled];
+  late final GeneratedColumn<bool> convertHeicToJpeg = GeneratedColumn<bool>(
+    'convert_heic_to_jpeg',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("convert_heic_to_jpeg" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  static const VerificationMeta _sendLivePhotoVideoMeta =
+      const VerificationMeta('sendLivePhotoVideo');
+  @override
+  late final GeneratedColumn<bool> sendLivePhotoVideo = GeneratedColumn<bool>(
+    'send_live_photo_video',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("send_live_photo_video" IN (0, 1))',
+    ),
+    defaultValue: const Constant(false),
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    slot,
+    receivingEnabled,
+    convertHeicToJpeg,
+    sendLivePhotoVideo,
+  ];
   @override
   String get aliasedName => _alias ?? actualTableName;
   @override
@@ -2717,6 +2751,24 @@ class $SettingsTable extends Settings
         ),
       );
     }
+    if (data.containsKey('convert_heic_to_jpeg')) {
+      context.handle(
+        _convertHeicToJpegMeta,
+        convertHeicToJpeg.isAcceptableOrUnknown(
+          data['convert_heic_to_jpeg']!,
+          _convertHeicToJpegMeta,
+        ),
+      );
+    }
+    if (data.containsKey('send_live_photo_video')) {
+      context.handle(
+        _sendLivePhotoVideoMeta,
+        sendLivePhotoVideo.isAcceptableOrUnknown(
+          data['send_live_photo_video']!,
+          _sendLivePhotoVideoMeta,
+        ),
+      );
+    }
     return context;
   }
 
@@ -2734,6 +2786,14 @@ class $SettingsTable extends Settings
         DriftSqlType.bool,
         data['${effectivePrefix}receiving_enabled'],
       )!,
+      convertHeicToJpeg: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}convert_heic_to_jpeg'],
+      )!,
+      sendLivePhotoVideo: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}send_live_photo_video'],
+      )!,
     );
   }
 
@@ -2748,12 +2808,25 @@ class SettingsRow extends DataClass implements Insertable<SettingsRow> {
 
   /// The global "Receiving" switch (D-031).
   final bool receivingEnabled;
-  const SettingsRow({required this.slot, required this.receivingEnabled});
+
+  /// iPhone to Android: convert HEIC photos to JPEG before sending (D-039).
+  final bool convertHeicToJpeg;
+
+  /// iPhone to Android: send a Live Photo's video next to its still.
+  final bool sendLivePhotoVideo;
+  const SettingsRow({
+    required this.slot,
+    required this.receivingEnabled,
+    required this.convertHeicToJpeg,
+    required this.sendLivePhotoVideo,
+  });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
     final map = <String, Expression>{};
     map['slot'] = Variable<int>(slot);
     map['receiving_enabled'] = Variable<bool>(receivingEnabled);
+    map['convert_heic_to_jpeg'] = Variable<bool>(convertHeicToJpeg);
+    map['send_live_photo_video'] = Variable<bool>(sendLivePhotoVideo);
     return map;
   }
 
@@ -2761,6 +2834,8 @@ class SettingsRow extends DataClass implements Insertable<SettingsRow> {
     return SettingsCompanion(
       slot: Value(slot),
       receivingEnabled: Value(receivingEnabled),
+      convertHeicToJpeg: Value(convertHeicToJpeg),
+      sendLivePhotoVideo: Value(sendLivePhotoVideo),
     );
   }
 
@@ -2772,6 +2847,8 @@ class SettingsRow extends DataClass implements Insertable<SettingsRow> {
     return SettingsRow(
       slot: serializer.fromJson<int>(json['slot']),
       receivingEnabled: serializer.fromJson<bool>(json['receivingEnabled']),
+      convertHeicToJpeg: serializer.fromJson<bool>(json['convertHeicToJpeg']),
+      sendLivePhotoVideo: serializer.fromJson<bool>(json['sendLivePhotoVideo']),
     );
   }
   @override
@@ -2780,12 +2857,21 @@ class SettingsRow extends DataClass implements Insertable<SettingsRow> {
     return <String, dynamic>{
       'slot': serializer.toJson<int>(slot),
       'receivingEnabled': serializer.toJson<bool>(receivingEnabled),
+      'convertHeicToJpeg': serializer.toJson<bool>(convertHeicToJpeg),
+      'sendLivePhotoVideo': serializer.toJson<bool>(sendLivePhotoVideo),
     };
   }
 
-  SettingsRow copyWith({int? slot, bool? receivingEnabled}) => SettingsRow(
+  SettingsRow copyWith({
+    int? slot,
+    bool? receivingEnabled,
+    bool? convertHeicToJpeg,
+    bool? sendLivePhotoVideo,
+  }) => SettingsRow(
     slot: slot ?? this.slot,
     receivingEnabled: receivingEnabled ?? this.receivingEnabled,
+    convertHeicToJpeg: convertHeicToJpeg ?? this.convertHeicToJpeg,
+    sendLivePhotoVideo: sendLivePhotoVideo ?? this.sendLivePhotoVideo,
   );
   SettingsRow copyWithCompanion(SettingsCompanion data) {
     return SettingsRow(
@@ -2793,6 +2879,12 @@ class SettingsRow extends DataClass implements Insertable<SettingsRow> {
       receivingEnabled: data.receivingEnabled.present
           ? data.receivingEnabled.value
           : this.receivingEnabled,
+      convertHeicToJpeg: data.convertHeicToJpeg.present
+          ? data.convertHeicToJpeg.value
+          : this.convertHeicToJpeg,
+      sendLivePhotoVideo: data.sendLivePhotoVideo.present
+          ? data.sendLivePhotoVideo.value
+          : this.sendLivePhotoVideo,
     );
   }
 
@@ -2800,49 +2892,73 @@ class SettingsRow extends DataClass implements Insertable<SettingsRow> {
   String toString() {
     return (StringBuffer('SettingsRow(')
           ..write('slot: $slot, ')
-          ..write('receivingEnabled: $receivingEnabled')
+          ..write('receivingEnabled: $receivingEnabled, ')
+          ..write('convertHeicToJpeg: $convertHeicToJpeg, ')
+          ..write('sendLivePhotoVideo: $sendLivePhotoVideo')
           ..write(')'))
         .toString();
   }
 
   @override
-  int get hashCode => Object.hash(slot, receivingEnabled);
+  int get hashCode => Object.hash(
+    slot,
+    receivingEnabled,
+    convertHeicToJpeg,
+    sendLivePhotoVideo,
+  );
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
       (other is SettingsRow &&
           other.slot == this.slot &&
-          other.receivingEnabled == this.receivingEnabled);
+          other.receivingEnabled == this.receivingEnabled &&
+          other.convertHeicToJpeg == this.convertHeicToJpeg &&
+          other.sendLivePhotoVideo == this.sendLivePhotoVideo);
 }
 
 class SettingsCompanion extends UpdateCompanion<SettingsRow> {
   final Value<int> slot;
   final Value<bool> receivingEnabled;
+  final Value<bool> convertHeicToJpeg;
+  final Value<bool> sendLivePhotoVideo;
   const SettingsCompanion({
     this.slot = const Value.absent(),
     this.receivingEnabled = const Value.absent(),
+    this.convertHeicToJpeg = const Value.absent(),
+    this.sendLivePhotoVideo = const Value.absent(),
   });
   SettingsCompanion.insert({
     this.slot = const Value.absent(),
     this.receivingEnabled = const Value.absent(),
+    this.convertHeicToJpeg = const Value.absent(),
+    this.sendLivePhotoVideo = const Value.absent(),
   });
   static Insertable<SettingsRow> custom({
     Expression<int>? slot,
     Expression<bool>? receivingEnabled,
+    Expression<bool>? convertHeicToJpeg,
+    Expression<bool>? sendLivePhotoVideo,
   }) {
     return RawValuesInsertable({
       if (slot != null) 'slot': slot,
       if (receivingEnabled != null) 'receiving_enabled': receivingEnabled,
+      if (convertHeicToJpeg != null) 'convert_heic_to_jpeg': convertHeicToJpeg,
+      if (sendLivePhotoVideo != null)
+        'send_live_photo_video': sendLivePhotoVideo,
     });
   }
 
   SettingsCompanion copyWith({
     Value<int>? slot,
     Value<bool>? receivingEnabled,
+    Value<bool>? convertHeicToJpeg,
+    Value<bool>? sendLivePhotoVideo,
   }) {
     return SettingsCompanion(
       slot: slot ?? this.slot,
       receivingEnabled: receivingEnabled ?? this.receivingEnabled,
+      convertHeicToJpeg: convertHeicToJpeg ?? this.convertHeicToJpeg,
+      sendLivePhotoVideo: sendLivePhotoVideo ?? this.sendLivePhotoVideo,
     );
   }
 
@@ -2855,6 +2971,12 @@ class SettingsCompanion extends UpdateCompanion<SettingsRow> {
     if (receivingEnabled.present) {
       map['receiving_enabled'] = Variable<bool>(receivingEnabled.value);
     }
+    if (convertHeicToJpeg.present) {
+      map['convert_heic_to_jpeg'] = Variable<bool>(convertHeicToJpeg.value);
+    }
+    if (sendLivePhotoVideo.present) {
+      map['send_live_photo_video'] = Variable<bool>(sendLivePhotoVideo.value);
+    }
     return map;
   }
 
@@ -2862,7 +2984,9 @@ class SettingsCompanion extends UpdateCompanion<SettingsRow> {
   String toString() {
     return (StringBuffer('SettingsCompanion(')
           ..write('slot: $slot, ')
-          ..write('receivingEnabled: $receivingEnabled')
+          ..write('receivingEnabled: $receivingEnabled, ')
+          ..write('convertHeicToJpeg: $convertHeicToJpeg, ')
+          ..write('sendLivePhotoVideo: $sendLivePhotoVideo')
           ..write(')'))
         .toString();
   }
@@ -4403,10 +4527,14 @@ typedef $$TrustedDevicesTableProcessedTableManager =
 typedef $$SettingsTableCreateCompanionBuilder = SettingsCompanion Function({
   Value<int> slot,
   Value<bool> receivingEnabled,
+  Value<bool> convertHeicToJpeg,
+  Value<bool> sendLivePhotoVideo,
 });
 typedef $$SettingsTableUpdateCompanionBuilder = SettingsCompanion Function({
   Value<int> slot,
   Value<bool> receivingEnabled,
+  Value<bool> convertHeicToJpeg,
+  Value<bool> sendLivePhotoVideo,
 });
 
 class $$SettingsTableFilterComposer
@@ -4425,6 +4553,16 @@ class $$SettingsTableFilterComposer
 
   ColumnFilters<bool> get receivingEnabled => $composableBuilder(
     column: $table.receivingEnabled,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get convertHeicToJpeg => $composableBuilder(
+    column: $table.convertHeicToJpeg,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get sendLivePhotoVideo => $composableBuilder(
+    column: $table.sendLivePhotoVideo,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -4447,6 +4585,16 @@ class $$SettingsTableOrderingComposer
     column: $table.receivingEnabled,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<bool> get convertHeicToJpeg => $composableBuilder(
+    column: $table.convertHeicToJpeg,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get sendLivePhotoVideo => $composableBuilder(
+    column: $table.sendLivePhotoVideo,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$SettingsTableAnnotationComposer
@@ -4463,6 +4611,16 @@ class $$SettingsTableAnnotationComposer
 
   GeneratedColumn<bool> get receivingEnabled => $composableBuilder(
     column: $table.receivingEnabled,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get convertHeicToJpeg => $composableBuilder(
+    column: $table.convertHeicToJpeg,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<bool> get sendLivePhotoVideo => $composableBuilder(
+    column: $table.sendLivePhotoVideo,
     builder: (column) => column,
   );
 }
@@ -4500,17 +4658,25 @@ class $$SettingsTableTableManager
               ({
                 Value<int> slot = const Value.absent(),
                 Value<bool> receivingEnabled = const Value.absent(),
+                Value<bool> convertHeicToJpeg = const Value.absent(),
+                Value<bool> sendLivePhotoVideo = const Value.absent(),
               }) => SettingsCompanion(
                 slot: slot,
                 receivingEnabled: receivingEnabled,
+                convertHeicToJpeg: convertHeicToJpeg,
+                sendLivePhotoVideo: sendLivePhotoVideo,
               ),
           createCompanionCallback:
               ({
                 Value<int> slot = const Value.absent(),
                 Value<bool> receivingEnabled = const Value.absent(),
+                Value<bool> convertHeicToJpeg = const Value.absent(),
+                Value<bool> sendLivePhotoVideo = const Value.absent(),
               }) => SettingsCompanion.insert(
                 slot: slot,
                 receivingEnabled: receivingEnabled,
+                convertHeicToJpeg: convertHeicToJpeg,
+                sendLivePhotoVideo: sendLivePhotoVideo,
               ),
           withReferenceMapper: (p0) => p0
               .map(

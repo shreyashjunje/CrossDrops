@@ -12,6 +12,7 @@ import 'keep_alive.dart';
 
 import '../core/discovery/bonsoir_backend.dart';
 import '../core/discovery/mdns_backend.dart';
+import '../core/media/format_plan.dart';
 import '../core/security/device_credentials.dart';
 import '../core/security/device_identity.dart';
 import '../core/security/secret_store.dart';
@@ -103,6 +104,10 @@ final settingsRepositoryProvider = Provider<SettingsRepository>(
 /// The global "Receiving" switch (D-031).
 final receivingEnabledProvider = StreamProvider<bool>(
   (ref) => ref.watch(settingsRepositoryProvider).watchReceivingEnabled(),
+);
+
+final formatSettingsProvider = StreamProvider<FormatSettings>(
+  (ref) => ref.watch(settingsRepositoryProvider).watchFormatSettings(),
 );
 
 /// mDNS browsing and advertising (bonsoir on the phones).

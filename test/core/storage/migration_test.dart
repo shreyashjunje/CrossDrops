@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:crossdrop/core/media/format_plan.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/core/storage/settings_repository.dart';
 import 'package:crossdrop/core/storage/trust_repository.dart';
@@ -37,6 +38,38 @@ void main() {
     expect(await TrustRepository(db).all(), isEmpty);
     expect(await SettingsRepository(db).receivingEnabled(), isTrue);
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 3);
+    expect(version.read<int>('user_version'), 4);
   });
+
+  test(
+    'a Phase 4 database (schema 3) upgrades to 4 and keeps settings',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('cd_migrate4');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File(p.join(dir.path, 'db.sqlite'));
+
+      var db = AppDatabase(NativeDatabase(file));
+      await db.customSelect('SELECT 1').get();
+      await db.customStatement(
+        'ALTER TABLE settings DROP COLUMN convert_heic_to_jpeg',
+      );
+      await db.customStatement(
+        'ALTER TABLE settings DROP COLUMN send_live_photo_video',
+      );
+      await db.customStatement(
+        'INSERT INTO settings (slot, receiving_enabled) VALUES (1, 0)',
+      );
+      await db.customStatement('PRAGMA user_version = 3');
+      await db.close();
+
+      db = AppDatabase(NativeDatabase(file));
+      addTearDown(db.close);
+      final settings = SettingsRepository(db);
+      expect(await settings.receivingEnabled(), isFalse);
+      expect(await settings.formatSettings(), const FormatSettings());
+      await settings.setConvertHeicToJpeg(true);
+      expect((await settings.formatSettings()).convertHeicToJpeg, isTrue);
+      expect(await settings.receivingEnabled(), isFalse);
+    },
+  );
 }

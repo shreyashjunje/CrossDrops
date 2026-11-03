@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -79,6 +81,7 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                       .read(settingsRepositoryProvider)
                       .setReceivingEnabled(on),
                 ),
+                if (Platform.isIOS) const _FormatSettings(),
                 const SizedBox(height: 16),
                 Text(
                   'Trusted devices',
@@ -181,5 +184,47 @@ class _TrustedDevices extends ConsumerWidget {
       ),
     );
     if (ok ?? false) await repo.remove(d.fingerprint);
+  }
+}
+
+/// Format choices for photos sent from this iPhone to an Android phone
+/// (D-039). Android phones send their files unchanged.
+class _FormatSettings extends ConsumerWidget {
+  const _FormatSettings();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final settings = ref.watch(formatSettingsProvider).value;
+    final repo = ref.read(settingsRepositoryProvider);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 16),
+        Text(
+          'Sending photos to Android',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Convert HEIC to JPEG'),
+          subtitle: const Text(
+            'For older Android galleries that cannot open HEIC. Takes a '
+            'moment per photo and loses a little quality and HDR.',
+          ),
+          value: settings?.convertHeicToJpeg ?? false,
+          onChanged: settings == null ? null : repo.setConvertHeicToJpeg,
+        ),
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          title: const Text('Send Live Photo videos'),
+          subtitle: const Text(
+            'Also send the short video of each Live Photo, as a separate '
+            'file. Android cannot play them as Live Photos.',
+          ),
+          value: settings?.sendLivePhotoVideo ?? false,
+          onChanged: settings == null ? null : repo.setSendLivePhotoVideo,
+        ),
+      ],
+    );
   }
 }

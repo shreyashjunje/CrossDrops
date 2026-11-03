@@ -133,6 +133,14 @@ class Settings extends Table {
   BoolColumn get receivingEnabled =>
       boolean().withDefault(const Constant(true))();
 
+  /// iPhone to Android: convert HEIC photos to JPEG before sending (D-039).
+  BoolColumn get convertHeicToJpeg =>
+      boolean().withDefault(const Constant(false))();
+
+  /// iPhone to Android: send a Live Photo's video next to its still.
+  BoolColumn get sendLivePhotoVideo =>
+      boolean().withDefault(const Constant(false))();
+
   @override
   Set<Column<Object>> get primaryKey => {slot};
 }
@@ -147,7 +155,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.executor);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 4;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -162,6 +170,10 @@ class AppDatabase extends _$AppDatabase {
         }
         await m.createTable(trustedDevices);
         await m.createTable(settings);
+      }
+      if (from >= 3 && from < 4) {
+        await m.addColumn(settings, settings.convertHeicToJpeg);
+        await m.addColumn(settings, settings.sendLivePhotoVideo);
       }
     },
     beforeOpen: (details) async {
