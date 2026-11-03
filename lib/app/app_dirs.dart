@@ -14,11 +14,21 @@ import 'package:path_provider/path_provider.dart';
 ///   On My iPhone > crossdrop.
 /// - Android: the app's external files folder
 ///   (`Android/data/<package>/files/CrossDrop`), visible over USB.
+///
+/// Files prepared for sending (iOS exports, copies of iOS documents and of
+/// Android providers that cannot seek):
+/// `<app support>/crossdrop_outgoing/<batch>/`, kept while a send may
+/// still resume (D-038).
 class AppDirs {
-  const AppDirs({required this.incomingTemp, required this.received});
+  const AppDirs({
+    required this.incomingTemp,
+    required this.received,
+    required this.outgoingStaging,
+  });
 
   final String incomingTemp;
   final String received;
+  final String outgoingStaging;
 
   static Future<AppDirs> resolve() async {
     // Not the OS temp or cache folder: both may be purged while the app is
@@ -35,6 +45,7 @@ class AppDirs {
     return AppDirs(
       incomingTemp: p.join(support.path, 'crossdrop_incoming'),
       received: p.join(base.path, 'CrossDrop'),
+      outgoingStaging: p.join(support.path, 'crossdrop_outgoing'),
     );
   }
 }

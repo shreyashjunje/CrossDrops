@@ -6,6 +6,9 @@ import '../../core/engine/send_session.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/peer_auth.dart';
 import '../transfer/transfer_format.dart';
+import '../../core/media/format_plan.dart';
+import '../../core/media/prepare.dart';
+import 'gallery_picker_screen.dart';
 import 'send_controller.dart';
 
 class SendScreen extends ConsumerStatefulWidget {
@@ -85,19 +88,32 @@ class _SendScreenState extends ConsumerState<SendScreen> {
             Row(
               children: [
                 Expanded(
-                  child: OutlinedButton(
-                    onPressed: controller.pickFiles,
-                    child: const Text('Add files'),
+                  child: OutlinedButton.icon(
+                    onPressed: _pickMedia,
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: const Text('Photos & videos'),
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (state.items.isNotEmpty)
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: controller.pickDocuments,
+                    icon: const Icon(Icons.folder_open_outlined),
+                    label: const Text('Files'),
+                  ),
+                ),
+              ],
+            ),
+            if (state.picked.isNotEmpty)
+              Row(
+                children: [
+                  Expanded(child: Text(_pickedSummary(state.picked))),
                   TextButton(
                     onPressed: controller.clearFiles,
                     child: const Text('Clear'),
                   ),
-              ],
-            ),
+                ],
+              ),
           ],
           if ((state.receiver ?? widget.target)?.trust.lookalike
               case final lookalike?) ...[
@@ -112,14 +128,19 @@ class _SendScreenState extends ConsumerState<SendScreen> {
               ),
             ),
           ],
-          if (state.items.isNotEmpty) ...[
+          if (state.preparing case final prep?) ...[
+            const SizedBox(height: 16),
+            LinearProgressIndicator(value: prep.fraction),
             const SizedBox(height: 8),
             Text(
-              '${state.items.length} '
-              '${state.items.length == 1 ? 'file' : 'files'} · '
-              '${formatSize(state.totalBytes)}',
+              prep.fraction == null
+                  ? 'Preparing ${prep.index + 1} of ${prep.count}…'
+                  : 'Preparing ${prep.index + 1} of ${prep.count}: '
+                        'downloading from iCloud '
+                        '${(prep.fraction! * 100).floor()}%',
             ),
           ],
+          if (state.skipped.isNotEmpty) _SkippedNotice(state.skipped),
           if (state.error != null)
             Text(
               state.error!,
@@ -130,7 +151,7 @@ class _SendScreenState extends ConsumerState<SendScreen> {
             children: [
               Expanded(
                 child: FilledButton(
-                  onPressed: running || state.items.isEmpty ? null : _send,
+                  onPressed: state.canSend ? _send : null,
                   child: const Text('Send'),
                 ),
               ),
@@ -194,6 +215,35 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     );
   }
 
+  Future<void> _pickMedia() async {
+    final assets = await Navigator.of(context).push<List<LibraryAsset>>(
+      MaterialPageRoute(builder: (_) => const GalleryPickerScreen()),
+    );
+    if (assets != null) {
+      ref.read(sendControllerProvider.notifier).addMedia(assets);
+    }
+  }
+
+  static String _pickedSummary(List<PickedItem> picked) {
+    var photos = 0, videos = 0, files = 0;
+    for (final p in picked) {
+      switch (p) {
+        case PickedAsset(:final asset) when asset.kind == FileKind.video:
+          videos++;
+        case PickedAsset():
+          photos++;
+        case PickedFile():
+          files++;
+      }
+    }
+    String n(int c, String one, String many) => '$c ${c == 1 ? one : many}';
+    return [
+      if (photos > 0) n(photos, 'photo', 'photos'),
+      if (videos > 0) n(videos, 'video', 'videos'),
+      if (files > 0) n(files, 'file', 'files'),
+    ].join(', ');
+  }
+
   static String _status(SendSnapshot s) => switch (s.phase) {
     SendPhase.connecting => 'Connecting…',
     SendPhase.waitingForAccept => 'Waiting for the other phone to accept…',
@@ -244,6 +294,48 @@ class _SendScreenState extends ConsumerState<SendScreen> {
       _ => 'Failed (${s.reason}).',
     },
   };
+}
+
+/// Items the preparation left out, and why.
+class _SkippedNotice extends StatelessWidget {
+  const _SkippedNotice(this.skipped);
+  final List<SkippedItem> skipped;
+
+  static String _why(SkipReason r) => switch (r) {
+    SkipReason.icloud =>
+      'only in iCloud and could not be downloaded. Check the internet '
+          'connection, or open it in Photos first',
+    SkipReason.notFound =>
+      'no longer in your library, or not shared with CrossDrop',
+    SkipReason.noSpace => 'not enough free space on this phone to prepare it',
+    SkipReason.unreadable => 'could not be read',
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final n = skipped.length;
+    return Container(
+      margin: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.all(8),
+      color: theme.colorScheme.errorContainer,
+      child: DefaultTextStyle.merge(
+        style: TextStyle(color: theme.colorScheme.onErrorContainer),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              n == 1 ? '1 item is not sent:' : '$n items are not sent:',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            for (final s in skipped.take(5))
+              Text('• ${s.label}: ${_why(s.reason)}.'),
+            if (n > 5) Text('…and ${n - 5} more.'),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 class _FileRow extends StatelessWidget {

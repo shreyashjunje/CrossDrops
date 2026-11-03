@@ -1,0 +1,45 @@
+import 'dart:io';
+
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:photo_manager/photo_manager.dart';
+
+import '../core/engine/source_opener.dart';
+import '../core/media/prepare.dart';
+import '../platform/android_source.dart';
+import '../platform/document_picker.dart';
+import '../platform/ios_export.dart';
+import 'app_dirs.dart';
+
+/// App folders, resolved once.
+final appDirsProvider = FutureProvider<AppDirs>((ref) => AppDirs.resolve());
+
+final androidSourcesProvider = Provider<AndroidSources>(
+  (ref) => AndroidSources(),
+);
+
+/// Opens what a send reads: content URIs as descriptors on Android,
+/// files elsewhere (D-036).
+final sourceOpenerProvider = Provider<SourceOpener>(
+  (ref) => Platform.isAndroid
+      ? AndroidSourceOpener(ref.read(androidSourcesProvider))
+      : const FileSourceOpener(),
+);
+
+/// Exports (iOS) or resolves (Android) photo-library items (D-038).
+final mediaPlatformProvider = Provider<MediaPlatform>(
+  (ref) => Platform.isIOS
+      ? IosMedia()
+      : AndroidMedia(
+          ref.read(androidSourcesProvider),
+          uriFor: (id) async => (await AssetEntity.fromId(id))?.getMediaUrl(),
+        ),
+);
+
+/// The "any file" picker (D-041).
+final documentPickerProvider = FutureProvider<DocumentPicker>((ref) async {
+  if (Platform.isAndroid) {
+    return AndroidDocumentPicker(ref.read(androidSourcesProvider));
+  }
+  final dirs = await ref.read(appDirsProvider.future);
+  return IosDocumentPicker(dirs.outgoingStaging);
+});

@@ -1,16 +1,17 @@
 import 'dart:async';
-import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/keep_alive.dart';
+import '../../app/media_providers.dart';
 import '../../app/providers.dart';
 import '../../core/client/peer_check.dart';
 import '../../core/client/upload_client.dart';
 import '../../core/discovery/peer_locator.dart';
 import '../../core/engine/send_session.dart';
-import '../../core/protocol/file_type.dart';
+import '../../core/log.dart';
+import '../../core/media/format_plan.dart';
+import '../../core/media/prepare.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/storage/transfer_repository.dart';
@@ -19,13 +20,28 @@ import '../transfer/transfer_format.dart';
 
 class SendState {
   const SendState({
+    this.picked = const [],
     this.items = const [],
+    this.preparing,
+    this.skipped = const [],
     this.snapshot,
     this.error,
     this.receiverName,
     this.receiver,
     this.receiverTrusted = false,
   });
+
+  /// What the user chose, before it is prepared.
+  final List<PickedItem> picked;
+
+  /// Files of the current or last send, after preparing.
+  final List<SendItem> items;
+
+  /// Set while picked items are being prepared (exports, iCloud).
+  final PrepareProgress? preparing;
+
+  /// Items left out by the last preparation, with the reason.
+  final List<SkippedItem> skipped;
 
   /// The receiver of the current or last send, after [checkPeer].
   final ConnectTarget? receiver;
@@ -41,29 +57,35 @@ class SendState {
       receiver?.deviceId != null &&
       snapshot?.phase == SendPhase.done;
 
-  /// Files picked, in sending order.
-  final List<SendItem> items;
-
   /// Null until a send starts.
   final SendSnapshot? snapshot;
   final String? error;
   final String? receiverName;
 
-  bool get isRunning => snapshot != null && !snapshot!.phase.isFinished;
+  bool get isPreparing => preparing != null;
+
+  bool get isRunning =>
+      isPreparing || (snapshot != null && !snapshot!.phase.isFinished);
 
   bool get canResume => snapshot?.canResume ?? false;
 
-  int get totalBytes => items.fold(0, (sum, i) => sum + i.size);
+  bool get canSend => !isRunning && picked.isNotEmpty;
 
   SendState copyWith({
+    List<PickedItem>? picked,
     List<SendItem>? items,
+    PrepareProgress? Function()? preparing,
+    List<SkippedItem>? skipped,
     SendSnapshot? Function()? snapshot,
     String? Function()? error,
     String? receiverName,
     ConnectTarget? receiver,
     bool? receiverTrusted,
   }) => SendState(
+    picked: picked ?? this.picked,
     items: items ?? this.items,
+    preparing: preparing != null ? preparing() : this.preparing,
+    skipped: skipped ?? this.skipped,
     snapshot: snapshot != null ? snapshot() : this.snapshot,
     error: error != null ? error() : this.error,
     receiverName: receiverName ?? this.receiverName,
@@ -78,11 +100,16 @@ final sendControllerProvider = NotifierProvider<SendController, SendState>(
   SendController.new,
 );
 
-/// Picks files and runs one [SendSession] at a time.
+/// Picks, prepares and runs one [SendSession] at a time.
 class SendController extends Notifier<SendState> implements BackgroundAware {
   SendSession? _session;
   StreamSubscription<SendSnapshot>? _sub;
+  PrepareControl? _prepare;
   final Object _keepAliveKey = Object();
+
+  /// What the last send leaves behind: staged copies and content grants,
+  /// released once it ends for good (not while it can still resume).
+  _Leftovers? _leftovers;
 
   @override
   SendState build() {
@@ -94,47 +121,62 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     return const SendState();
   }
 
-  Future<void> pickFiles() async {
-    final picked = await FilePicker.pickFiles();
-    if (picked.isEmpty || !ref.mounted) return;
-    final items = <SendItem>[];
-    var unreadable = 0;
-    for (final f in picked) {
-      final path = f.path;
-      if (path == null) {
-        unreadable++;
-        continue;
-      }
-      final type = guessFileType(f.name);
-      items.add(
-        SendItem(
-          path: path,
-          name: f.name,
-          size: await File(path).length(),
-          mime: type.mime,
-          kind: type.kind,
-        ),
-      );
-    }
-    if (!ref.mounted) return;
+  /// Adds photos and videos from the gallery picker, without duplicates.
+  void addMedia(List<LibraryAsset> assets) {
+    if (state.isRunning || assets.isEmpty) return;
+    final have = {
+      for (final p in state.picked)
+        if (p is PickedAsset) p.asset.id,
+    };
+    _setPicked([
+      ...state.picked,
+      for (final a in assets)
+        if (have.add(a.id)) PickedAsset(a),
+    ]);
+  }
+
+  /// Adds files from another app's share sheet or intent.
+  void addShared(List<PickedFile> files) {
+    if (state.isRunning || files.isEmpty) return;
+    _setPicked([...state.picked, ...files]);
+  }
+
+  Future<void> pickDocuments() async {
+    if (state.isRunning) return;
+    final picker = await ref.read(documentPickerProvider.future);
+    final files = await picker.pick();
+    if (!ref.mounted || files.isEmpty) return;
+    _setPicked([...state.picked, ...files]);
+  }
+
+  void _setPicked(List<PickedItem> picked) {
+    // A new selection starts a new send; the last one's files go.
+    unawaited(_releaseLeftovers());
     state = SendState(
-      items: [...state.items, ...items],
-      error: unreadable == 0
-          ? null
-          : '$unreadable file(s) cannot be read directly and were skipped.',
+      picked: picked,
+      receiver: state.receiver,
+      receiverName: state.receiverName,
+      receiverTrusted: state.receiverTrusted,
     );
   }
 
-  void clearFiles() {
+  Future<void> clearFiles() async {
     if (state.isRunning) return;
+    final docs = [
+      for (final p in state.picked)
+        if (p is PickedFile) p,
+    ];
     state = const SendState();
+    await _releaseLeftovers();
+    await _releaseDocs(docs);
   }
 
-  /// Offers the picked files to [target] and sends them. A target that
-  /// was not checked yet (an address typed on the Send screen) is checked
-  /// first, so every connection is pinned to the receiver's fingerprint.
+  /// Prepares the picked items, offers them to [target] and sends them. A
+  /// target that was not checked yet (an address typed on the Send
+  /// screen) is checked first, so every connection is pinned to the
+  /// receiver's fingerprint.
   Future<void> send(ConnectTarget target) async {
-    if (state.isRunning || state.items.isEmpty) return;
+    if (!state.canSend) return;
     var checked = target;
     if (target.pinSource == null) {
       try {
@@ -146,6 +188,9 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
         return;
       }
     }
+    final prepared = await _prepareFor(checked);
+    if (prepared == null || !ref.mounted) return;
+
     final device = await ref.read(identityProvider.future);
     final credentials = await ref.read(credentialsProvider.future);
     final deviceId = checked.deviceId;
@@ -153,22 +198,99 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
       host: checked.host,
       port: checked.port,
       sender: _senderInfo(device),
-      items: state.items,
+      items: prepared.items,
       receiverFingerprint: checked.fingerprint!,
       credentials: credentials,
       expectedDeviceId: deviceId,
       repository: ref.read(transferRepositoryProvider),
       locate: deviceId == null ? null : _locator(deviceId, device.deviceId),
+      opener: ref.read(sourceOpenerProvider),
     );
     if (checked.trust.isTrusted) {
       await ref.read(trustRepositoryProvider).touch(checked.fingerprint!);
     }
+    _leftovers = _Leftovers(
+      stagingDirs: [?prepared.stagingDir],
+      docs: [
+        for (final p in state.picked)
+          if (p is PickedFile) p,
+      ],
+    );
     state = state.copyWith(
+      items: prepared.items,
+      skipped: prepared.skipped,
       receiverName: checked.name ?? checked.host,
       receiver: checked,
       receiverTrusted: checked.trust.isTrusted,
     );
     await _run(session);
+  }
+
+  /// Exports and checks the picked items. Null if cancelled or nothing
+  /// is left to send; the state then says why.
+  Future<PrepareResult?> _prepareFor(ConnectTarget target) async {
+    final dirs = await ref.read(appDirsProvider.future);
+    final settings = await ref
+        .read(settingsRepositoryProvider)
+        .formatSettings();
+    final preparer = Preparer(
+      platform: ref.read(mediaPlatformProvider),
+      opener: ref.read(sourceOpenerProvider),
+      stagingRoot: dirs.outgoingStaging,
+      settings: settings,
+      receiver: DevicePlatform.tryParse(target.platform ?? ''),
+    );
+    final control = _prepare = PrepareControl();
+    final picked = state.picked;
+    state = state.copyWith(
+      preparing: () => PrepareProgress(0, picked.length, null),
+      skipped: const [],
+      snapshot: () => null,
+      error: () => null,
+    );
+    final keepAlive = ref.read(keepAliveProvider);
+    await keepAlive.begin(
+      _keepAliveKey,
+      this,
+      title: 'Preparing files',
+      text: '${picked.length} ${picked.length == 1 ? 'item' : 'items'}',
+    );
+    PrepareResult result;
+    try {
+      result = await preparer.prepare(
+        picked,
+        control: control,
+        onProgress: (p) {
+          if (ref.mounted) state = state.copyWith(preparing: () => p);
+        },
+      );
+    } catch (e) {
+      logEvent('prepare', 'failed: ${e.runtimeType}');
+      result = PrepareResult(
+        items: const [],
+        skipped: [
+          for (final p in picked) SkippedItem(p.label, SkipReason.unreadable),
+        ],
+      );
+    } finally {
+      _prepare = null;
+      await keepAlive.end(_keepAliveKey);
+    }
+    if (!ref.mounted) return null;
+    if (result.cancelled) {
+      state = state.copyWith(preparing: () => null);
+      return null;
+    }
+    if (result.items.isEmpty) {
+      state = state.copyWith(
+        preparing: () => null,
+        skipped: result.skipped,
+        error: () => 'Nothing could be prepared for sending.',
+      );
+      return null;
+    }
+    state = state.copyWith(preparing: () => null, skipped: result.skipped);
+    return result;
   }
 
   /// Trusts the receiver of the last send: later sends to it are pinned
@@ -224,6 +346,7 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
         credentials: credentials,
         repository: ref.read(transferRepositoryProvider),
         locate: _locator(stored.peer.id, device.deviceId),
+        opener: ref.read(sourceOpenerProvider),
       );
     } on StateError {
       // Stored before Phase 4, without the receiver's fingerprint.
@@ -234,23 +357,39 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
       );
       return;
     }
-    state = SendState(
-      items: [
-        for (final f in stored.files)
-          SendItem(
-            path: f.sourcePath ?? '',
-            name: f.name,
-            size: f.size,
-            mime: f.mime,
-            kind: f.kind,
-          ),
-      ],
-      receiverName: stored.peer.name,
-    );
+    final items = [
+      for (final f in stored.files)
+        SendItem(
+          path: f.sourcePath ?? '',
+          name: f.name,
+          size: f.size,
+          mime: f.mime,
+          kind: f.kind,
+        ),
+    ];
+    if (_leftovers == null) {
+      // Started by an earlier run: work out what it left behind.
+      final dirs = await ref.read(appDirsProvider.future);
+      _leftovers = _Leftovers(
+        stagingDirs: {
+          for (final i in items) ?stagingBatchOf(i.path, dirs.outgoingStaging),
+        }.toList(),
+        docs: [
+          for (final i in items)
+            if (i.path.startsWith('content://'))
+              PickedFile(ref: i.path, name: i.name),
+        ],
+      );
+    }
+    state = SendState(items: items, receiverName: stored.peer.name);
     await _run(session);
   }
 
-  Future<void> cancel() async => _session?.cancel();
+  Future<void> cancel() async {
+    final prepare = _prepare;
+    if (prepare != null) return prepare.cancel();
+    await _session?.cancel();
+  }
 
   @override
   Future<void> onBackground() async {
@@ -287,12 +426,38 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
         ),
       );
     });
+    SendSnapshot? result;
     try {
-      final result = await session.run();
+      result = await session.run();
       if (ref.mounted) state = state.copyWith(snapshot: () => result);
     } finally {
       await keepAlive.end(_keepAliveKey);
       if (_session == session) _session = null;
+      // A send that can resume keeps its files; any other end frees them.
+      if (result != null && !result.canResume) {
+        await _releaseLeftovers();
+        if (ref.mounted) state = state.copyWith(picked: const []);
+      }
+    }
+  }
+
+  Future<void> _releaseLeftovers() async {
+    final l = _leftovers;
+    _leftovers = null;
+    if (l == null) return;
+    for (final d in l.stagingDirs) {
+      await deleteStaging(d);
+    }
+    await _releaseDocs(l.docs);
+  }
+
+  Future<void> _releaseDocs(List<PickedFile> docs) async {
+    if (docs.isEmpty) return;
+    try {
+      final picker = await ref.read(documentPickerProvider.future);
+      await picker.release(docs);
+    } catch (e) {
+      logEvent('send', 'could not release picks: ${e.runtimeType}');
     }
   }
 
@@ -308,4 +473,10 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     name: device.deviceName,
     platform: DevicePlatform.current.name,
   );
+}
+
+class _Leftovers {
+  const _Leftovers({required this.stagingDirs, required this.docs});
+  final List<String> stagingDirs;
+  final List<PickedFile> docs;
 }

@@ -9,6 +9,7 @@ import '../../app/app_dirs.dart';
 import '../../app/providers.dart';
 import '../../core/client/upload_client.dart';
 import '../../core/log.dart';
+import '../../core/media/prepare.dart';
 import '../../core/protocol/models.dart';
 import '../../core/storage/partial_cleanup.dart';
 import '../../core/storage/transfer_repository.dart';
@@ -29,6 +30,12 @@ final unfinishedTransfersProvider = FutureProvider<List<StoredSession>>((
       repository: repo,
       incomingTemp: dirs.incomingTemp,
     ).run();
+    // After PartialCleanup, which expires sends older than 24 hours.
+    await cleanStaging(dirs.outgoingStaging, [
+      for (final s in await repo.unfinished())
+        if (s.direction == TransferDirection.send)
+          for (final f in s.files) ?f.sourcePath,
+    ]);
   } catch (e) {
     logEvent('storage', 'cleanup failed: ${e.runtimeType}');
   }
