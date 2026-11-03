@@ -1,5 +1,5 @@
 name: crossdrop
-description: "A new Flutter project."
+description: "Send photos, videos and files directly between an iPhone and an Android phone over local Wi-Fi or a hotspot. No cloud, no accounts."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev

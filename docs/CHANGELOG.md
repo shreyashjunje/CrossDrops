@@ -21,6 +21,11 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 - **Android network binding (L7):** a Wi-Fi loss reported while a bind was running could leave the binder thinking it was bound, so the next Wi-Fi without internet was not bound. Changes are now applied one at a time.
 - **Names (L8):** received file names lose bidi controls and zero-width characters (`photo<RLO>gpj.exe` showed as `photoexe.jpg`), C1 control characters become `_`, and the receiver sanitizes offered file names and the sender's name on arrival, so every screen shows the name that is saved.
 
+### Changed (release preparation, code review 2026-11-03)
+- **App id** `io.github.shreyashjunje.crossdrop` on Android and iOS (extension `.ShareExtension`, App Group `group.io.github.shreyashjunje.crossdrop`) instead of `com.example.crossdrop` (D-063). Test phones get it as a new app; uninstall the old one.
+- **Android release signing:** a real key from `android/key.properties` or CI secrets; a release build without one fails unless `CROSSDROP_ALLOW_DEBUG_SIGNING=true` marks it as a test build. CI names such APKs `*-debugsigned` ([RELEASE.md](RELEASE.md)).
+- LICENSE (all rights reserved), pubspec description, and README status that matches the device-test records (built and unit-tested; not yet tested on devices).
+
 ### Added (Phase 7)
 - Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.
 - iPhone joins that network ([features/iphone-join-hotspot.md](features/iphone-join-hotspot.md)): in-app with NEHotspotConfiguration when the build has the Hotspot Configuration capability (paid Apple account), otherwise guided through Settings with Copy password; handles Cancel, an iPhone already on the network, and removes the network afterwards (D-055).

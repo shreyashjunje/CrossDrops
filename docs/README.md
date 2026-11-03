@@ -6,6 +6,7 @@
 - [CHANGELOG.md](CHANGELOG.md): notable changes to the project and docs.
 - [DEVICE_TESTS.md](DEVICE_TESTS.md): acceptance checks that need real iPhone and Android phones.
 - [BENCHMARKS.md](BENCHMARKS.md): measured transfer speeds on real devices.
+- [RELEASE.md](RELEASE.md): app ids, Android release signing (local and CI), iPhone distribution.
 - [features/](features/): one doc per feature, written from [features/_TEMPLATE.md](features/_TEMPLATE.md).
   - [file-transfer-poc.md](features/file-transfer-poc.md): Phase 1 proof of concept, HTTPS server and streaming client with resume and SHA-256 check.
   - [discovery.md](features/discovery.md): Phase 2 Bonjour discovery, nearby list, device identity, iOS Local Network permission, network changes.

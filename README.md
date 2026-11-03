@@ -3,13 +3,9 @@ CrossDrop is a Flutter app that sends photos, videos and files directly between 
 
 ## Status
 
-- **Phase 1, file transfer proof of concept:** built and tested on devices.
-- **Phase 2, discovery and QR connect:** built and tested on devices.
-- **Phase 3, transfer engine:** built and tested on devices.
-- **Phase 4, security:** built and tested on devices.
-- **Phase 5, media and sharing:** built and tested on devices.
-- **Phase 6, UI and onboarding:** built and tested on devices.
-- **Phase 7, hotspot mode and benchmarks:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 7) and benchmark runs (`docs/BENCHMARKS.md`, Phase 7) are pending.
+- **Phases 1 to 7** (transfer engine, discovery and QR, security and pairing, media and sharing, UI, hotspot mode, benchmark builds): **built and unit-tested**. `flutter analyze` and `flutter test` run in CI on every push.
+- **Not yet tested on devices.** The only device run so far is one 1.2 MB video from an Android phone to a PC ([docs/TODAY-2026-11-02.md](docs/TODAY-2026-11-02.md)). Every Results table in [docs/DEVICE_TESTS.md](docs/DEVICE_TESTS.md) and [docs/BENCHMARKS.md](docs/BENCHMARKS.md) is still empty, so no phase meets the Definition of done yet ([docs/STATUS.md](docs/STATUS.md)).
+- The fixes from the code review of 2026-11-03 are in ([docs/CHANGELOG.md](docs/CHANGELOG.md)); the ones that need a phone are listed under "Code review fixes" in DEVICE_TESTS.md.
 
 What works in the code today:
 
@@ -48,8 +44,10 @@ flutter build apk --release --dart-define=CROSSDROP_BENCH=true  # benchmark buil
 
 After changing database tables in `lib/core/storage/database.dart`, run `dart run build_runner build`.
 
+Android release builds need the release key in `android/key.properties`, or `CROSSDROP_ALLOW_DEBUG_SIGNING=true` for a test build signed with the debug key ([docs/RELEASE.md](docs/RELEASE.md)). The app id is `io.github.shreyashjunje.crossdrop` on both platforms.
+
 **CI and builds without a Mac:** the GitHub Actions workflow **Build** runs analyze and tests on every push. When started manually (Actions > Build > Run workflow) it also produces an Android APK and an unsigned iPhone `.ipa`. Install the `.ipa` from Windows with Sideloadly and a free Apple ID; the steps are in [docs/DEVICE_TESTS.md](docs/DEVICE_TESTS.md#installing-the-ci-builds-no-mac-needed).
 
 ## Docs
 
-Start with [docs/README.md](docs/README.md). The design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the checks that need real phones are in [docs/DEVICE_TESTS.md](docs/DEVICE_TESTS.md).
+Start with [docs/README.md](docs/README.md). Release signing and app ids: [docs/RELEASE.md](docs/RELEASE.md). Licence: [LICENSE](LICENSE) (all rights reserved). The design is in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md); the checks that need real phones are in [docs/DEVICE_TESTS.md](docs/DEVICE_TESTS.md).
