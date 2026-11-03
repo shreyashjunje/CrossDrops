@@ -19,7 +19,9 @@ android {
         applicationId = "com.example.crossdrop"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // Android 10: MediaStore pending items, RELATIVE_PATH and the
+        // Downloads collection (D-035).
+        minSdk = 29
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
