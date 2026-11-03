@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/navigation.dart';
 import '../../app/providers.dart';
+import '../history/history_screen.dart';
 import '../receive/my_qr_screen.dart';
 import '../send/send_screen.dart';
 import '../settings/settings_screen.dart';
@@ -45,6 +46,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
       appBar: AppBar(
         title: const Text('CrossDrop'),
         actions: [
+          IconButton(
+            tooltip: 'History',
+            onPressed: () => pushScreen<void>(
+              context,
+              Routes.history,
+              const HistoryScreen(),
+            ),
+            icon: const Icon(Icons.history),
+          ),
           IconButton(
             tooltip: 'Settings',
             onPressed: () => pushScreen<void>(

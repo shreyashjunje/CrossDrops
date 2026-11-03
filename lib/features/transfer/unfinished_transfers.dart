@@ -15,6 +15,8 @@ import '../../core/protocol/models.dart';
 import '../../core/storage/partial_cleanup.dart';
 import '../../platform/android_store.dart';
 import '../../core/storage/transfer_repository.dart';
+import '../receive/receive_controller.dart';
+import '../receive/receive_host.dart';
 import '../send/send_controller.dart';
 import '../../app/navigation.dart';
 import 'transfer_format.dart';
@@ -52,6 +54,17 @@ final unfinishedTransfersProvider = FutureProvider<List<StoredSession>>((
   }
   return repo.unfinished();
 });
+
+/// Gives up an unfinished transfer. A received one that the running
+/// server holds is cancelled through it, so memory and database agree.
+Future<void> discardOrCancel(WidgetRef ref, StoredSession s) async {
+  if (s.direction == TransferDirection.receive &&
+      ref.read(receiveStateProvider).sessions.containsKey(s.sessionId)) {
+    await ref.read(receiveControllerProvider.notifier).cancel(s.sessionId);
+    return;
+  }
+  await discardTransfer(ref, s);
+}
 
 /// Gives up an unfinished transfer: marks it cancelled, deletes partial
 /// files (receive) or tells the receiver (send, best effort).
@@ -147,7 +160,7 @@ class UnfinishedTransfersDialog extends ConsumerWidget {
                 },
                 onDiscard: () async {
                   close();
-                  await discardTransfer(ref, s);
+                  await discardOrCancel(ref, s);
                 },
               ),
               const Divider(),

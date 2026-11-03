@@ -20,6 +20,7 @@ import '../../core/security/device_identity.dart';
 import '../../core/server/receive_server.dart';
 import '../../core/storage/trust_repository.dart';
 import '../transfer/transfer_format.dart';
+import '../transfer/unfinished_transfers.dart';
 
 class IncomingFile {
   const IncomingFile({
@@ -393,6 +394,10 @@ class ReceiveController extends Notifier<ReceiveState> {
         return;
       }
       state = state.copyWith(receivingOff: false);
+      // Receiving starts at launch now (D-046): let the launch cleanup of
+      // expired partial files finish before the server restores sessions.
+      await ref.read(unfinishedTransfersProvider.future);
+      if (!ref.mounted) return;
       final dirs = await AppDirs.resolve();
       final device = await ref.read(identityProvider.future);
       final identity = await ref.read(credentialsProvider.future);
