@@ -369,8 +369,29 @@ class ReceiveController extends Notifier<ReceiveState> {
   Future<void> _onShow() async {
     _hidden = false;
     _idleTimer?.cancel();
-    if (!_suspended || !ref.mounted) return;
+    if (!ref.mounted) return;
+    if (!_suspended) return _restartIfDead();
     _suspended = false;
+    if (_receivingOn) await _start();
+  }
+
+  /// iOS suspends an idle app a few seconds after it is hidden, long before
+  /// [idleInBackground] stops the server, and may reclaim the listening
+  /// socket meanwhile (TN2277). If the server no longer answers, start it
+  /// again on a new port and advertise that (review M6).
+  Future<void> _restartIfDead() async {
+    final server = _server;
+    if (server == null || _starting) return;
+    if (await server.isListening()) return;
+    if (!ref.mounted || _server != server) return;
+    logEvent('receive', 'listening socket gone after suspension: restarting');
+    await _stopServer();
+    if (!ref.mounted) return;
+    state = state.copyWith(
+      clearPort: true,
+      advertising: false,
+      qrPayload: () => null,
+    );
     if (_receivingOn) await _start();
   }
 
@@ -537,7 +558,12 @@ class ReceiveController extends Notifier<ReceiveState> {
     _sub = null;
     final server = _server;
     _server = null;
-    await server?.close();
+    try {
+      await server?.close();
+    } catch (e) {
+      // A socket iOS reclaimed may fail to close; it is gone either way.
+      logEvent('receive', 'server close failed: ${e.runtimeType}');
+    }
     _kept.clear();
   }
 

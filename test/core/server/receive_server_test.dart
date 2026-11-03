@@ -188,6 +188,26 @@ void main() {
 
   String shaOf(List<int> data) => sha256.convert(data).toString();
 
+  test('isListening: true while serving, a probe does not hurt it', () async {
+    // Review M6: the app probes after iOS may have reclaimed the socket.
+    expect(await r.server.isListening(), isTrue);
+    expect(await r.server.isListening(), isTrue);
+    final (code, _) = await send('GET', '/v1/info');
+    expect(code, 200);
+  });
+
+  test('isListening: false once the socket is gone', () async {
+    final port = r.port;
+    await r.server.close();
+    expect(await r.server.isListening(), isFalse);
+    // Nothing answers on the old port either.
+    await expectLater(
+      Socket.connect('127.0.0.1', port, timeout: const Duration(seconds: 2)),
+      throwsA(isA<SocketException>()),
+    );
+    // tearDown closes again; the server must allow that.
+  });
+
   test('GET /v1/info returns id, name, platform and versions', () async {
     final (code, body) = await send('GET', '/v1/info');
     expect(code, 200);

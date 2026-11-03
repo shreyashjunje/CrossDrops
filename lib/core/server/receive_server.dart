@@ -475,6 +475,27 @@ class ReceiveServer {
 
   int get port => _server.port;
 
+  /// Whether the listening socket still takes connections, by a TCP
+  /// connect over loopback that sends nothing. iOS may reclaim a listening
+  /// socket while the app is suspended (Apple TN2277); the phone would
+  /// then advertise a port nobody answers on (review M6).
+  Future<bool> isListening({
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    if (_closed) return false;
+    try {
+      final probe = await Socket.connect(
+        InternetAddress.loopbackIPv4,
+        port,
+        timeout: timeout,
+      );
+      probe.destroy();
+      return true;
+    } on SocketException {
+      return false;
+    }
+  }
+
   Stream<ReceiveEvent> get events => _events.stream;
 
   /// Current sessions, including ones restored after a restart.

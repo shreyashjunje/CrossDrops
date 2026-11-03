@@ -11,6 +11,7 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 - **Sharing (H4):** on an iPhone cold start, files shared from another app could be deleted by the launch cleanup before Send used them. The share is now taken after the cleanup, and the cleanup keeps staging folders younger than 10 minutes.
 - **Receiver resources (M1, M2, L3):** ended sessions are forgotten after 5 minutes (at most 32 kept), offers never accepted are removed from the database, paused sessions expire after 24 h, at most one hash isolate runs per session, and parallel offers can no longer slip past the one-per-sender and 8-open-sessions limits.
 - **Receiver keep-alive (M3, L6):** a paused received session no longer keeps the screen on, the Android notification up and the server running for good; it lets go 150 s after the pause, also with Receiving off (D-062).
+- **iPhone receiver after the lock screen (M6):** when CrossDrop comes back on screen it checks that its server still answers and restarts it on a new port if iOS took the socket back while suspended. Needs a device check.
 
 ### Added (Phase 7)
 - Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.
