@@ -1448,7 +1448,9 @@ class ReceiveServer {
         f.hashedBytes = written;
       }
       f.received = written;
-      _events.add(FileProgress(s.id, f.offer.fileId, written, size));
+      if (!_events.isClosed) {
+        _events.add(FileProgress(s.id, f.offer.fileId, written, size));
+      }
       final request = f.checkpointRequest;
       final due =
           written - checkpointed >= _checkpointBytes ||
@@ -1480,6 +1482,14 @@ class ReceiveServer {
           if (sub.isPaused && queued <= receiveQueueBytes ~/ 2) sub.resume();
           if (s.status.isTerminal) {
             stopped = true;
+            break;
+          }
+          if (_closed) {
+            // The server is closing (app going away, or a new server takes
+            // over): stop after this write and checkpoint it, so no writer
+            // outlives close() and touches a part a later server restored.
+            // The sender sends the rest again.
+            readError ??= const SocketException('receive server closed');
             break;
           }
         }

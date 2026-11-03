@@ -1095,6 +1095,48 @@ void main() {
     }, timeout: const Timeout(Duration(minutes: 1)));
   });
 
+  group('closing with bytes still queued (D-064)', () {
+    test(
+      'the writer stops at close and its checkpoint matches the part',
+      () async {
+        final gate = Completer<void>();
+        await r.close();
+        r = await TestReceiver.start(
+          identity: identity,
+          bodyIdleTimeout: const Duration(seconds: 5),
+          store: (t) => _SlowStore(FolderStore(t.saveDir), gate),
+        );
+        final data = randomBytes(12 * mb);
+        final sid = await createSession('big.bin', data.length);
+        unawaited(
+          send(
+            'PUT',
+            '/v1/sessions/$sid/files/f1?offset=0',
+            bytes: data,
+          ).then<void>((_) {}, onError: (Object _) {}),
+        );
+        await waitFor(() => r.server.bufferedBytes >= 6 * mb);
+        final closing = r.server.close();
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+        gate.complete();
+        await closing;
+        final part = File(p.join(r.tempDir, sid, 'f1.part'));
+        final length = part.lengthSync();
+        // Not the whole queue: the writer stopped after its current write.
+        expect(length, lessThan(6 * mb));
+        final stored = await r.repo.find(sid, TransferDirection.receive);
+        expect(stored!.files.single.transferredBytes, length);
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+        expect(
+          part.lengthSync(),
+          length,
+          reason: 'nothing written after close',
+        );
+      },
+      timeout: const Timeout(Duration(minutes: 1)),
+    );
+  });
+
   group('checkpoints and restart', () {
     test('a dropped upload pauses the session and keeps the bytes', () async {
       final sid = await createSession('a.bin', 10 * mb);
