@@ -7,9 +7,11 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../app/navigation.dart';
 import '../../app/providers.dart';
+import '../../core/bench/bench.dart';
 import '../../core/protocol/connect_payload.dart';
 import '../../core/security/device_identity.dart';
 import '../../platform/hotspot.dart';
+import '../bench/bench_screen.dart';
 import '../nearby/qr_scan_screen.dart';
 import '../receive/receive_controller.dart';
 import '../receive/receive_host.dart';
@@ -398,6 +400,14 @@ class _HotspotRunningState extends ConsumerState<_HotspotRunning> {
           onPressed: () =>
               pushScreen<void>(context, Routes.send, const SendScreen()),
         ),
+        if (benchBuild)
+          // The network lives with this screen, so the benchmark opens on
+          // top of it (D-058).
+          TextButton(
+            onPressed: () =>
+                pushScreen<void>(context, Routes.settings, const BenchScreen()),
+            child: const Text('Benchmark (test build)'),
+          ),
         const SizedBox(height: 8),
         const Text(
           'Keep this screen open until you are done: the network stops when '
