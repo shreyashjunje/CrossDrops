@@ -112,6 +112,9 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   SendSession? _session;
   StreamSubscription<SendSnapshot>? _sub;
   PrepareControl? _prepare;
+
+  /// The receiver is being checked before preparing (typed address).
+  bool _checking = false;
   final Object _keepAliveKey = Object();
 
   /// What the last send leaves behind: staged copies and content grants,
@@ -196,6 +199,10 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   /// receiver's fingerprint.
   Future<void> send(ConnectTarget target) async {
     if (!state.canSend) return;
+    // Cancel works from here on: during the peer check below there is no
+    // preparation or session yet, and Cancel used to do nothing (review
+    // L4).
+    final control = _prepare = PrepareControl();
     // Running from now on, so the transfer screen never shows the last
     // send's result.
     state = state.copyWith(
@@ -206,19 +213,29 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     );
     var checked = target;
     if (target.pinSource == null) {
+      _checking = true;
+      var ok = false;
       try {
         checked = await ref.read(peerCheckProvider)(target);
+        ok = true;
       } on UploadException catch (e) {
-        if (ref.mounted) {
+        if (ref.mounted && !control.isCancelled) {
           state = state.copyWith(
             preparing: () => null,
             error: () => _checkError(e),
           );
         }
         return;
+      } finally {
+        _checking = false;
+        if ((!ok || control.isCancelled) && identical(_prepare, control)) {
+          _prepare = null;
+        }
       }
+      // Cancelled meanwhile: cancel() already reset the state.
+      if (control.isCancelled || !ref.mounted) return;
     }
-    final prepared = await _prepareFor(checked);
+    final prepared = await _prepareFor(checked, control);
     if (prepared == null || !ref.mounted) return;
 
     final device = await ref.read(identityProvider.future);
@@ -258,7 +275,10 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
 
   /// Exports and checks the picked items. Null if cancelled or nothing
   /// is left to send; the state then says why.
-  Future<PrepareResult?> _prepareFor(ConnectTarget target) async {
+  Future<PrepareResult?> _prepareFor(
+    ConnectTarget target,
+    PrepareControl control,
+  ) async {
     final dirs = await ref.read(appDirsProvider.future);
     final settings = await ref
         .read(settingsRepositoryProvider)
@@ -270,7 +290,7 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
       settings: settings,
       receiver: DevicePlatform.tryParse(target.platform ?? ''),
     );
-    final control = _prepare = PrepareControl();
+    _prepare = control;
     final picked = state.picked;
     state = state.copyWith(
       preparing: () => PrepareProgress(0, picked.length, null),
@@ -417,7 +437,13 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
 
   Future<void> cancel() async {
     final prepare = _prepare;
-    if (prepare != null) return prepare.cancel();
+    if (prepare != null) {
+      if (_checking) {
+        // The peer check cannot be stopped; its answer is ignored.
+        state = state.copyWith(preparing: () => null);
+      }
+      return prepare.cancel();
+    }
     await _session?.cancel();
   }
 

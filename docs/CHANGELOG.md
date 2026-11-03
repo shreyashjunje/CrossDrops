@@ -16,6 +16,7 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 - **Cancel (M5):** cancelling while connecting showed "network" failure; cancelling while the offer was on its way could leave the offer on the receiver. Both now end as cancelled, and an offer that arrived is withdrawn.
 - **Saving (L1):** two files with the same name saved at the same moment could end up at one path, the second replacing the first. The save now claims its name by creating the file exclusively first.
 - **Complete (L2):** `/complete` checks the session and file again after reading its body, so two completes of an empty file no longer save it twice and a cancel during the body read no longer leaves a part and folder behind.
+- **Cancel (L4):** Cancel while a typed address is being checked now stops the send; it used to do nothing and the send went on.
 
 ### Added (Phase 7)
 - Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.
