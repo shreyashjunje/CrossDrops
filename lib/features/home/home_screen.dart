@@ -6,6 +6,7 @@ import '../../app/providers.dart';
 import '../nearby/nearby_screen.dart';
 import '../receive/my_qr_screen.dart';
 import '../settings/settings_screen.dart';
+import '../transfer/transfer_screen.dart';
 import '../transfer/unfinished_transfers.dart';
 import 'active_transfers.dart';
 import 'receive_status_card.dart';
@@ -70,7 +71,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       const MyQrScreen(),
                     ),
                   ),
-                  const ActiveTransfers(),
+                  ActiveTransfers(
+                    onOpen: (id) => pushScreen<void>(
+                      context,
+                      Routes.transfer,
+                      TransferScreen(receiveSessionId: id),
+                    ),
+                  ),
                 ],
               ),
             ),

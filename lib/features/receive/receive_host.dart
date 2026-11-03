@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/navigation.dart';
 import '../../core/server/receive_server.dart';
+import '../transfer/transfer_screen.dart';
 import 'incoming_request_screen.dart';
 import 'receive_controller.dart';
 
@@ -102,6 +105,17 @@ class _ReceiveHostState extends ConsumerState<ReceiveHost> {
               accept: decision.accept,
               trust: decision.trust,
             );
+        if (decision.accept) {
+          unawaited(
+            navigator.push(
+              MaterialPageRoute<void>(
+                settings: const RouteSettings(name: Routes.transfer),
+                builder: (_) =>
+                    TransferScreen(receiveSessionId: offer.sessionId),
+              ),
+            ),
+          );
+        }
       }
     }
     // Another offer may be waiting.

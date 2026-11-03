@@ -29,7 +29,12 @@ class SendState {
     this.receiverName,
     this.receiver,
     this.receiverTrusted = false,
+    this.pausedByUser = false,
   });
+
+  /// The user tapped Pause; the send waits for Resume, even when the app
+  /// comes back to the foreground.
+  final bool pausedByUser;
 
   /// What the user chose, before it is prepared.
   final List<PickedItem> picked;
@@ -81,6 +86,7 @@ class SendState {
     String? receiverName,
     ConnectTarget? receiver,
     bool? receiverTrusted,
+    bool? pausedByUser,
   }) => SendState(
     picked: picked ?? this.picked,
     items: items ?? this.items,
@@ -91,6 +97,7 @@ class SendState {
     receiverName: receiverName ?? this.receiverName,
     receiver: receiver ?? this.receiver,
     receiverTrusted: receiverTrusted ?? this.receiverTrusted,
+    pausedByUser: pausedByUser ?? this.pausedByUser,
   );
 }
 
@@ -391,10 +398,29 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     await _session?.cancel();
   }
 
+  /// Pauses the running send after the current chunk. The receiver keeps
+  /// what arrived; [continueSending] picks up from there.
+  void pause() {
+    final s = _session;
+    if (s == null) return;
+    final phase = s.snapshot.phase;
+    if (phase != SendPhase.sending && phase != SendPhase.retrying) return;
+    s.pause();
+    state = state.copyWith(pausedByUser: true);
+  }
+
+  void continueSending() {
+    if (!state.pausedByUser) return;
+    state = state.copyWith(pausedByUser: false);
+    _session?.resume();
+  }
+
   @override
   Future<void> onBackground() async {
     final s = _session;
-    if (s == null || s.snapshot.phase.isFinished) return;
+    if (s == null || s.snapshot.phase.isFinished || state.pausedByUser) {
+      return;
+    }
     s.pause();
     // Wait until the current chunk is out and the upload stopped.
     await s.updates
@@ -403,7 +429,9 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   }
 
   @override
-  void onForeground() => _session?.resume();
+  void onForeground() {
+    if (!state.pausedByUser) _session?.resume();
+  }
 
   Future<void> _run(SendSession session) async {
     _session = session;
@@ -429,7 +457,9 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     SendSnapshot? result;
     try {
       result = await session.run();
-      if (ref.mounted) state = state.copyWith(snapshot: () => result);
+      if (ref.mounted) {
+        state = state.copyWith(snapshot: () => result, pausedByUser: false);
+      }
     } finally {
       await keepAlive.end(_keepAliveKey);
       if (_session == session) _session = null;
