@@ -10,6 +10,7 @@ import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:crossdrop/core/security/peer_auth.dart';
+import 'package:crossdrop/core/server/file_store.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
@@ -84,6 +85,9 @@ class TestReceiver {
   /// Free bytes to report, or null for "unknown".
   int? freeBytes;
 
+  /// Holds partial files; null for the default [FolderStore].
+  ReceivedFileStore? store;
+
   String get tempDir => p.join(root.path, 'tmp');
   String get saveDir => p.join(root.path, 'save');
   TransferRepository get repo => TransferRepository(db);
@@ -97,6 +101,7 @@ class TestReceiver {
     OfferDecider? decider,
     int? freeBytes,
     ServerLimits limits = testLimits,
+    ReceivedFileStore Function(TestReceiver r)? store,
   }) async {
     final r = TestReceiver._(
       Directory.systemTemp.createTempSync('cd_recv'),
@@ -106,6 +111,7 @@ class TestReceiver {
     if (decider != null) r.decider = decider;
     r.limits = limits;
     r.freeBytes = freeBytes;
+    r.store = store?.call(r);
     await r._startServer(bodyIdleTimeout, acceptTimeout, checkpointBytes);
     return r;
   }
@@ -124,6 +130,7 @@ class TestReceiver {
       limits: limits,
       tempDir: tempDir,
       saveDir: saveDir,
+      store: store,
       repository: repo,
       decider: (o) => decider(o),
       freeSpace: (_) async => freeBytes,

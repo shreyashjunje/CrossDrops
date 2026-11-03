@@ -18,10 +18,11 @@ import '../protocol/auth_messages.dart';
 import '../protocol/events.dart';
 import '../protocol/models.dart';
 import '../security/device_credentials.dart';
-import '../storage/file_name_sanitizer.dart';
 import '../storage/transfer_repository.dart';
 import '../storage/trust_repository.dart';
 import 'rate_limiter.dart';
+import '../media/save_target.dart';
+import 'file_store.dart';
 import 'sender_auth.dart';
 
 /// Events for the UI. They carry ids and sizes, never file contents.
@@ -65,10 +66,26 @@ class FileProgress extends ReceiveEvent {
 }
 
 class FileSaved extends ReceiveEvent {
-  const FileSaved(super.sessionId, this.fileId, this.savedPath, this.size);
+  const FileSaved(
+    super.sessionId,
+    this.fileId,
+    this.savedPath,
+    this.size, {
+    this.collection = SaveCollection.files,
+    this.fallback,
+  });
   final String fileId;
+
+  /// Opaque location (path, content URI, Photos id); never shown or logged.
   final String savedPath;
   final int size;
+
+  /// Where the user finds it.
+  final SaveCollection collection;
+
+  /// Why it is not in the gallery although it is a photo or video
+  /// ([SaveFallback]).
+  final String? fallback;
 }
 
 class FileFailed extends ReceiveEvent {
@@ -186,7 +203,7 @@ class ReceiveFileSnapshot {
 class _ReceivingFile {
   _ReceivingFile(
     this.offer,
-    this.partPath, {
+    this.location, {
     this.status = FileTransferStatus.pending,
     this.received = 0,
     this.hashAttempts = 0,
@@ -195,7 +212,10 @@ class _ReceivingFile {
   });
 
   final FileOffer offer;
-  final String partPath;
+
+  /// Where the partial file is ([ReceivedFileStore]); may change when the
+  /// part is first created.
+  String location;
   FileTransferStatus status;
 
   /// Bytes on disk in the `.part` file.
@@ -300,6 +320,7 @@ class ReceiveServer {
     this._limits,
     this._tempDir,
     this._saveDir,
+    this._store,
     this._repo,
     this._decider,
     this._freeSpace,
@@ -323,7 +344,10 @@ class ReceiveServer {
     refillEvery: _limits.authRefill,
   );
   final String _tempDir;
+
+  /// A folder on the volume files are saved to, for the free-space check.
   final String _saveDir;
+  final ReceivedFileStore _store;
   final TransferRepository _repo;
   final OfferDecider _decider;
   final FreeSpaceProbe? _freeSpace;
@@ -345,13 +369,15 @@ class ReceiveServer {
   /// while [acceptsUntrusted] returns false, offers from untrusted senders
   /// get 403 `receiving_off`.
   ///
-  /// Partial files go to `<tempDir>/<sessionId>/<fileId>.part`; verified
-  /// files are moved into [saveDir].
+  /// Session folders are `<tempDir>/<sessionId>`. [store] holds partial
+  /// files and saves verified ones; by default a [FolderStore] that moves
+  /// them into [saveDir].
   static Future<ReceiveServer> start({
     required DeviceInfo info,
     required DeviceCredentials credentials,
     required String tempDir,
     required String saveDir,
+    ReceivedFileStore? store,
     required TransferRepository repository,
     required OfferDecider decider,
     TrustLookup trustLookup = _trustNobody,
@@ -375,6 +401,7 @@ class ReceiveServer {
       limits,
       tempDir,
       saveDir,
+      store ?? FolderStore(saveDir),
       repository,
       decider,
       freeSpace,
@@ -384,7 +411,7 @@ class ReceiveServer {
       freeSpaceReserve,
     );
     await Directory(tempDir).create(recursive: true);
-    await Directory(saveDir).create(recursive: true);
+    if (store == null) await Directory(saveDir).create(recursive: true);
     await server._restore();
     server._server = await shelf_io.serve(
       server._handler(),
@@ -622,7 +649,7 @@ class ReceiveServer {
           status: SessionStatus.failed,
           reason: 'expired',
         );
-        await _deleteDir(dir);
+        await _discardStored(stored, dir);
         continue;
       }
       if (stored.status == SessionStatus.offered) {
@@ -632,15 +659,20 @@ class ReceiveServer {
           status: SessionStatus.rejected,
           reason: RejectReasons.timeout,
         );
-        await _deleteDir(dir);
+        await _discardStored(stored, dir);
         continue;
       }
       final files = <String, _ReceivingFile>{};
       for (final f in stored.files) {
-        final part = p.join(dir, '${f.fileId}.part');
+        final offer = f.toOffer();
+        final part = f.tempPath ?? _store.initialLocation(dir, offer);
         var received = 0;
         if (!f.status.isTerminal) {
-          received = await _restorePart(part, f.transferredBytes);
+          try {
+            received = await _store.restore(part, f.transferredBytes);
+          } on FileSystemException {
+            received = 0;
+          }
           if (received != f.transferredBytes) {
             await _repo.updateFile(
               stored.rowId,
@@ -650,7 +682,7 @@ class ReceiveServer {
           }
         }
         files[f.fileId] = _ReceivingFile(
-          f.toOffer(),
+          offer,
           part,
           status: switch (f.status) {
             FileTransferStatus.verifying => FileTransferStatus.receiving,
@@ -680,25 +712,15 @@ class ReceiveServer {
     }
   }
 
-  /// Cuts the partial file back to the last checkpoint: bytes after it may
-  /// not have reached the disk before a crash.
-  static Future<int> _restorePart(String path, int checkpoint) async {
-    final file = File(path);
-    if (!await file.exists()) {
-      await file.create(recursive: true);
-      return 0;
-    }
-    final length = await file.length();
-    final keep = min(length, checkpoint);
-    if (keep != length) {
-      final raf = await file.open(mode: FileMode.append);
-      try {
-        await raf.truncate(keep);
-      } finally {
-        await raf.close();
+  /// Deletes the partial files of a stored session nobody will finish.
+  Future<void> _discardStored(StoredSession stored, String dir) async {
+    for (final f in stored.files) {
+      final loc = f.tempPath;
+      if (loc != null && f.status != FileTransferStatus.saved) {
+        await _store.delete(loc);
       }
     }
-    return keep;
+    await _deleteDir(dir);
   }
 
   // ----------------------------------------------------------------- offers
@@ -777,7 +799,7 @@ class ReceiveServer {
       status: SessionStatus.offered,
       files: [
         for (final f in offer.files)
-          StoredFile.fromOffer(f, tempPath: p.join(dir, '${f.fileId}.part')),
+          StoredFile.fromOffer(f, tempPath: _store.initialLocation(dir, f)),
       ],
     );
     final session = _Session(
@@ -790,10 +812,7 @@ class ReceiveServer {
       trust: trust,
       files: Map.fromEntries([
         for (final f in offer.files)
-          MapEntry(
-            f.fileId,
-            _ReceivingFile(f, p.join(dir, '${f.fileId}.part')),
-          ),
+          MapEntry(f.fileId, _ReceivingFile(f, _store.initialLocation(dir, f))),
       ]),
       machine: SessionStateMachine(),
     );
@@ -878,7 +897,7 @@ class ReceiveServer {
     await _setStatus(s, SessionStatus.rejected, reason);
     _broadcast(s, RejectedEvent(reason, neededBytes: neededBytes));
     await _closeSockets(s);
-    await _deleteDir(s.dir);
+    await _discardParts(s);
   }
 
   // ------------------------------------------------------- session routes
@@ -920,7 +939,7 @@ class ReceiveServer {
     for (final f in s.files.values) {
       f.dropHasher();
     }
-    await _deleteDir(s.dir);
+    await _discardParts(s);
   }
 
   FutureOr<Response> _eventSocket(Request req, String sid) {
@@ -1053,9 +1072,7 @@ class ReceiveServer {
     int offset,
   ) async {
     final size = f.offer.size;
-    final part = File(f.partPath);
-    if (!await part.exists()) await part.create(recursive: true);
-    final received = await part.length();
+    final received = await _store.length(f.location);
     f.received = received;
     if (offset != received) {
       return _error(
@@ -1092,7 +1109,13 @@ class ReceiveServer {
       f.hasher = hasher;
       f.hashedBytes = offset;
     }
-    final raf = await part.open(mode: FileMode.append);
+    final PartFile raf;
+    try {
+      raf = await _openPart(s, f);
+    } on FileSystemException catch (e) {
+      f.dropHasher();
+      return _diskError(s, f, e);
+    }
     var written = offset;
     var checkpointed = offset;
     var overflow = false;
@@ -1101,7 +1124,7 @@ class ReceiveServer {
     final buffer = BytesBuilder(copy: false);
 
     Future<void> checkpoint() async {
-      await raf.flush(); // fsync: the count we store must be on disk
+      await raf.sync(); // the count we store must be on disk
       checkpointed = written;
       await _repo.updateFile(
         s.rowId,
@@ -1115,7 +1138,7 @@ class ReceiveServer {
       if (buffer.isEmpty) return;
       final bytes = buffer.takeBytes();
       try {
-        await raf.writeFrom(bytes);
+        await raf.append(bytes);
       } on FileSystemException {
         // Part of the buffer may be on disk: the hash no longer matches.
         f.dropHasher();
@@ -1205,7 +1228,7 @@ class ReceiveServer {
     final noSpace = _isNoSpace(e);
     final code = noSpace ? ErrorCodes.noSpace : ErrorCodes.ioError;
     _log('file ${f.offer.fileId}: write failed ($code)');
-    final onDisk = await File(f.partPath).length();
+    final onDisk = await _store.length(f.location);
     f.received = onDisk;
     await _repo.updateFile(s.rowId, f.offer.fileId, transferredBytes: onDisk);
     _broadcast(s, ErrorEvent(code, fileId: f.offer.fileId));
@@ -1215,11 +1238,20 @@ class ReceiveServer {
     });
   }
 
-  static bool _isNoSpace(FileSystemException e) {
-    final code = e.osError?.errorCode;
-    // ENOSPC on Linux, Android and iOS; ERROR_DISK_FULL / HANDLE_DISK_FULL
-    // on Windows test hosts.
-    return code == 28 || code == 112 || code == 39;
+  static bool _isNoSpace(FileSystemException e) => isNoSpace(e);
+
+  /// Opens the part, creating it on first use, and stores a new location.
+  Future<PartFile> _openPart(_Session s, _ReceivingFile f) async {
+    final (part, location) = await _store.open(
+      f.location,
+      sessionDir: s.dir,
+      offer: f.offer,
+    );
+    if (location != f.location) {
+      f.location = location;
+      await _repo.updateFile(s.rowId, f.offer.fileId, tempPath: location);
+    }
+    return part;
   }
 
   Future<Response> _complete(Request req, String sid, String fid) async {
@@ -1247,11 +1279,8 @@ class ReceiveServer {
     f.lock();
     try {
       final size = f.offer.size;
-      final part = File(f.partPath);
-      if (size == 0 && !await part.exists()) {
-        await part.create(recursive: true);
-      }
-      final received = await part.length();
+      if (size == 0) await (await _openPart(s, f)).close();
+      final received = await _store.length(f.location);
       if (received != size) {
         return _error(409, ErrorCodes.incomplete, 'file not fully received', {
           'receivedBytes': received,
@@ -1264,15 +1293,14 @@ class ReceiveServer {
         fid,
         status: FileTransferStatus.verifying,
       );
-      final digest = f.digest ?? await _hashFile(f.partPath, size);
+      final digest = f.digest ?? await _hashPart(s, f);
       if (s.status.isTerminal) return _sessionGate(s)!;
       if (digest != body.sha256) return await _hashMismatch(s, f);
 
-      final String dest;
+      final SaveResult saved;
       try {
-        dest = availablePath(_saveDir, sanitizeFileName(f.offer.name));
-        await _move(f.partPath, dest);
-      } on FileSystemException catch (e) {
+        saved = await _store.save(f.location, f.offer);
+      } on Exception catch (e) {
         f.status = FileTransferStatus.receiving;
         await _repo.updateFile(
           s.rowId,
@@ -1280,10 +1308,14 @@ class ReceiveServer {
           status: FileTransferStatus.receiving,
         );
         await _pauseIfIdle(s, except: f);
-        final code = _isNoSpace(e) ? ErrorCodes.noSpace : ErrorCodes.ioError;
+        final full =
+            e is StoreFull || (e is FileSystemException && _isNoSpace(e));
+        final code = full ? ErrorCodes.noSpace : ErrorCodes.ioError;
+        _log('file $fid: save failed ($code)');
         _broadcast(s, ErrorEvent(code, fileId: fid));
         return _error(507, code, 'could not save file');
       }
+      final dest = saved.location;
       f.savedPath = dest;
       f.status = FileTransferStatus.saved;
       await _repo.updateFile(
@@ -1294,8 +1326,21 @@ class ReceiveServer {
         sha256: digest,
         finalLocation: dest,
       );
-      _log('file $fid: verified and saved ($size bytes)');
-      _events.add(FileSaved(s.id, fid, dest, size));
+      final note = saved.fallback == null ? '' : ', ${saved.fallback}';
+      _log(
+        'file $fid: verified and saved '
+        '($size bytes, ${saved.collection.name}$note)',
+      );
+      _events.add(
+        FileSaved(
+          s.id,
+          fid,
+          dest,
+          size,
+          collection: saved.collection,
+          fallback: saved.fallback,
+        ),
+      );
       _broadcast(s, FileDoneEvent(fid));
       await _afterFile(s);
       return _json(200, _fileStatus(f));
@@ -1318,7 +1363,13 @@ class ReceiveServer {
         'retry': false,
       });
     }
-    await File(f.partPath).writeAsBytes(const []);
+    final part = await _openPart(s, f);
+    try {
+      await part.truncate(0);
+      await part.sync();
+    } finally {
+      await part.close();
+    }
     f.received = 0;
     f.status = FileTransferStatus.receiving;
     await _repo.updateFile(
@@ -1349,11 +1400,7 @@ class ReceiveServer {
     f.received = 0;
     f.digest = null;
     f.dropHasher();
-    try {
-      await File(f.partPath).delete();
-    } on FileSystemException {
-      // Already gone.
-    }
+    await _store.delete(f.location);
     await _repo.updateFile(
       s.rowId,
       fid,
@@ -1382,7 +1429,7 @@ class ReceiveServer {
       }
       _log('session ${s.id}: ${s.status.name}');
       await _closeSockets(s);
-      await _deleteDir(s.dir);
+      await _discardParts(s);
     } else if (s.status == SessionStatus.verifying) {
       await _setStatus(s, SessionStatus.transferring);
     }
@@ -1445,6 +1492,15 @@ class ReceiveServer {
     }
   }
 
+  /// Deletes the partial files of every file not saved, then the session
+  /// folder. MediaStore parts live outside the folder (D-040).
+  Future<void> _discardParts(_Session s) async {
+    for (final f in s.files.values) {
+      if (f.status != FileTransferStatus.saved) await _store.delete(f.location);
+    }
+    await _deleteDir(s.dir);
+  }
+
   static Future<void> _deleteDir(String dir) async {
     try {
       await Directory(dir).delete(recursive: true);
@@ -1453,19 +1509,16 @@ class ReceiveServer {
     }
   }
 
-  static Future<String> _hashFile(String path, int length) async {
-    final hasher = await Sha256Isolate.spawn();
-    await hasher.addFilePrefix(path, length);
-    return hasher.close();
-  }
-
-  static Future<void> _move(String from, String to) async {
+  /// SHA-256 of the part on disk, after an app restart lost the running
+  /// hash.
+  Future<String> _hashPart(_Session s, _ReceivingFile f) async {
+    final part = await _openPart(s, f);
     try {
-      await File(from).rename(to);
-    } on FileSystemException {
-      // Different volume: copy (streamed by the OS), then delete.
-      await File(from).copy(to);
-      await File(from).delete();
+      final hasher = await Sha256Isolate.spawn();
+      await hasher.addSourcePrefix(part.source, f.offer.size);
+      return await hasher.close();
+    } finally {
+      await part.close();
     }
   }
 

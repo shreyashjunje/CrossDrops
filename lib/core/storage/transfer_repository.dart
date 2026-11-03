@@ -206,6 +206,7 @@ class TransferRepository {
     String? sha256,
     String? finalLocation,
     String? errorCode,
+    String? tempPath,
   }) {
     return _db.transaction(() async {
       await (_db.update(_db.sessionFiles)..where(
@@ -219,6 +220,7 @@ class TransferRepository {
               sha256: Value.absentIfNull(sha256),
               finalLocation: Value.absentIfNull(finalLocation),
               errorCode: Value.absentIfNull(errorCode),
+              tempPath: Value.absentIfNull(tempPath),
             ),
           );
       // Keeps updatedAt fresh so the 24-hour cleanup sees activity.

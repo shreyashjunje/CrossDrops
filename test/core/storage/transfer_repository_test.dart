@@ -177,6 +177,24 @@ void main() {
       expect(old, isNonZero);
     });
 
+    test('expired parts outside the folder go through deletePart', () async {
+      final rowId = await receiveSession('gone', files: 3);
+      await repo.updateFile(rowId, 'f0', tempPath: 'content://media/9');
+      await repo.updateFile(rowId, 'f1', status: FileTransferStatus.saved);
+      now = now.add(const Duration(hours: 25));
+      final deleted = <String>[];
+
+      await PartialCleanup(
+        repository: repo,
+        incomingTemp: temp.path,
+        deletePart: (loc) async => deleted.add(loc),
+        clock: () => now,
+      ).run();
+
+      // The saved file is not touched; the stored location is used.
+      expect(deleted, ['content://media/9', '/tmp/gone/f2.part']);
+    });
+
     test('keeps recent orphans, deletes old ones', () async {
       makePart('orphan');
       final cleanup = PartialCleanup(

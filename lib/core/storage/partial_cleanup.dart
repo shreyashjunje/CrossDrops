@@ -19,9 +19,15 @@ class PartialCleanup {
     required TransferRepository repository,
     required this.incomingTemp,
     this.maxAge = const Duration(hours: 24),
+    this.deletePart,
     DateTime Function()? clock,
   }) : _repo = repository,
        _clock = clock ?? DateTime.now;
+
+  /// Deletes a partial file stored outside the session folder (Android
+  /// MediaStore pending items, D-040). Called for every unsaved file of an
+  /// expired session.
+  final Future<void> Function(String location)? deletePart;
 
   final TransferRepository _repo;
 
@@ -42,7 +48,18 @@ class PartialCleanup {
           status: SessionStatus.failed,
           reason: expiredReason,
         );
-        if (s.direction == TransferDirection.receive) expired.add(s.sessionId);
+        if (s.direction == TransferDirection.receive) {
+          expired.add(s.sessionId);
+          final delete = deletePart;
+          if (delete != null) {
+            for (final f in s.files) {
+              final loc = f.tempPath;
+              if (loc != null && f.status != FileTransferStatus.saved) {
+                await delete(loc);
+              }
+            }
+          }
+        }
         logEvent('storage', 'session ${s.sessionId}: expired after 24 h');
       } else if (s.direction == TransferDirection.receive) {
         keep.add(s.sessionId);
