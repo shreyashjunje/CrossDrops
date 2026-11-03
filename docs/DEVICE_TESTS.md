@@ -1273,3 +1273,107 @@ Not covered anywhere yet: real `startLocalOnlyHotspot` behaviour on your Android
 | P7-7 Personal Hotspot guide | | | | | | |
 | P7-8 hotspot suggestion | | | | | | |
 | P7-9 benchmark smoke test | | | | | | |
+
+## Code review fixes (2026-11-03)
+
+The fixes from the code review are unit-tested on the PC. These checks cover the parts only a phone can show. Run them on a normal build (bench off) from the same commit on both phones; R-9 needs a bench build.
+
+### Preparation (once)
+
+1. **New app id:** the app is now `io.github.shreyashjunje.crossdrop`. Uninstall the old one on both phones first: Android `adb uninstall com.example.crossdrop`; iPhone, delete CrossDrop from the Home Screen. Trusted devices and history start empty (new identity).
+2. **Protocol 2:** both phones must run this build. An older build shows the other as "needs update".
+3. **Android APK name:** `crossdrop-<sha7>-debugsigned.apk` until the release key secrets are set (RELEASE.md).
+4. **Logs:** Android `adb logcat -s flutter`; iPhone through the Xcode console or Console.app if a Mac is at hand, otherwise screenshots. New lines:
+   - `[crossdrop.receive] listening socket gone after suspension: restarting`
+   - `[crossdrop.server] session <id>: paused for 24 h, expired`
+   - `[crossdrop.send] session <id>: cancelled while offering`, `session <id>: discarded`
+
+### R-1: Pairing still matches on both phones (H1)
+
+1. Nearby list (not QR), first contact, iPhone → Android with one photo.
+2. Expected: both phones show the same 6-digit code; Accept works; the photo arrives.
+3. Repeat Android → iPhone.
+
+**Paste back:** a photo of both screens with the code.
+
+### R-2: Leaving the hotspot screen while it starts (H3, Android)
+
+1. Hotspot mode > This phone makes the network > **Start**, then press Back within a second, before the QR code appears.
+2. Expected: no hotspot icon in the status bar 5 s later, and in Settings > Network > Hotspot nothing from CrossDrop is running.
+3. Start again normally within 20 s: the QR code appears (no "failed").
+
+**Paste back:** logcat from step 1 to 3.
+
+### R-3: Share to CrossDrop while it is closed (H4, iPhone)
+
+1. Force-quit CrossDrop (swipe it away).
+2. Photos > select 3 photos > Share > CrossDrop.
+3. Expected: CrossDrop opens on Send with "3 files ready", and **Send** to the Android phone delivers all three. Before the fix, Send could say "Nothing could be prepared".
+4. Repeat twice; it must work every time.
+
+**Paste back:** screenshot of the Send screen, and the Android's Done screen.
+
+### R-4: A paused receive lets the screen sleep (M3)
+
+1. Send a 1 GB file iPhone → Android. During the transfer, on the **iPhone** (sender), go to the Home Screen and lock it.
+2. On the Android (receiver), watch the screen and the notification.
+3. Expected: "Receiving from <iPhone>" stays for about 2.5 minutes after the pause, then the notification goes and the screen may turn off as usual.
+4. Unlock the iPhone and open CrossDrop: the transfer continues (Android shows it again).
+5. Repeat in the other direction (Android sends, iPhone receives, lock the Android): the iPhone's screen may sleep about 2.5 minutes after the pause.
+
+**Paste back:** times when you locked and when the notification went; logcat.
+
+### R-5: Pause between files and going to the background (M4, iPhone sender)
+
+1. iPhone → Android, 20 photos. Tap **Pause** right after a file ends (watch the per-file list).
+2. Expected: the Android's progress stops within a second and does not move while paused; **Resume** finishes all 20.
+3. Then send a 1 GB video and press the Home button during the transfer, wait 30 s, come back.
+4. Expected: the transfer continues from where it stopped; no "failed".
+
+**Paste back:** screenshots, and how long the Android kept receiving after Home.
+
+### R-6: Cancel while connecting (M5)
+
+1. Turn the receiving phone's Wi-Fi off. On the sender, type its old address (Send > Enter IP), tap Send, then **Cancel** at once.
+2. Expected: "Cancelled", not "network failure"; the screen returns at once.
+3. Turn the Wi-Fi on. Send something to the same phone: it is not refused as busy.
+
+### R-7: iPhone receiver after the lock screen (M6)
+
+1. iPhone: open CrossDrop, Home screen idle (Receiving on). Lock it for **2 minutes**.
+2. Unlock and open CrossDrop.
+3. On the Android: Send > the iPhone from the nearby list, one photo.
+4. Expected: the offer reaches the iPhone within a few seconds. If the iPhone took the socket back, the server restarts on a new port (the iPhone's My QR code shows a new port).
+
+**Paste back:** whether it worked, and the iPhone's port in My QR code before and after.
+
+### R-8: Wi-Fi lost while binding (L7, Android)
+
+1. Join the iPhone Personal Hotspot from the Android (no internet). Open CrossDrop; logcat shows `bound to Wi-Fi (no internet there)`.
+2. Turn the Android's Wi-Fi off and on again at once, three times.
+3. Join the hotspot again. Expected: `bound to Wi-Fi` again, and a send to the iPhone works.
+
+### R-9: Measure this phone (bench build)
+
+1. Bench build on both phones. Settings > Benchmark > **Measure this phone**, twice on each phone.
+2. Expected: four lines with MB/s each; `crossdrop-limits.csv` has 8 rows per phone.
+3. Fill in BENCHMARKS.md, Step 0.
+
+### Not checked on devices
+
+Covered by tests on the PC: the commitment and its man-in-the-middle refusal, size caps, session and hash limits, parallel offers, the keep-alive grace, pause and cancel races, exclusive save names, complete re-checks, invisible characters, the binding queue, the socket read-ahead, time-based checkpoints, the release signing failure. `FdFile` changes run only on the Linux CI job (POSIX).
+
+### Results
+
+| Check | Date | iPhone, iOS | Android, version | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Preparation (new app id, protocol 2) | | | | | | |
+| R-1 pairing code both ways | | | | | | |
+| R-2 leave hotspot while starting | | | | | | |
+| R-3 share while closed (iPhone) | | | | | | |
+| R-4 paused receive lets the screen sleep | | | | | | |
+| R-5 pause between files, background | | | | | | |
+| R-6 cancel while connecting | | | | | | |
+| R-7 iPhone receiver after lock | | | | | | |
+| R-8 Wi-Fi lost while binding | | | | | | |
+| R-9 measure this phone | | | | | | |

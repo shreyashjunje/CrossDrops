@@ -1,4 +1,6 @@
-# Status after Phase 7 (2026-11-03)
+# Status after Phase 7 (2026-11-03, updated after the code review)
+
+**Code review of 2026-11-03:** every bug (H1–H4, M1–M6, L1–L8) and every release blocker is fixed in the code and unit-tested; speed items 1–5 are in (item 1 as "Measure this phone", D-066); items 6–10 wait for measurements (D-066). What needs a phone is in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Code review fixes" (R-1 to R-9). Run those with the smoke tests below.
 
 All v1 features in CLAUDE.md are now in the code: transfer engine, discovery, QR, pinned TLS and pairing, media saving, sharing from other apps, UI, Android hotspot, iPhone Personal Hotspot guide, and benchmark builds. CI runs analyze and tests on every push.
 
@@ -43,6 +45,8 @@ All v1 features in CLAUDE.md are now in the code: transfer engine, discovery, QR
    - P7-9: benchmark smoke test.
 
    If one fails, stop and paste back screenshots and `adb logcat -s flutter`. Fixing those first saves running 90 checks against a broken build.
+
+   Then R-1 to R-9 (code review fixes). Uninstall the old `com.example.crossdrop` app first: the new id installs as a separate app.
 4. **Next coding task (for Claude):** bring P1 and P2 up to date with the current screens, and add a short "v1 core pass" list at the top of DEVICE_TESTS.md. The full pass then follows the app as it is today, not as it was in each phase.
 5. **Full device pass:** Phases 3 to 7, then the updated 1 and 2. Write each result in its table with the date, OS versions and commit.
 6. **Benchmarks:** use the bench build and fill in BENCHMARKS.md. Then decide the speed target, the buffer size and D-059.
