@@ -23,6 +23,7 @@ import '../core/storage/transfer_repository.dart';
 import '../core/storage/trust_repository.dart';
 import '../platform/free_space.dart';
 import '../platform/local_network.dart';
+import '../platform/network.dart';
 import '../platform/secure_secret_store.dart';
 
 /// The app's database, open for the app's lifetime.
@@ -142,6 +143,11 @@ final keepAliveProvider = Provider<KeepAliveCoordinator>((ref) {
 /// Local Network permission probe and the system settings link.
 final localNetworkProvider = Provider<LocalNetwork>(
   (ref) => ChannelLocalNetwork(),
+);
+
+/// Address prefixes, the Android Wi-Fi state and network binding.
+final networkPlatformProvider = Provider<NetworkPlatform>(
+  (ref) => ChannelNetworkPlatform(),
 );
 
 /// One event per OS connectivity change (Wi-Fi joined, left or switched).
