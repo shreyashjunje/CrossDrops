@@ -524,3 +524,10 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - LICENSE says all rights reserved. Choosing an open-source licence is the owner's call before any public source release; this keeps every option open.
 - Consequences: test phones get the new id as a separate app (uninstall the old one once). Losing the release key means no updates under this id, so it must be backed up. Steps are in RELEASE.md.
 
+## D-064: The receiver reads ahead of the disk, up to 8 MB
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The code review (speed) found the receive loop serial: inside one `await for` it wrote 1 MB, handed it to the hasher and, every 4 MB, fsynced and wrote the database. While any of these was awaited the body stream was paused, the TCP window filled and the sender stalled. Disk and network never overlapped.
+- Decision: the request body is read into a queue that a writer loop empties in about 1 MB writes. Reading pauses at 8 MB queued and resumes at 4 MB. The size limit is checked as bytes arrive (hard rule 6); a stalled or dropped client still keeps every byte that arrived; `checkpointAll` wakes an idle writer so it saves progress even with less than 1 MB queued.
+- Consequences: up to 8 MB more memory per running upload (one at a time per session, eight sessions at most), still bounded and still streamed (hard rule 1). The gain is measured in the Phase 7 benchmark; a test shows the socket is read while a write is stuck, and that the queue stays bounded.
+

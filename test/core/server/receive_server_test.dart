@@ -7,6 +7,8 @@ import 'dart:typed_data';
 import 'package:crossdrop/core/protocol/events.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_credentials.dart';
+import 'package:crossdrop/core/engine/chunked_reader.dart';
+import 'package:crossdrop/core/server/file_store.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
 import 'package:crossdrop/core/storage/trust_repository.dart';
@@ -1055,6 +1057,44 @@ void main() {
     });
   });
 
+  group('reading ahead of the disk (D-064)', () {
+    test('the socket is read while a write is stuck, up to a bound', () async {
+      final gate = Completer<void>();
+      await r.close();
+      r = await TestReceiver.start(
+        identity: identity,
+        bodyIdleTimeout: const Duration(seconds: 5),
+        store: (t) => _SlowStore(FolderStore(t.saveDir), gate),
+      );
+      final data = randomBytes(12 * mb);
+      final sid = await createSession('big.bin', data.length);
+      final put = send(
+        'PUT',
+        '/v1/sessions/$sid/files/f1?offset=0',
+        bytes: data,
+      );
+      // The first write waits; the server keeps reading into its queue.
+      await waitFor(() => r.server.bufferedBytes >= 6 * mb);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(
+        r.server.bufferedBytes,
+        lessThanOrEqualTo(ReceiveServer.receiveQueueBytes + mb),
+      );
+      gate.complete();
+      final (code, body) = await put;
+      expect(code, 200, reason: '$body');
+      expect(body['receivedBytes'], data.length);
+      expect(r.server.bufferedBytes, 0);
+      final (done, _) = await send(
+        'POST',
+        '/v1/sessions/$sid/files/f1/complete',
+        json: {'sha256': shaOf(data)},
+      );
+      expect(done, 200);
+      expect(await hashFile(r.saved.single.savedPath), shaOf(data));
+    }, timeout: const Timeout(Duration(minutes: 1)));
+  });
+
   group('checkpoints and restart', () {
     test('a dropped upload pauses the session and keeps the bytes', () async {
       final sid = await createSession('a.bin', 10 * mb);
@@ -1173,4 +1213,76 @@ void main() {
       expect(stored!.files.single.transferredBytes, greaterThan(0));
     });
   });
+}
+
+/// A [ReceivedFileStore] whose first append waits for [gate]: a disk
+/// that is busy for a while.
+class _SlowStore implements ReceivedFileStore {
+  _SlowStore(this._inner, this._gate);
+
+  final ReceivedFileStore _inner;
+  final Completer<void> _gate;
+
+  @override
+  String initialLocation(String sessionDir, FileOffer offer) =>
+      _inner.initialLocation(sessionDir, offer);
+
+  @override
+  Future<(PartFile, String)> open(
+    String location, {
+    required String sessionDir,
+    required FileOffer offer,
+  }) async {
+    final (part, at) = await _inner.open(
+      location,
+      sessionDir: sessionDir,
+      offer: offer,
+    );
+    return (_SlowPart(part, _gate), at);
+  }
+
+  @override
+  Future<int> length(String location) => _inner.length(location);
+
+  @override
+  Future<int> restore(String location, int checkpoint) =>
+      _inner.restore(location, checkpoint);
+
+  @override
+  Future<void> delete(String location) => _inner.delete(location);
+
+  @override
+  Future<SaveResult> save(String location, FileOffer offer) =>
+      _inner.save(location, offer);
+}
+
+class _SlowPart implements PartFile {
+  _SlowPart(this._inner, this._gate);
+
+  final PartFile _inner;
+  final Completer<void> _gate;
+
+  @override
+  Future<void> append(Uint8List bytes) async {
+    await _gate.future;
+    await _inner.append(bytes);
+  }
+
+  @override
+  Future<int> length() => _inner.length();
+
+  @override
+  Future<void> sync() => _inner.sync();
+
+  @override
+  Future<void> truncate(int length) => _inner.truncate(length);
+
+  @override
+  Future<void> setModified(DateTime time) => _inner.setModified(time);
+
+  @override
+  ByteSource get source => _inner.source;
+
+  @override
+  Future<void> close() => _inner.close();
 }

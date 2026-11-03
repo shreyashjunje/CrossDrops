@@ -219,7 +219,7 @@ The SHA-256 is not in the offer, so the sender can start sending before hashing 
 2. Data is written to a partial file through a `ReceivedFileStore`: on iPhone `<app support>/crossdrop_incoming/<sessionId>/<fileId>.part` (D-025), on Android straight into a pending MediaStore item, created at the first byte (D-040). Every 4 MB, and whenever an upload stops, the partial file is fsynced and then the received byte count is saved. After a crash it is cut back to that count (D-022).
 3. On reconnect, the sender calls GET on the file, then PUT with `offset = receivedBytes`. Retries wait 1, 2, 4, 8 s, then 8 s, and stop after about 2 minutes without progress (D-019).
 4. Files go one at a time on one connection in v1. Parallel streams (2–4) are added only if benchmarks show a gain.
-5. Read and write buffers start at 1 MB; tune after benchmarks.
+5. Read and write buffers start at 1 MB; tune after benchmarks. The receiver reads the socket into a queue of at most 8 MB that a separate writer empties (write, hash, checkpoint), so disk work does not stall the connection (D-064).
 6. On `complete`, the receiver compares SHA-256 (computed incrementally while writing, kept across drops; hashed from disk after an app restart, D-021). On mismatch, the file restarts from zero once, then fails.
 7. After verification the file is saved without a copy: Android publishes the pending item; iPhone moves the file into Photos or the Documents folder (see Platform modules). Where it goes is decided from the sanitized name's extension, never the declared MIME type.
 8. More bytes than declared, by Content-Length or by count, fails that file and deletes its partial file. The other files continue.

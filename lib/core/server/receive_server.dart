@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -247,6 +248,12 @@ class _ReceivingFile {
   /// after saving progress.
   Completer<void>? checkpointRequest;
 
+  /// Wakes the running upload's writer (to see [checkpointRequest]).
+  void Function()? nudge;
+
+  /// Bytes the running upload read from the socket but has not written.
+  int buffered = 0;
+
   bool get busy => _busy != null;
 
   void lock() => _busy = Completer<void>();
@@ -400,6 +407,10 @@ class ReceiveServer {
   /// as the launch cleanup does with stored ones.
   static const Duration pausedExpiry = Duration(hours: 24);
 
+  /// Bytes an upload may read ahead of the disk (D-064): enough to cover
+  /// a slow write, fsync or hash step, still a bounded few buffers.
+  static const int receiveQueueBytes = 8 * 1024 * 1024;
+
   /// Starts listening on [port] (0 = random, as ARCHITECTURE.md asks) and
   /// restores unfinished sessions from [repository].
   ///
@@ -527,6 +538,13 @@ class ReceiveServer {
   bool get isReceiving =>
       _sessions.values.any((s) => s.files.values.any((f) => f.busy));
 
+  /// Bytes read from sockets and not yet written, over all uploads. For
+  /// tests and diagnostics.
+  int get bufferedBytes => _sessions.values.fold(
+    0,
+    (n, s) => n + s.files.values.fold(0, (m, f) => m + f.buffered),
+  );
+
   /// Incremental hashes kept alive between uploads; at most one per
   /// session. For tests and diagnostics.
   int get liveHashes => _sessions.values.fold(
@@ -568,6 +586,7 @@ class ReceiveServer {
       for (final f in s.files.values) {
         if (!f.busy) continue;
         waits.add((f.checkpointRequest ??= Completer<void>()).future);
+        f.nudge?.call();
       }
     }
     if (waits.isEmpty) return;
@@ -1332,7 +1351,67 @@ class ReceiveServer {
     var overflow = false;
     var stopped = false;
     Object? interruption;
-    final buffer = BytesBuilder(copy: false);
+
+    // The socket is read into a bounded queue that the writer loop below
+    // empties, so writing, hashing and checkpoints no longer pause the
+    // socket and stall the sender (D-064). At most [receiveQueueBytes]
+    // wait; then reading pauses until the writer is down to half of it.
+    final queue = ListQueue<List<int>>();
+    var queued = 0;
+    var arrived = offset;
+    var ended = false;
+    Object? readError;
+    Completer<void>? wake;
+    void signal() {
+      final w = wake;
+      wake = null;
+      w?.complete();
+    }
+
+    final sub = req
+        .read()
+        .timeout(_bodyIdleTimeout)
+        .listen(null, cancelOnError: true);
+    sub
+      ..onData((chunk) {
+        // Never trust the declared size (CLAUDE.md hard rule 6).
+        if (arrived + chunk.length > size) {
+          overflow = true;
+          ended = true;
+          unawaited(sub.cancel());
+          signal();
+          return;
+        }
+        arrived += chunk.length;
+        queue.add(chunk);
+        queued += chunk.length;
+        f.buffered = queued;
+        if (queued >= receiveQueueBytes && !sub.isPaused) sub.pause();
+        if (queued >= defaultChunkSize) signal();
+      })
+      ..onError((Object e) {
+        // Client went away or stalled. Every byte that arrived is kept.
+        readError = e;
+        ended = true;
+        signal();
+      })
+      ..onDone(() {
+        ended = true;
+        signal();
+      });
+    f.nudge = signal;
+
+    /// Socket chunks are small (TLS records): join them into one write of
+    /// about [defaultChunkSize], or whatever is left at the end.
+    Uint8List take() {
+      final out = BytesBuilder(copy: false);
+      while (queue.isNotEmpty && out.length < defaultChunkSize) {
+        out.add(queue.removeFirst());
+      }
+      queued -= out.length;
+      f.buffered = queued;
+      return out.takeBytes();
+    }
 
     Future<void> checkpoint() async {
       await raf.sync(); // the count we store must be on disk
@@ -1345,9 +1424,7 @@ class ReceiveServer {
       _broadcast(s, ProgressEvent(f.offer.fileId, written));
     }
 
-    Future<void> flush() async {
-      if (buffer.isEmpty) return;
-      final bytes = buffer.takeBytes();
+    Future<void> flush(Uint8List bytes) async {
       try {
         await raf.append(bytes);
       } on FileSystemException {
@@ -1372,31 +1449,38 @@ class ReceiveServer {
 
     try {
       try {
-        await for (final chunk in req.read().timeout(_bodyIdleTimeout)) {
-          // Never trust the declared size (CLAUDE.md hard rule 6).
-          if (written + buffer.length + chunk.length > size) {
-            overflow = true;
-            break;
+        while (!overflow) {
+          final asked = f.checkpointRequest;
+          if (queued < defaultChunkSize && !ended && asked == null) {
+            await (wake = Completer<void>()).future;
+            continue;
           }
-          buffer.add(chunk);
-          if (buffer.length >= defaultChunkSize) await flush();
+          if (queued == 0) {
+            if (ended) break; // everything that arrived is written
+            // checkpointAll with nothing new queued.
+            f.checkpointRequest = null;
+            await checkpoint();
+            asked?.complete();
+            continue;
+          }
+          await flush(take());
+          if (sub.isPaused && queued <= receiveQueueBytes ~/ 2) sub.resume();
           if (s.status.isTerminal) {
             stopped = true;
             break;
           }
         }
-        if (!overflow && !stopped) await flush();
       } on FileSystemException catch (e) {
         interruption = e;
-      } on Exception catch (e) {
-        // Client went away or stalled. Keep every byte that arrived.
-        interruption = e;
-        await flush();
       }
+      interruption ??= readError;
       if (!overflow && !stopped) await checkpoint();
     } on FileSystemException catch (e) {
       interruption = e;
     } finally {
+      f.nudge = null;
+      f.buffered = 0;
+      await sub.cancel();
       await raf.close();
     }
 
