@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../../app/keep_alive.dart';
 import '../../app/providers.dart';
 import 'receive_host.dart';
 
@@ -18,15 +19,18 @@ class MyQrScreen extends ConsumerStatefulWidget {
 class _MyQrScreenState extends ConsumerState<MyQrScreen> {
   final Object _screenKey = Object();
 
+  // Read once: ref may not be used in dispose.
+  late final KeepAliveCoordinator _keepAlive = ref.read(keepAliveProvider);
+
   @override
   void initState() {
     super.initState();
-    ref.read(keepAliveProvider).holdScreen(_screenKey);
+    _keepAlive.holdScreen(_screenKey);
   }
 
   @override
   void dispose() {
-    ref.read(keepAliveProvider).releaseScreen(_screenKey);
+    _keepAlive.releaseScreen(_screenKey);
     super.dispose();
   }
 
