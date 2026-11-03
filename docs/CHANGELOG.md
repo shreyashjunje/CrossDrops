@@ -4,6 +4,31 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 
 ## 2026-11-03
 
+### Added (Phase 6)
+- Screens ([features/ui-navigation.md](features/ui-navigation.md)):
+  - Home: "Ready to receive" with the device name, the Receiving switch, Show my QR code, transfers in progress and one large Send button.
+  - Send: pick files first, see the count and size, then choose the phone.
+  - Nearby: platform and connection hint per phone, Scan QR code, Enter IP, and "Can't find the other phone?" (basics, then QR, then hotspot mode).
+  - Incoming request: full screen over any screen, with sender, platform, trusted or first-time warning, files, size, names, code, Trust this device and a countdown.
+  - Progress for both directions: per-file and total progress, speed, time left, Pause and Resume on the sender, Cancel, and "Keep CrossDrop open and the screen on" on iPhone.
+  - Done and Failed: where files were saved, Open, the reason in plain words and the next step with a button.
+  - Hotspot mode: UI and the iPhone Personal Hotspot guide. Starting a hotspot from the app is Phase 7.
+  - History, Settings (sections, Trusted devices screen, About).
+- Onboarding ([features/onboarding.md](features/onboarding.md)): three pages on first launch. Receiving, and so the iOS Local Network prompt, starts after them.
+- Dark mode following the system; WCAG AA contrast, 48 dp touch targets, screen-reader labels; accessibility guideline tests on every new screen, including 2× text on a small phone.
+- Open received files through a small `crossdrop/open` channel (D-051).
+- Database schema 5: `settings.onboardingDone`, with a migration test.
+- Docs: [features/settings.md](features/settings.md), decisions D-046 to D-053, Phase 6 device checks and a screen review checklist.
+
+### Changed (Phase 6)
+- **Receiving runs whenever CrossDrop is open** (D-046). The Receive screen is gone; its QR code is under "Show my QR code". The server stops after 30 s in the background with nothing in flight, and no longer keeps the screen on by itself.
+- Sending starts from Home > Send with files; shares from other apps open the Send screen (D-052).
+- Failure wording comes from one table that follows ARCHITECTURE.md's failure table (D-049).
+- A rename restarts receiving, so other phones see the new name.
+
+### Fixed (Phase 6)
+- With receiving running from launch, the server now waits for the launch cleanup of expired partial files before it restores sessions. Discarding a received transfer goes through the running server.
+
 ### Added (Phase 5)
 - Picking ([features/media-picking.md](features/media-picking.md)):
   - "Photos & videos": a gallery grid on photo_manager with albums, Live and duration badges, Limited access ("Select more", Settings) and a denied screen.

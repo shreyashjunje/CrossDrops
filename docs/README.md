@@ -19,4 +19,7 @@
   - [saving-received-files.md](features/saving-received-files.md): Phase 5 MediaStore pending items on Android, Photos and Files on iPhone, fallbacks.
   - [format-handling.md](features/format-handling.md): Phase 5 originals, HEIC to JPEG and Live Photo settings, names, kinds and dates.
   - [share-from-other-apps.md](features/share-from-other-apps.md): Phase 5 iOS Share Extension and Android share intents.
+  - [ui-navigation.md](features/ui-navigation.md): Phase 6 screens, screen flow, receiving from Home, failure messages, accessibility.
+  - [onboarding.md](features/onboarding.md): Phase 6 first-launch introduction and when each permission is asked.
+  - [settings.md](features/settings.md): Phase 6 Settings, Trusted devices and About.
 - [TODAY-2026-11-02.md](TODAY-2026-11-02.md): short list of what was built, tested and left open on day one.

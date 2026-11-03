@@ -855,3 +855,254 @@ Covered by unit tests:
 | P5-8 dates | | | | | | |
 | P5-9 share from Photos, Files, Gallery | | | | | | |
 | P5-10 share vs picker | | | | | | |
+
+## Phase 6: UI and onboarding
+
+Feature docs: [features/ui-navigation.md](features/ui-navigation.md), [features/onboarding.md](features/onboarding.md), [features/settings.md](features/settings.md).
+
+**What changed for earlier checks:** there is no Receive button any more. A phone is ready to receive whenever CrossDrop is open (Home shows "Ready to receive"). Its QR code and address are under **Show my QR code**. Sending starts with **Send** on Home: pick files, tap Send, then pick the phone.
+
+### Preparation (once)
+
+1. **Build both phones from the same commit** and install over the Phase 5 app without deleting it ([Installing the CI builds](#installing-the-ci-builds-no-mac-needed)).
+   - New Swift file: `ios/Runner/OpenFileChannel.swift`. If the **iPhone unsigned IPA** job fails, paste its red lines and stop.
+   - The Android debug APK was built on the PC before committing, so the Kotlin change compiles. It has not run on a phone yet.
+2. **Delete and reinstall on one phone, for P6-1 only.** To see the iOS Local Network prompt again, the app must be new on the iPhone: delete CrossDrop from the iPhone (this gives it a new identity; the Android phone will show the lookalike warning once), then install the build. Keep the Android install as an upgrade, so both paths are covered.
+3. **Logs:** as in Phase 5. New lines:
+   - `[crossdrop.receive] hidden and idle: server stopped`
+   - `[crossdrop.server] listening on port <n>` appears again when the app comes back.
+   - `[crossdrop.open] failed: <code>`
+
+   No file names appear in logs.
+4. **Screens to check on two sizes.** If you have only one phone of each kind, make one look smaller:
+   - iPhone: Settings > Display & Brightness > Display Zoom > **Larger Text** (the screen behaves like a smaller iPhone).
+   - Android: Settings > Display > **Display size** > largest (same effect).
+
+   Set it back afterwards.
+
+### P6-1: First launch, introduction and permission timing
+
+1. iPhone (fresh install): open CrossDrop.
+   - Expected: page 1 "Open CrossDrop on both phones". **No** system prompt yet.
+2. Tap **Next**. Expected: page 2 "Allow Local Network". Still no prompt.
+3. Tap **Next**, then **Get started**.
+   - Expected: Home, and **right away** the iOS prompt "CrossDrop would like to find and connect to devices on your local network". Tap **Allow**.
+   - Home shows "Ready to receive as <name>".
+4. Android (upgrade): open CrossDrop.
+   - Expected: the three pages once (page 2 is "Same Wi-Fi, no internet needed").
+   - Tap **Skip**. Home appears with no system prompt.
+5. Close and reopen both apps. Expected: straight to Home, no pages.
+6. Settings > **Show the introduction**. Expected: the pages again; the last button says **Close** and returns to Settings.
+7. **Permissions come when used:**
+   - Camera only at Scan QR code.
+   - Photos only at Photos & videos.
+   - On Android 13+, notifications at the first transfer.
+   - On iPhone, add-only Photos at the first Accept with photos.
+
+Paste back: a screenshot of the iPhone right after Get started, showing the prompt over Home.
+
+### P6-2: Home, the Receiving switch and My QR code
+
+1. Both phones on Home. Expected: "Ready to receive as <name>", and the text "Phones on the same Wi-Fi with CrossDrop open can see you".
+2. On Android: **Send** > pick any photo > **Send**. Expected: the iPhone is listed with "iPhone · same Wi-Fi". Go back.
+3. On the iPhone, turn **Receiving** off.
+   - Expected: "Receiving is off".
+   - Within about 5 s the iPhone disappears from Android's list (tap the refresh icon).
+   - Turn it back on: it reappears.
+4. iPhone: **Show my QR code**.
+   - Expected: a QR code on white, also in dark mode. The screen does not dim while it is open.
+   - "No camera? Type the address" shows the IP and port.
+5. Put the iPhone in the background (home gesture) for **more than 30 s**, then reopen CrossDrop.
+   - Expected: Android's list loses the iPhone while it is away.
+   - After reopening, the iPhone shows "Starting…" briefly, then "Ready to receive", and Android finds it again.
+   - The log shows `hidden and idle: server stopped`.
+6. Repeat step 5 on Android (home button, 30 s, back). Same expectations.
+
+### P6-3: Send iPhone → Android, untrusted, end to end
+
+Use the iPhone after P6-1 (new identity, not trusted by Android).
+
+1. iPhone: **Send**.
+   - Expected: Photos & videos and Files buttons, and a text "Choose photos, videos or files…".
+2. Pick 3 photos and a PDF.
+   - Expected: they are listed, each with an × to remove.
+   - The summary reads like "3 photos, 1 file · at least 1.2 MB", and "The full size is shown when sending starts".
+   - Remove one photo with ×: the list and the count update.
+3. Tap **Send**. Expected: the nearby list shows the Android phone with "Android phone · same Wi-Fi". Tap it.
+4. Expected on the iPhone:
+   - "Preparing 1 of 3…".
+   - Then "Waiting for <Android> to accept…" with the 6-digit code under "Check that the other phone shows this code".
+5. Expected on Android: the full-screen **Incoming files** request.
+   - Your iPhone's name, "iPhone · Not trusted", and the box "First time from this device…".
+   - "wants to send you 3 files · <size>", the names, the same 6-digit code, "Trust this device", and "This request expires in N s" counting down.
+6. Tick **Trust this device**, tap **Codes match, accept**.
+   - Expected on Android: the Progress screen. Bars, "Receiving 1 of 3", speed and time left (on a large file), and the note "You can switch apps: the transfer continues…".
+   - Expected on the iPhone: "Keep CrossDrop open and the screen on until the transfer finishes".
+7. When done:
+   - **Android** shows a check, "3 files received", "from <iPhone> · <size>", "Where to find them: Saved to Pictures/CrossDrop" (and Download/CrossDrop for the PDF), and an **Open** button per file.
+   - Tap Open on a photo: the gallery or a viewer shows it. Tap Open on the PDF: a PDF viewer opens.
+   - **The iPhone** shows "3 files sent", "The other phone checked every file with SHA-256", and "Trust <Android>". Tap it.
+8. Send again from the iPhone. Expected: no code on either phone, and Android's request says "Trusted".
+
+Paste back: screenshots of steps 5, 6 (both phones) and 7 (both phones).
+
+### P6-4: Send Android → iPhone, offer over another screen
+
+1. iPhone: open **Settings** (stay there).
+2. Android: Send a video and a WebM or ZIP file to the iPhone.
+3. Expected: the Incoming request appears on the iPhone **on top of Settings**.
+   - Accept. Progress shows "Keep CrossDrop open and the screen on…".
+4. When done:
+   - The iPhone shows "Saved to Photos" for the video, with **Open Photos**.
+   - The other file shows "Saved to Files > On My iPhone > CrossDrop", with **Open**.
+   - Open Photos opens the Photos app; Open shows a Quick Look preview. Write down whether Open Photos worked.
+5. Send again and do **not** answer.
+   - Expected: the countdown reaches 0 and the request closes by itself.
+   - Android shows "Not answered", "Nobody tapped Accept on the other phone within 60 seconds", and **Send again**.
+6. Send again and tap **Decline**. Expected on Android: "Declined" and **Send again**. Tap it: the Send screen opens.
+
+### P6-5: Pause, Resume and Cancel
+
+Use a video of 300 MB or more.
+
+1. iPhone → Android. During sending, tap **Pause** on the iPhone.
+   - Expected on the iPhone: "Paused. Tap Resume to go on", with a **Resume** button.
+   - Within about 15 s, Android shows "Paused. Waiting for <iPhone> to reconnect…".
+2. Wait 30 s, then tap **Resume**. Expected: it continues from where it stopped (the percentage does not go back to 0), and finishes with the hash checked.
+3. Pause again. Lock the iPhone for 10 s, unlock. Expected: it is **still paused** (a user pause is kept). Resume.
+4. New send. On Android, tap **Cancel** > **Cancel transfer**.
+   - Expected on Android: "Cancelled", "You stopped the transfer. Unfinished files were deleted."
+   - On the iPhone: "Cancelled by <Android>" and **Send again**.
+5. New send. Cancel on the **iPhone**. Expected on Android: "Cancelled by <iPhone>".
+
+### P6-6: Failures say what happened and what to do
+
+1. **Receiving off:**
+   - Forget the iPhone in Android's Settings > Trusted devices, so the next send needs the code again.
+   - Turn Receiving off on Android, then send from the iPhone.
+   - Expected on the iPhone: "The other phone is not receiving", "Receiving is turned off on it", "Ask its owner to turn Receiving on…".
+2. **Connection lost:**
+   - Send a large video iPhone → Android. During sending, turn Wi-Fi off on Android and leave it off for **more than 2 minutes**.
+   - Expected on the iPhone: "Connection lost… trying again", then "Connection lost", "The phones could not reach each other for 2 minutes", a next step that mentions hotspot mode, and **Resume**.
+   - Turn Wi-Fi on again, wait for Android to show "Ready to receive", then tap **Resume**. Expected: it finishes.
+3. **QR on a network that blocks phones (if you have one, such as a guest Wi-Fi):**
+   - Scan the other phone's QR code.
+   - Expected: "Could not connect" in a bar at the bottom, with a **Help** action that opens "Can't find the other phone?".
+
+Paste back: screenshots of each failure screen.
+
+### P6-7: Can't find the other phone? and hotspot mode
+
+1. On either phone: Send > pick a file > Send > **Can't find the other phone?**
+   - Expected, in this order: "1. Check both phones", "2. Use the QR code" with **Scan QR code**, and "3. Use hotspot mode".
+   - On the iPhone, a Local Network step with **Open Settings**; tapping it opens CrossDrop's page in Settings.
+2. Tap **Scan QR code**. Expected: back on the nearby list and the camera opens. Scan the other phone's code; sending starts.
+3. **Hotspot mode** on Android:
+   - Expected: "This phone makes the network" and "Join the iPhone's Personal Hotspot".
+   - Tap the first. Expected: the note "Starting the network from CrossDrop comes in the next update", and steps for Android's own hotspot.
+4. **Hotspot mode** on the iPhone: expected "Join the Android phone's network" and "This iPhone makes the network".
+5. **Follow the Personal Hotspot guide for real:**
+   - Turn off Wi-Fi on both phones.
+   - Turn on Personal Hotspot on the iPhone and join it from Android.
+   - Open CrossDrop on both. Send a photo in each direction.
+   - Write down whether they found each other in the list, or needed the QR code.
+   - Android may say the network has no internet: stay connected. This is scenario 5; if the transfer fails, it may be the mobile-data routing that Phase 7 fixes. Paste the logs.
+
+### P6-8: History
+
+1. Home > **History** (clock icon).
+   - Expected: the transfers from today under "Today".
+   - Each shows ↗ or ↙, "To/From <name>", file count, size and platform, a status (Done, Failed, Cancelled, Declined), and the time.
+2. Tap a received one. Expected: the Done view with **Open**. Open works.
+3. Tap a failed or cancelled one. Expected: the Failed view with the reason.
+4. Unfinished send:
+   - Start a large send, Pause it, and kill the iPhone app (swipe up).
+   - Reopen. If asked "Unfinished transfers", tap **Later**.
+   - History > the transfer. Expected: "Unfinished: N% of…", **Resume** and **Discard**.
+   - Tap **Resume**. Expected: it continues and finishes.
+
+### P6-9: Settings
+
+1. Rename the iPhone to "Test iPhone". Expected: within a few seconds, Android's nearby list (refresh) shows "Test iPhone". Rename it back.
+2. Turn Receiving off in **Settings**, go Home. Expected: Home shows "Receiving is off". Close and reopen the app: still off. Turn it on.
+3. iPhone only: "Sending photos to Android" has two switches. Turn on **Convert HEIC to JPEG**, send a HEIC photo to Android: it arrives as `.JPG`. Turn it off again.
+4. **Trusted devices:**
+   - The Android phone is listed with "Accept without asking".
+   - Turn that on and send from Android: the iPhone saves the files with no request.
+   - Turn it off, then **Forget** (confirm). The next send asks for the code again.
+5. **About:** version 1.0.0, the sections, and the security key in groups of four. Open-source licenses opens a list.
+
+### P6-10: Screen readers
+
+1. iPhone: Settings > Accessibility > **VoiceOver** on. Android: **TalkBack** on.
+2. Receive an untrusted offer.
+   - Expected on the Incoming request: the sender is read, then the warning, the file count.
+   - The code is read digit by digit ("Code 4 8 2 9 1 3").
+   - The buttons are read as "Decline" and "Codes match, accept".
+3. During the transfer, swipe through Progress.
+   - Expected: "Total progress, 42%"; each file as "<name>, 40%" or "<name>, done".
+   - The stage line is announced when it changes.
+4. In History, each row is read as one item: "Sent, To <name>, …".
+5. Turn the screen reader off.
+
+Paste back: anything that is read wrongly or not at all.
+
+### Screen review checklist
+
+For each screen, check the four conditions and tick or note a problem. **Small phone:** the smaller of your phones, or Display Zoom / Display size as in preparation 4. **Large phone:** the larger one at normal zoom. **Large text:** iPhone Settings > Accessibility > Display & Text Size > Larger Text, slider to the far right (also try one of the extra-large accessibility sizes); Android Settings > Display > Font size at maximum. **Dark mode:** the system dark theme on.
+
+What to look for on every screen:
+- No text is cut off mid-word or overlapped. Long names may end with "…".
+- Every button is fully visible, or reachable by scrolling.
+- Text is easy to read against its background. Warnings (red or tinted boxes) are readable in dark mode.
+- The QR code has a white background in dark mode.
+- Nothing jumps or flickers while progress updates.
+
+| Screen | How to reach it | Small phone | Large phone | Large text | Dark mode |
+| --- | --- | --- | --- | --- | --- |
+| Onboarding, 3 pages | Settings > Show the introduction | | | | |
+| Home, ready | Open the app | | | | |
+| Home, receiving off | Switch off | | | | |
+| Home, with a transfer in progress | During P6-5 | | | | |
+| My QR code | Home > Show my QR code | | | | |
+| Send, empty and with 10+ items | Home > Send | | | | |
+| Nearby, list and empty after 10 s | Send > Send | | | | |
+| Can't find the other phone? | Nearby, bottom link | | | | |
+| Hotspot mode and both guides | Help > Hotspot mode | | | | |
+| Incoming request, untrusted with 7+ files | P6-3 | | | | |
+| Incoming request, trusted | P6-3 step 8 | | | | |
+| Progress, sender waiting with code | P6-3 step 4 | | | | |
+| Progress, running, both phones | P6-3 step 6 | | | | |
+| Progress, paused | P6-5 | | | | |
+| Done, received (Open buttons) | P6-3 step 7 | | | | |
+| Done, sent (Trust button) | P6-3 step 7 | | | | |
+| Failed, connection lost | P6-6 | | | | |
+| Failed, declined / not answered | P6-4 | | | | |
+| History, list and detail | Home > History | | | | |
+| Settings | Home > Settings | | | | |
+| Trusted devices | Settings | | | | |
+| About | Settings | | | | |
+
+### Not checked on devices
+
+Covered by tests on the PC:
+- Flutter's tap-target, label and contrast guidelines on every Phase 6 screen in light and dark; Home, Send, Settings and History on a 320 × 568 phone with 2× text (`test/a11y/`).
+- Failure wording for every reason code (`failure_messages_test.dart`).
+- Schema 5 migration.
+
+### Results
+
+| Check | Date | iPhone, iOS | Android, version | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Build and install (prep 1) | | | | | | |
+| P6-1 introduction and prompt timing | | | | | | |
+| P6-2 Home, switch, QR, background 30 s | | | | | | |
+| P6-3 iPhone → Android end to end, Open | | | | | | |
+| P6-4 Android → iPhone over Settings, timeout, decline | | | | | | |
+| P6-5 Pause, Resume, Cancel both sides | | | | | | |
+| P6-6 failure screens | | | | | | |
+| P6-7 help, hotspot UI, Personal Hotspot for real | | | | | | |
+| P6-8 History, resume from History | | | | | | |
+| P6-9 Settings | | | | | | |
+| P6-10 VoiceOver and TalkBack | | | | | | |
+| Screen review checklist | | | | | | |

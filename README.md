@@ -5,9 +5,10 @@ CrossDrop is a Flutter app that sends photos, videos and files directly between 
 
 - **Phase 1, file transfer proof of concept:** built and tested on devices.
 - **Phase 2, discovery and QR connect:** built and tested on devices.
-- **Phase 3, transfer engine:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 3) are pending.
+- **Phase 3, transfer engine:** built and tested on devices.
 - **Phase 4, security:** built and tested on devices.
-- **Phase 5, media and sharing:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 5) are pending; the iPhone code is first compiled by the CI build.
+- **Phase 5, media and sharing:** built and tested on devices.
+- **Phase 6, UI and onboarding:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 6) are pending.
 
 What works in the code today:
 
@@ -15,7 +16,7 @@ What works in the code today:
 - Transfers resume by themselves after Wi-Fi drops and after either app restarts. Unfinished transfers are offered at launch.
 - Cancel from either side, with progress, speed and time left on both.
 - The screen stays on during transfers. Android keeps going with the screen off (foreground service). iPhone saves and pauses in the background, then continues.
-- Phones on the same Wi-Fi find each other through Bonjour while the receiver has Receive open. A QR code and a typed IP and port are the fallbacks.
+- Phones on the same Wi-Fi find each other through Bonjour while CrossDrop is open on the receiver (Home shows "Ready to receive"). A QR code and a typed IP and port are the fallbacks, and "Can't find the other phone?" walks through QR, then hotspot mode.
 - Each phone has its own key; its certificate fingerprint is its identity. Every connection is TLS 1.3, pinned to the receiver, and the sender proves its key with a signed challenge (`dart:io` cannot do mutual TLS with unknown certificates, D-027).
 - New devices are checked with a 6-digit code shown on both phones. Trusted devices skip the code, can be set to auto-accept, and a trusted name with another key is flagged.
 - A Receiving switch, rate limits and request size limits keep strangers on the Wi-Fi out.
@@ -23,10 +24,11 @@ What works in the code today:
 - Received photos and videos go to Photos or the gallery, other files to Files or Download/CrossDrop, without an extra copy.
 - HEIC and HEVC are sent as they are. Converting HEIC to JPEG and sending Live Photo videos are settings.
 - Share from Photos, Gallery, Files or any app opens CrossDrop with the files selected.
+- Screens: Home, Send (files first, then the phone), Incoming request, Progress with Pause, Done with Open, Failed with the reason and next step, History, Settings, a three-page introduction. Dark mode, large text and screen readers are supported.
 
 Requirements: iOS 15 or later, Android 10 or later.
 
-Not yet built: hotspot mode, transfer history and the final transfer UI.
+Not yet built: starting or joining a hotspot from the app (the screens and the iPhone Personal Hotspot guide exist), and Android network binding on a hotspot without internet (Phase 7).
 
 ## Build and test
 

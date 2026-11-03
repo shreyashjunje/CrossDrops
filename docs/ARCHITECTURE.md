@@ -1,6 +1,6 @@
 # CrossDrop Architecture: iPhone ↔ Android File Sharing
 
-Nov 1, 2026 · updated Nov 3, 2026 (Phase 5) · @yash
+Nov 1, 2026 · updated Nov 3, 2026 (Phase 6) · @yash
 
 CrossDrop v1 is a Flutter app in which each phone runs a small encrypted HTTPS server. The phones find each other over the local network (or connect through a hotspot) and send files straight to each other, with no cloud server. This document covers only iPhone ↔ Android, in both directions.
 
@@ -135,7 +135,7 @@ The protocol is plain HTTPS with JSON for control and streamed request bodies fo
 - TXT record: `v=1` (protocol version), `id=<device UUID>`, `n=<device name, at most 63 UTF-8 bytes>`, `p=ios|android`, `fp=<first 16 hex chars of certificate SHA-256>`. Keys are case-insensitive. A record with a newer `v` needs only `v`, `id` and `n` and is listed as "needs update".
 - The TXT fingerprint is a hint only. The full fingerprint is checked in the TLS handshake.
 - Browsers ignore records with a bad TXT, their own id, or no IPv4 address in a local range (10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10), so an advertisement can never point the app outside the local network.
-- In Phase 2 a phone advertises only while its Receive screen is open (D-016). It re-advertises when the Wi-Fi or IP changes and when the app returns to the foreground.
+- A phone advertises while CrossDrop is open and Receiving is on, on any screen (D-046; until Phase 5 only on the Receive screen, D-016). It stops 30 s after the app is hidden with nothing in flight. It re-advertises when the Wi-Fi or IP changes, when the app returns to the foreground and when the device is renamed.
 
 **QR code payload**
 
@@ -315,10 +315,10 @@ After a successful pairing the receiver can tick "Trust this device" in the Acce
 
 **Abuse limits and server hygiene** (D-031, D-032)
 
-- **Receiving switch** (Settings and Receive screen, on by default). Off: the phone stops advertising and its QR code, offers from untrusted senders get 403 `receiving_off`, and the server stops as soon as no transfer is running. While the server is still running, offers from trusted devices are allowed. With the switch off, the server does not start at all.
+- **Receiving switch** (Home and Settings, on by default). Off: the phone stops advertising and its QR code, offers from untrusted senders get 403 `receiving_off`, and the server stops as soon as no transfer is running. While the server is still running, offers from trusted devices are allowed. With the switch off, the server does not start at all.
 - **Rate limits per IP address:** `POST /v1/sessions` 3 at once, then one every 20 s; `/v1/auth/challenge` and `/v1/auth` 10 at once, then one every 3 s. Over the limit: 429 `rate_limited` with `retryAfter` and a `Retry-After` header. At most 1,024 addresses, 64 open challenges and 256 tokens are remembered.
 - **Request limits:** 16 KB of headers (431), 16 KB for auth and `complete` bodies, 4 MB for an offer (413); file bodies are limited by the declared size as before.
-- **Server lifetime:** runs only while the Receive screen is open, the app is in the foreground (or, on Android, a transfer runs in the foreground service) and the switch is on. A new random port at every start. Idle keep-alive connections close after 30 s.
+- **Server lifetime:** runs while the app is open, after the first-launch introduction (D-050), and the switch is on (D-046). It stops 30 s after the app is hidden with no offer waiting and no bytes moving (on Android a running transfer keeps going in the foreground service), and starts again when the app is shown. A new random port at every start. Idle keep-alive connections close after 30 s.
 
 **Threats and defenses**
 
@@ -333,7 +333,7 @@ After a successful pairing the receiver can tick "Trust this device" in the Acce
 | Huge offer to fill the disk | Free-space check before accepting; reject if the file is larger than declared |
 | Flood of requests | Rate limits; header and body limits; capped challenge, token and address tables |
 | Corrupted or tampered file | SHA-256 verified before saving |
-| Server left open in public | Server runs only while Receive is open and the switch is on; new random port each start |
+| Server left open in public | Server runs only while the app is open and the switch is on, stops when hidden and idle; new random port each start |
 | Identity copied to another phone | Key in this-device-only Keychain or Keystore storage; Android backup and device transfer off |
 | Old protocol version with a known bug | Minimum supported version in the app; reject below it |
 
@@ -357,7 +357,7 @@ Most platform risk sits in four areas: how files are read, how they are saved, w
 | HEIC photos (iPhone → Android) | Default: send the original HEIC. Setting "Convert HEIC to JPEG": ImageIO at quality 0.92 with metadata and colour profile kept, HDR gain map lost (D-039). | Most modern Android galleries open HEIC; older ones may not. The setting's description says so. |
 | Live Photos (iPhone → Android) | Default: send the still. Setting "Send Live Photo videos": also the MOV, named after the still, sharing `livePhotoGroup` (D-039). | Saved as a photo, plus a video if both were sent. No Live Photo playback. |
 | HEVC / HDR video (iPhone → Android) | Send the original. | Most phones play HEVC. Dolby Vision HDR may look washed out on some Androids; note it in help, don't transcode in v1. |
-| Android → iPhone formats | JPEG, PNG, HEIC, WebP, MP4 and MOV go to Photos. WebM, Matroska, AVI and anything Photos refuses go to Files, with a note on the Receive screen. Motion Photos arrive as stills. | Not applicable. |
+| Android → iPhone formats | JPEG, PNG, HEIC, WebP, MP4 and MOV go to Photos. WebM, Matroska, AVI and anything Photos refuses go to Files, with a note on the Done screen. Motion Photos arrive as stills. | Not applicable. |
 | Screen lock during transfer | Keep the screen on during a transfer (`wakelock_plus`). Use a short background task to finish the current chunk and save progress; resume when the app returns. | Foreground service of type data sync with a progress notification; transfer continues with the screen off. Needs `POST_NOTIFICATIONS`. |
 | Battery and OEM killers | Not applicable. | Some brands (Xiaomi, Oppo, Vivo, OnePlus) kill background apps aggressively. Ask the user to exempt CrossDrop from battery optimization if transfers stop. |
 | Hotspot | Can't create one from an app; the user turns on Personal Hotspot. Can join an Android hotspot in-app via NEHotspotConfiguration (needs the Hotspot Configuration capability). | LocalOnlyHotspot creates one with a random name and password; no internet sharing. |
@@ -365,9 +365,13 @@ Most platform risk sits in four areas: how files are read, how they are saved, w
 | Network binding | Local subnet traffic goes over Wi-Fi even without internet. | When the Wi-Fi has no internet, bind the process or socket to that Wi-Fi network, or traffic may go over mobile data. |
 | Share from other apps | Share Extension target: clones the files into an App Group inbox (no file in memory), writes a manifest, opens `crossdrop://share`. The app checks the manifest, moves the files into staging and opens Send with them selected (D-045). | Intent filters for `SEND` and `SEND_MULTIPLE` on a `singleTask` activity; only content URIs of other apps; read in place (D-044). |
 
+## Screens
+
+Home is also the receive screen: while CrossDrop is open and Receiving is on, the phone can be found, and an offer opens the Incoming request on top of any screen (D-046). Sending goes files first, then the phone (D-052). The same Progress, Done and Failed screens serve both directions (D-048). A first-launch introduction comes before any network use (D-050). Screen flow and details: [features/ui-navigation.md](features/ui-navigation.md), [features/onboarding.md](features/onboarding.md), [features/settings.md](features/settings.md).
+
 ## Failure handling
 
-Every failure ends in one of three outcomes: an automatic resume, a clear message with the next step, or a clean cancel that leaves no half-saved files.
+Every failure ends in one of three outcomes: an automatic resume, a clear message with the next step, or a clean cancel that leaves no half-saved files. The words the app shows for each row, and the button for the next step, are in one table (`lib/features/transfer/failure_messages.dart`, D-049).
 
 | Failure | How it's detected | Recovery |
 | --- | --- | --- |
@@ -387,7 +391,7 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | iPhone screen locks or app backgrounded | App lifecycle events (hidden) | Inside a background task: the sender finishes the current chunk and pauses, the receiver saves progress. On return the sender continues; time in the background does not use up the retry deadline |
 | Android app killed by battery saver | Session lost; partial file remains | On next launch, show "Resume unfinished transfer?"; resume if the sender reconnects |
 | App crash or phone restart | Partial files and session rows in the database | Part files cut back to the last checkpoint; same resume prompt; delete partial files older than 24 hours |
-| Receiver app restarts | The server listens on a new random port | The sender finds it again by device id over mDNS after 3 failed tries, once Receive is open |
+| Receiver app restarts | The server listens on a new random port | The sender finds it again by device id over mDNS after 3 failed tries, once CrossDrop is open again |
 | Hash mismatch | `complete` verification fails | Restart that file from zero once; then mark it failed; the other files continue |
 | More bytes than declared | Content-Length or counting on the receiver | That file fails and its partial file is deleted; the other files continue |
 | Peer IP changes (DHCP, reconnect) | Connection refused at the old address | Rediscover by device id via mDNS and continue |
@@ -396,7 +400,7 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | iCloud original won't download | Export fails, or no progress for 90 s, while preparing | That item is left out before the offer, with "only in iCloud and could not be downloaded"; the others are sent (D-038) |
 | Picked item gone before sending | Export or open fails while preparing (deleted, or no longer shared under Limited access) | Left out before the offer, with the reason |
 | Sender out of space while preparing | Export write fails with no space | That item and the rest are left out; "not enough free space on this phone" |
-| Unsupported format on the receiver | Extension not in the gallery list, MediaStore refuses the MIME type, or Photos refuses the file | Save to Files or Downloads instead; the Receive screen says why |
+| Unsupported format on the receiver | Extension not in the gallery list, MediaStore refuses the MIME type, or Photos refuses the file | Save to Files or Downloads instead; the Done screen says why |
 | No Photos access on the receiver (iPhone) | Add-only access denied | Save to Files; "CrossDrop may not add to Photos" |
 | Shared file no longer readable (Android) | The share intent's grant ended with the process | The send stops with "a file could not be read any more"; share again |
 | Protocol version mismatch | `/v1/info` versions don't overlap | "Update CrossDrop on the other phone" |
@@ -412,9 +416,9 @@ Every failure ends in one of three outcomes: an automatic resume, a clear messag
 | `trusted_devices` | fingerprint (key), deviceId, name, platform, autoAccept, firstSeen, lastSeen |
 | `sessions` | sessionId + direction (unique), peerDeviceId, peerName, peerPlatform, peerFingerprint, peerHost and peerPort (send), status, reason, totalBytes, createdAt, updatedAt, finishedAt |
 | `session_files` | session row + fileId, position, name, size, mime, kind, created, livePhotoGroup, sha256, transferredBytes, tempPath, sourcePath (send), finalLocation, status, hashAttempts, errorCode |
-| `settings` | receivingEnabled (Phase 4); convertHeicToJpeg, sendLivePhotoVideo (Phase 5) |
+| `settings` | receivingEnabled (Phase 4); convertHeicToJpeg, sendLivePhotoVideo (Phase 5); onboardingDone (Phase 6) |
 
-Schema version 4. The database file is in Application Support, not Documents (D-034). `session_files.tempPath` is a path or an Android MediaStore content URI; `sourcePath` is a path or a content URI; `finalLocation` is a path, a content URI or `photos:<id>`, never shown. Session status: see [Session state machine](#session-state-machine). Both directions are stored. Sessions stored before Phase 4 have no peerFingerprint and cannot resume: a received one is marked failed at start, a sent one asks the user to send again. A sent session that gave up on the network stays `paused`, so the launch prompt can offer to resume it.
+Schema version 5. The database file is in Application Support, not Documents (D-034). `session_files.tempPath` is a path or an Android MediaStore content URI; `sourcePath` is a path or a content URI; `finalLocation` is a path, a content URI or `photos:<id>`, never shown. Session status: see [Session state machine](#session-state-machine). Both directions are stored. Sessions stored before Phase 4 have no peerFingerprint and cannot resume: a received one is marked failed at start, a sent one asks the user to send again. A sent session that gave up on the network stays `paused`, so the launch prompt can offer to resume it.
 
 **Code structure**
 
@@ -423,11 +427,12 @@ crossdrop/
   lib/
     app/            # routing, theme, Riverpod providers
     features/
-      home/         # "Ready to receive" + send button
-      nearby/       # discovered devices list, QR scanner
+      home/         # "Ready to receive" + switch + send button
+      onboarding/   # first-launch introduction
+      nearby/       # discovered devices list, QR scanner, find help
       send/         # file picking, offer screen
-      receive/      # incoming request, accept/reject
-      transfer/     # progress, speed, cancel, done
+      receive/      # receiving host, incoming request, my QR code
+      transfer/     # progress, speed, pause, cancel, done, failed
       hotspot/      # offline mode flow
       history/      # past transfers
       settings/
@@ -466,7 +471,7 @@ crossdrop/
 - [ ] Custom protocol (this document) or LocalSend-compatible protocol? Compatibility would let CrossDrop talk to LocalSend users; check its protocol and license first.
 - [x] HEIC default: send the original; JPEG is a setting (Phase 5, D-039).
 - [x] Live Photos default: the still only; the video is a setting (Phase 5, D-039).
-- [ ] Is iPhone Personal Hotspot mode worth an in-app guide in v1, or Android hotspot mode only?
+- [x] iPhone Personal Hotspot: an in-app guide in v1, next to Android hotspot mode (Phase 6).
 - [x] Trusted devices: allow auto-accept, or always show the Accept prompt? Auto-accept is allowed, off by default, per trusted device (Phase 4).
 - [x] Minimum OS versions: iOS 15, Android 10 (SDK 29), for MediaStore pending items and the Downloads collection (Phase 5, D-035).
 - [ ] What speed target counts as success, decided after the Phase 1 proof of concept measures real numbers?

@@ -374,3 +374,64 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - **Setup:** the App Group id is the `APP_GROUP_ID` build setting (`group.com.example.crossdrop`), read from Info.plist at run time. The extension is embedded before Flutter's "Thin Binary" phase, which avoids Xcode's build-cycle error.
   - `receive_sharing_intent` is not used.
 - Consequences: The extension stays far below its memory limit for any file size. If a re-signing tool drops or renames the App Group, sharing says it is not available, and the in-app pickers still work. Shared photos are what Photos hands over, which may be a rendered copy rather than the library original; for exact originals use the in-app picker.
+
+## D-046: Home is the receive screen; receiving runs while the app is open
+- Date: 2026-11-03
+- Status: Accepted (changes D-016 and the server lifetime in D-031)
+- Context: Phase 6 asks for a Home screen that shows "Ready to receive" with a Receiving switch. Until now the server ran only while a separate Receive screen was open, so a phone on Home could not be found.
+- Decision:
+  - `ReceiveHost`, above the navigator, keeps the receive controller alive on every screen once onboarding is done (D-050). Offers open the Incoming request on top of whatever is open.
+  - The QR code and addresses move to a "My QR code" screen, which keeps the screen on while open. The server no longer keeps the screen on by itself; running transfers still do.
+  - When the app has been hidden for 30 s with no offer waiting and no bytes moving, the server stops and advertising ends. It starts again, on a new port, when the app is shown. A paused session does not keep it running: its sender finds the phone again by id.
+  - Because receiving now starts at launch, the server waits for the launch cleanup of expired partial files before it restores sessions, and discarding a received transfer that the server holds goes through the server's cancel.
+  - A rename restarts receiving when nothing is in flight, so the new name is advertised.
+- Consequences: Other phones on the same Wi-Fi can see this phone whenever CrossDrop is open and Receiving is on, not only on one screen. Untrusted senders still need Accept and the code check, and the switch hides the phone. No protocol or security code changed.
+
+## D-047: Navigation with Navigator and named routes
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The app already used `Navigator`, a route observer and a global navigator key for shares. A routing package (go_router) would add a dependency for about twelve screens and no deep links.
+- Decision: Plain `Navigator` with route names in `lib/app/navigation.dart`. The route observer tells the share listener and the offer prompt what is on top, so they do not open duplicates.
+- Consequences: No new package. Deep links other than `crossdrop://share` stay out of scope.
+
+## D-048: One transfer view model for both directions
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The sender's state (`SendSnapshot`) and the receiver's (`IncomingSession`, stored sessions) differ, but the Progress, Done, Failed and History screens show the same things.
+- Decision: `TransferView` (stage, peer, files, bytes, speed, time left, reason, pairing code, resumable) is built from either. `ProgressView` and `ResultView` are plain widgets that take it.
+- Consequences: One set of screens, tested without the engine. A new engine state needs one mapping in `transfer_view.dart`.
+
+## D-049: Failure messages come from one table
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Each screen had its own wording for the same reason codes, and some offered no next step.
+- Decision: `failure_messages.dart` maps every reason code to a title, a plain-language reason, the next step from ARCHITECTURE.md's failure table and one button (Resume, Send again, Scan QR code, Other ways to connect, or none). A pin mismatch never offers a retry. Unknown codes show the code, so users can report it.
+- Consequences: Wording changes in one place, with unit tests per code.
+
+## D-050: Onboarding first; receiving starts after it
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The brief asks for permissions at the moment they are needed. With D-046, receiving would start at launch and iOS would show its Local Network prompt before anything explained it.
+- Decision: Three introduction pages on first launch. Receiving (and so the iOS Local Network prompt) starts when the user taps Get started or Skip, right after the page that explains Local Network. Camera, Photos, add-only Photos and notifications stay where they are used. `settings.onboardingDone`, schema 5, off by default, so phones upgraded from Phase 5 see the pages once. Settings can replay them.
+- Consequences: The Local Network prompt on iPhone comes right after onboarding, not at the first Send. A database error shows Home rather than locking the user out.
+
+## D-051: Open received files through our own channel
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The Done screen needs an Open button. `open_filex` opens file paths; received files are MediaStore content URIs on Android and Photos assets (`photos:<id>`) on iPhone.
+- Decision: A small `crossdrop/open` channel. Android starts `ACTION_VIEW` with a read grant, for `content://media/...` URIs only. iOS opens the Photos app for `photos:<id>` (through the undocumented `photos-redirect://` scheme; there is no public way to show one asset) and previews a file inside Documents with Quick Look. Anything else is refused.
+- Consequences: No new package. "Open Photos" opens the library, not the photo. If the scheme stops working, the button falls back to "Saved to Photos".
+
+## D-052: Send picks files first, then the phone
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Phase 5 opened the nearby list first. The brief's Send screen shows the selected files, their size and a Send button, and shares from other apps arrive with files already chosen.
+- Decision: Home > Send shows the pickers and the selection; Send opens the nearby list, which returns the chosen phone; the transfer screen takes over (preparing, code, progress, result). Sizes: documents and Android shares carry the size the platform reports; photos and videos only get a size when they are prepared (they may be in iCloud or converted), so the total says "at least" until sending starts.
+- Consequences: One way into sending, shared with the share sheet. The exact total appears on the Progress screen.
+
+## D-053: The sender can pause
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The brief asks for Pause on the Progress screen. The engine already pauses after the current chunk when iOS backgrounds the app, and resumes from the receiver's `receivedBytes`.
+- Decision: Pause on the sender uses that same engine pause. A user pause is remembered, so returning to the foreground does not resume it, and the app going to the background does not pause it twice. The receiver has no Pause: it cannot stop the sender without the protocol, and Cancel covers it.
+- Consequences: No protocol change. While paused, the receiver shows "Waiting for the sender to reconnect". After 24 hours the paused session expires as before.
