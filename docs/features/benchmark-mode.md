@@ -59,12 +59,15 @@ A hidden screen in benchmark builds that sends the same random test files throug
 
 No names, addresses or fingerprints (CLAUDE.md hard rule 7).
 
+**This phone's limits** (`lib/core/bench/phone_limits.dart`, D-066): "Measure this phone" times, 256 MB each and without the network, SHA-256 in an isolate, pinned TLS 1.3 between two isolates over loopback, and writes through the receive store with a checkpoint every 4 MB and every 64 MB or 2 s. Rows (`time, platform, app_version, test, bytes, ms, mb_s`) go to `crossdrop-limits.csv`. There is deliberately no TLS-off or hash-off transfer mode (hard rule 4).
+
 ## Code
 
 | Path | Purpose |
 | --- | --- |
 | `lib/core/bench/bench.dart` | Flag, sizes, buffers, names, test file |
 | `lib/core/bench/bench_runner.dart` | Cases and runs |
+| `lib/core/bench/phone_limits.dart` | SHA-256, TLS loopback and write rates of one phone |
 | `lib/core/bench/bench_stats.dart` | Throughput, median, best buffer, CSV |
 | `lib/core/bench/process_stats.dart` | CPU time and memory |
 | `lib/core/bench/bench_store.dart` | Verify, then discard, benchmark files |

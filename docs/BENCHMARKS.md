@@ -134,6 +134,29 @@ Measured with benchmark builds ([features/benchmark-mode.md](features/benchmark-
 | Android hotspot | Android: Send > Can't find the other phone? > Hotspot mode > This phone makes the network > **Start**. iPhone: join it (scan, or Settings > Wi-Fi with the shown password). On the Android, tap **Benchmark (test build)** on the hotspot screen, so the network stays up; never go back from the hotspot screen during a series. |
 | iPhone hotspot | iPhone: Settings > Personal Hotspot > Allow Others to Join (leave **Maximize Compatibility** off unless the Android cannot see it; write down which). Android: join it in Settings > Wi-Fi, mobile data off. Then Settings > Benchmark on both. |
 
+### Step 0: each phone's own limits (D-066)
+
+Before the network series, on **each** phone: Settings > Benchmark > **Measure this phone** (about a minute, screen on, nothing else running). It measures, 256 MB each, without the network:
+
+- `sha256`: SHA-256 in a background isolate, as both phones hash every file.
+- `tls_loopback`: pinned TLS 1.3 between two isolates on this phone, the cost of TLS and the socket stack without the radio.
+- `write_fsync_4mb` and `write_fsync_64mb`: writing through the store received files use (MediaStore on Android, the app folder on iPhone), with a checkpoint every 4 MB (before D-065) and every 64 MB or 2 s (now).
+
+Rows go to `crossdrop-limits.csv` next to `crossdrop-bench.csv`. Run it twice and keep the second (the first warms caches). Paste both phones' files.
+
+| Phone | sha256 MB/s | tls_loopback MB/s | write_fsync_4mb MB/s | write_fsync_64mb MB/s |
+| --- | --- | --- | --- | --- |
+| iPhone | | | | |
+| Android | | | | |
+
+How to read it, with Step A and B and an iperf3 baseline:
+
+- A step within about 1.5× of a transfer's MB/s on the same phone is that transfer's ceiling. `sha256` on the receiver is the first candidate on budget Androids (pure Dart).
+- If `write_fsync_4mb` is clearly below `write_fsync_64mb`, D-065 already pays off; if both are close to the transfer speed, the disk is the limit.
+- CrossDrop well below iperf3 while every step here is far above it points at the protocol path (one file at a time, the per-file round trips), not at CPU or disk.
+
+The decisions waiting on these numbers are in D-066.
+
 ### Step A: choose the buffer size
 
 On **Router 5 GHz**, then on **Android hotspot**:

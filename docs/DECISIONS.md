@@ -538,3 +538,16 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Decision: the mechanism of D-022 stays (fsync first, then store the byte count; restore cuts the part back). A running upload is checkpointed after 64 MB or 2 s, whichever comes first, and whenever it stops (drop, stall, pause, `checkpointAll` when iOS backgrounds the app). Both are `ReceiveServer.start` parameters, so the benchmark can compare.
 - Consequences: after a crash or a kill, about 2 s of data is sent again instead of at most 4 MB; on a fast link that is more bytes, but it costs seconds, and drops (not crashes) still checkpoint at the exact byte. The `progress` event comes at the same pace.
 
+## D-066: Measure each phone's limits first; the bigger speed changes wait for numbers
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The code review listed ten speed items in order of expected gain, starting with "measure first" (bench-only "TLS off" and "hash off" toggles and an iperf3 baseline). Items 2–5 (receiver read-ahead D-064, fewer checkpoints D-065, sender read-ahead, fewer copies in `FdFile`) are safe without numbers and are done. The rest change the protocol, native code or the transfer model.
+- Decision:
+  - **Measuring:** no TLS-off or hash-off transfer mode, not even in benchmark builds: a plain-HTTP or unverified path in the code is a downgrade waiting to happen (hard rule 4). Instead, Settings > Benchmark > "Measure this phone" times SHA-256, pinned TLS 1.3 on loopback and writes through the receive store, each on its own (BENCHMARKS.md, Step 0). With Step A/B and iperf3 that separates the costs the toggles would have.
+  - **Native SHA-256** (CommonCrypto on iOS through FFI; on Android a small C SHA-256 with ARMv8 crypto instructions, built with the app): only if Step 0 shows `sha256` within 1.5× of a measured transfer on a test phone. It adds a native build to both platforms and must be tested on devices.
+  - **Overlapping files** (PUT of file N+1 on a second connection while N completes): only if a series of many small files is clearly slower per byte than one large file (below about 70 %). It changes transfer rule 4 (one file at a time, one connection).
+  - **Streaming the iOS export** (offer and upload while PhotoKit still exports): only if preparing large videos is a large share of the total time on the test iPhone. It needs the size before the export ends and native work on a Mac.
+  - **Wi-Fi Direct on 5 GHz** instead of LocalOnlyHotspot: an experiment for the Android hotspot series, not a v1 change. The Personal Hotspot guide already tells users to turn on "Maximize Compatibility" (2.4 GHz, slower) only if the Android cannot see the network.
+  - **Parallel streams:** D-059 stands; they come last.
+- Consequences: the next speed work is chosen from measurements on the two test phones, and each change gets a before and after row in BENCHMARKS.md.
+

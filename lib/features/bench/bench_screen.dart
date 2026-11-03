@@ -8,11 +8,13 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../../app/media_providers.dart';
 import '../../app/providers.dart';
 import '../../app/version.dart';
 import '../../core/bench/bench.dart';
 import '../../core/bench/bench_runner.dart';
 import '../../core/bench/bench_stats.dart';
+import '../../core/bench/phone_limits.dart';
 import '../../core/client/peer_check.dart';
 import '../../core/engine/send_session.dart';
 import '../../core/protocol/models.dart';
@@ -55,6 +57,11 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
   String? _csvPath;
   ReceiverBenchTracker? _tracker;
 
+  /// "This phone's limits" (D-066): results, and the step running now.
+  final List<PhoneLimit> _limits = [];
+  String? _limitsStep;
+  String? _limitsError;
+
   DevicePlatform get _me => DevicePlatform.current;
 
   @override
@@ -85,6 +92,52 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
     final path = _csvPath;
     if (path != null) {
       await File(path).writeAsString('${r.toCsv()}\n', mode: FileMode.append);
+    }
+  }
+
+  /// SHA-256, pinned TLS on loopback and writes through the receive
+  /// store, each 256 MB; rows go to `crossdrop-limits.csv` next to the
+  /// benchmark CSV.
+  Future<void> _measureLimits() async {
+    setState(() {
+      _limitsStep = 'starting';
+      _limitsError = null;
+    });
+    await WakelockPlus.enable();
+    try {
+      final dirs = await ref.read(appDirsProvider.future);
+      final results = await measurePhoneLimits(
+        credentials: await ref.read(credentialsProvider.future),
+        store: await ref.read(receivedFileStoreProvider.future),
+        tempDir: dirs.incomingTemp,
+        onStart: (t) {
+          if (mounted) setState(() => _limitsStep = t);
+        },
+      );
+      final docs = await getApplicationDocumentsDirectory();
+      final csv = File(p.join(docs.path, 'crossdrop-limits.csv'));
+      if (!await csv.exists()) {
+        await csv.writeAsString('${PhoneLimit.csvHeader}\n');
+      }
+      await csv.writeAsString(
+        [
+          for (final r in results)
+            '${r.toCsv(platform: _me.name, appVersion: appVersion)}\n',
+        ].join(),
+        mode: FileMode.append,
+      );
+      if (mounted) {
+        setState(() {
+          _limits
+            ..clear()
+            ..addAll(results);
+        });
+      }
+    } catch (e) {
+      if (mounted) setState(() => _limitsError = '$e');
+    } finally {
+      await WakelockPlus.disable();
+      if (mounted) setState(() => _limitsStep = null);
     }
   }
 
@@ -324,6 +377,26 @@ class _BenchScreenState extends ConsumerState<BenchScreen> {
             value: _recordReceiving,
             onChanged: (v) => setState(() => _recordReceiving = v),
           ),
+          const Divider(height: 32),
+          Text("This phone's limits", style: theme.textTheme.titleMedium),
+          const Text(
+            'SHA-256, pinned TLS on this phone alone, and writing as '
+            'received files are written, with a checkpoint every 4 MB '
+            'and every 64 MB. A step close to the transfer speed is the '
+            'limit. About a minute; keep the screen on.',
+          ),
+          if (_limitsStep != null) ...[
+            const SizedBox(height: 8),
+            Text('Measuring: $_limitsStep'),
+            const LinearProgressIndicator(),
+          ] else
+            OutlinedButton(
+              onPressed: running ? null : _measureLimits,
+              child: const Text('Measure this phone'),
+            ),
+          if (_limitsError != null) Text('Failed: $_limitsError'),
+          for (final r in _limits)
+            Text('${r.test}: ${r.mbPerSecond.toStringAsFixed(0)} MB/s'),
           const Divider(height: 32),
           Text('Results', style: theme.textTheme.titleMedium),
           if (best != null)
