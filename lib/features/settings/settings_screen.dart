@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/navigation.dart';
 import '../../app/providers.dart';
+import '../../core/bench/bench.dart';
 import '../../core/protocol/device_name.dart';
 import '../../core/security/device_identity.dart';
+import '../bench/bench_screen.dart';
 import '../nearby/find_help_screen.dart';
 import '../onboarding/onboarding_screen.dart';
 import 'about_screen.dart';
@@ -140,6 +142,17 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     OnboardingScreen(replay: true, platform: me),
                   ),
                 ),
+                if (benchBuild)
+                  ListTile(
+                    leading: const Icon(Icons.speed),
+                    title: const Text('Benchmark (test build)'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => pushScreen<void>(
+                      context,
+                      Routes.settings,
+                      const BenchScreen(),
+                    ),
+                  ),
                 ListTile(
                   leading: const Icon(Icons.info_outline),
                   title: const Text('About CrossDrop'),

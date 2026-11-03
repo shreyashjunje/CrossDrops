@@ -6,6 +6,10 @@
 #   unsigned iPhone .ipa. Run this after each phase, then install the
 #   builds on the phones for the device checks in docs/DEVICE_TESTS.md.
 #
+# With the "bench" input on, both builds are benchmark builds
+# (--dart-define=CROSSDROP_BENCH=true, D-058): release mode with Settings >
+# Benchmark. Their files are named *-bench*. Never hand them to users.
+#
 # The iPhone build is unsigned. Install it from Windows with Sideloadly and
 # a free Apple ID (DEVICE_TESTS.md, "Installing the CI builds"). macOS
 # minutes count 10x on private repositories, so it only runs on demand.
@@ -16,6 +20,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      bench:
+        description: Benchmark build (Settings > Benchmark; test phones only)
+        type: boolean
+        default: false
 
 concurrency:
   group: build-${{ github.ref }}
@@ -23,6 +32,8 @@ concurrency:
 
 env:
   FLUTTER_VERSION: 3.47.9
+  BENCH_DEFINE: ${{ inputs.bench && '--dart-define=CROSSDROP_BENCH=true' || '' }}
+  BENCH_SUFFIX: ${{ inputs.bench && '-bench' || '' }}
 
 jobs:
   test:
@@ -62,12 +73,12 @@ jobs:
       - run: flutter pub get
       # Signed with the debug key (android/app/build.gradle.kts), so it
       # installs with `adb install` or by opening the file on the phone.
-      - run: flutter build apk --release
+      - run: flutter build apk --release $BENCH_DEFINE
       - name: Name the APK after the commit
-        run: mv build/app/outputs/flutter-apk/app-release.apk "crossdrop-${GITHUB_SHA::7}.apk"
+        run: mv build/app/outputs/flutter-apk/app-release.apk "crossdrop-${GITHUB_SHA::7}${BENCH_SUFFIX}.apk"
       - uses: actions/upload-artifact@v4
         with:
-          name: crossdrop-android-${{ github.sha }}
+          name: crossdrop-android-${{ github.sha }}${{ env.BENCH_SUFFIX }}
           path: crossdrop-*.apk
           retention-days: 14
 
@@ -85,16 +96,16 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: flutter pub get
-      - run: flutter build ios --release --no-codesign
+      - run: flutter build ios --release --no-codesign $BENCH_DEFINE
       # An .ipa is a zip with Runner.app inside a Payload folder. Sideloadly
       # signs it with the user's Apple ID when installing.
       - name: Package unsigned IPA
         run: |
           mkdir -p Payload
           cp -R build/ios/iphoneos/Runner.app Payload/
-          zip -qr "crossdrop-${GITHUB_SHA::7}-unsigned.ipa" Payload
+          zip -qr "crossdrop-${GITHUB_SHA::7}${BENCH_SUFFIX}-unsigned.ipa" Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: crossdrop-ios-unsigned-${{ github.sha }}
+          name: crossdrop-ios-unsigned-${{ github.sha }}${{ env.BENCH_SUFFIX }}
           path: crossdrop-*-unsigned.ipa
           retention-days: 14

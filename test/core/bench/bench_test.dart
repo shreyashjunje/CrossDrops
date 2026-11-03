@@ -24,6 +24,10 @@ BenchResult sent(int size, int buffer, double mbps, {bool ok = true}) =>
 const mib = 1024 * 1024;
 
 void main() {
+  test('normal builds have no benchmark mode', () {
+    expect(benchBuild, isFalse);
+  });
+
   group('names and labels', () {
     test('sizeLabel', () {
       expect(sizeLabel(10 * mib), '10 MB');

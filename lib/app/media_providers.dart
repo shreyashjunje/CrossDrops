@@ -5,6 +5,8 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../core/engine/source_opener.dart';
 import '../core/media/prepare.dart';
+import '../core/bench/bench.dart';
+import '../core/bench/bench_store.dart';
 import '../core/server/file_store.dart';
 import '../platform/android_source.dart';
 import '../platform/android_store.dart';
@@ -54,9 +56,18 @@ final documentPickerProvider = FutureProvider<DocumentPicker>((ref) async {
 final receivedFileStoreProvider = FutureProvider<ReceivedFileStore>((
   ref,
 ) async {
-  if (Platform.isAndroid) return MediaStoreFileStore(ChannelMediaStore());
-  final dirs = await ref.read(appDirsProvider.future);
-  return FolderStore(dirs.received, mediaSaver: ref.read(photosSaverProvider));
+  final ReceivedFileStore store;
+  if (Platform.isAndroid) {
+    store = MediaStoreFileStore(ChannelMediaStore());
+  } else {
+    final dirs = await ref.read(appDirsProvider.future);
+    store = FolderStore(
+      dirs.received,
+      mediaSaver: ref.read(photosSaverProvider),
+    );
+  }
+  // Benchmark builds verify, then drop, their own test files (D-058).
+  return benchBuild ? BenchDiscardingStore(store) : store;
 });
 
 /// iOS Photos library saving (D-043); unused on Android.
