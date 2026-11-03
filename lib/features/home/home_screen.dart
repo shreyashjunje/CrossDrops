@@ -4,7 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../nearby/nearby_screen.dart';
 import '../receive/receive_screen.dart';
-import '../send/share_listener.dart';
+import '../../app/navigation.dart';
 import '../settings/settings_screen.dart';
 import '../transfer/unfinished_transfers.dart';
 

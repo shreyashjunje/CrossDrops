@@ -18,7 +18,7 @@ import '../../core/storage/transfer_repository.dart';
 import '../receive/receive_screen.dart';
 import '../send/send_controller.dart';
 import '../send/send_screen.dart';
-import '../send/share_listener.dart';
+import '../../app/navigation.dart';
 import 'transfer_format.dart';
 
 /// Runs once per app launch: deletes partial files older than 24 hours,

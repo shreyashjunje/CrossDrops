@@ -8,7 +8,7 @@ import '../../core/discovery/peer_list.dart';
 import '../../core/protocol/connect_payload.dart';
 import '../../core/security/device_identity.dart';
 import '../send/send_screen.dart';
-import '../send/share_listener.dart';
+import '../../app/navigation.dart';
 import 'local_network_denied_view.dart';
 import 'lookalike_dialog.dart';
 import 'manual_address_dialog.dart';
