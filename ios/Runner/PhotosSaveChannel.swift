@@ -1,5 +1,6 @@
 import Flutter
 import Photos
+import UniformTypeIdentifiers
 
 /// Platform channel `crossdrop/photos` (Dart side: lib/platform/ios_photos.dart).
 ///
@@ -71,7 +72,14 @@ final class PhotosSaveChannel {
       let options = PHAssetResourceCreationOptions()
       // Move, not copy: a 4 GB video must not need 8 GB.
       options.shouldMoveFile = true
-      if let name { options.originalFilename = name }
+      if let name {
+        options.originalFilename = name
+        // Do not let Photos guess the type.
+        let ext = (name as NSString).pathExtension
+        if let type = UTType(filenameExtension: ext) {
+          options.uniformTypeIdentifier = type.identifier
+        }
+      }
       request.addResource(with: video ? .video : .photo, fileURL: url, options: options)
       if let created { request.creationDate = created }
       placeholder = request.placeholderForCreatedAsset

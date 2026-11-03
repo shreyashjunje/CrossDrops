@@ -178,15 +178,28 @@ class FolderStore implements ReceivedFileStore {
     String? fallback;
     final saver = mediaSaver;
     if (saver != null && collection != SaveCollection.files) {
-      final r = await saver.saveToGallery(
-        location,
-        safeName: safeName,
-        kind: offer.kind,
-        created: offer.created,
-      );
+      // Photos judges a file partly by its extension: hand it over under
+      // its real name, not `f1.part`. Same folder, so this is a rename.
+      final named = p.join(p.dirname(location), offer.fileId, safeName);
+      await Directory(p.dirname(named)).create(recursive: true);
+      await File(location).rename(named);
+      final GallerySave r;
+      try {
+        r = await saver.saveToGallery(
+          named,
+          safeName: safeName,
+          kind: offer.kind,
+          created: offer.created,
+        );
+      } catch (_) {
+        await File(named).rename(location);
+        rethrow;
+      }
       if (r.savedAs != null) {
         return SaveResult(location: r.savedAs!, collection: collection);
       }
+      // Not taken: the part is back where the session expects it.
+      await File(named).rename(location);
       if (r.noSpace) throw const StoreFull();
       fallback = r.fallback;
     }

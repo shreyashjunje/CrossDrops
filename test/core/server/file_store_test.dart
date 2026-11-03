@@ -89,6 +89,8 @@ void main() {
       expect(r.location, 'photos:ABC');
       expect(r.collection, SaveCollection.photos);
       expect(saver.calls.single.$2, 'IMG_1.HEIC');
+      // Handed over under its real name, not f1.part.
+      expect(p.basename(saver.calls.single.$1), 'IMG_1.HEIC');
       expect(Directory(save).existsSync(), isFalse, reason: 'not in Files');
     });
 
@@ -148,7 +150,10 @@ void main() {
       final o = offer('IMG_1.JPG', kind: FileKind.photo);
       final loc = await part(s, o, [1, 2, 3]);
       await expectLater(s.save(loc, o), throwsA(isA<StoreFull>()));
-      expect(File(loc).existsSync(), isTrue);
+      expect(File(loc).existsSync(), isTrue, reason: 'back at its location');
+      // A later retry works from there.
+      saver.answer = const GallerySave.saved('photos:Z');
+      expect((await s.save(loc, o)).location, 'photos:Z');
     });
   });
 
@@ -260,7 +265,7 @@ void main() {
 
 class _FakeSaver implements MediaSaver {
   _FakeSaver(this.answer);
-  final GallerySave answer;
+  GallerySave answer;
   final List<(String, String)> calls = [];
 
   @override
