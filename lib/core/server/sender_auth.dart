@@ -75,9 +75,6 @@ class SenderAuthenticator {
     _expire();
     final challenge = _challenges.remove(request.nonce);
     if (challenge == null) throw const AuthFailure('unknown nonce');
-    if (commitNonce(request.senderNonce) != challenge.commit) {
-      throw const AuthFailure('commitment mismatch');
-    }
     final PeerCertificate cert;
     try {
       cert = PeerCertificate.parse(request.certificate);
@@ -86,6 +83,16 @@ class SenderAuthenticator {
     }
     if (cert.fingerprint == ownFingerprint) {
       throw const AuthFailure('own certificate');
+    }
+    // The certificate must be the one committed to before our nonce went
+    // out; otherwise it could have been chosen to steer the code (D-061).
+    final expected = authCommitment(
+      receiverFingerprint: ownFingerprint,
+      senderFingerprint: cert.fingerprint,
+      senderNonce: request.senderNonce,
+    );
+    if (expected != challenge.commit) {
+      throw const AuthFailure('commitment mismatch');
     }
     final input = authSigningInput(
       receiverFingerprint: ownFingerprint,

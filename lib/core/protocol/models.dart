@@ -1,12 +1,18 @@
-/// Protocol v1 message models. See docs/ARCHITECTURE.md, "Protocol spec".
+/// Protocol message models. See docs/ARCHITECTURE.md, "Protocol spec".
+///
+/// The URL paths stay under `/v1`; this number is the wire version that
+/// `GET /v1/info`, the TXT record and the QR code carry.
 library;
 
-/// The newest protocol version this app speaks.
-const int protocolVersion = 1;
+/// The newest protocol version this app speaks. 2: the auth commitment
+/// covers both fingerprints (D-061).
+const int protocolVersion = 2;
 
 /// Every protocol version this app speaks, oldest first. Below the first
 /// entry is the minimum supported version (ARCHITECTURE.md, "Threats").
-const List<int> supportedVersions = [1];
+/// Version 1 is refused: its pairing code could be steered by a man in
+/// the middle (D-061).
+const List<int> supportedVersions = [2];
 
 /// The highest version in both [supportedVersions] and [theirs], or null if
 /// there is none ("Update CrossDrop on the other phone").

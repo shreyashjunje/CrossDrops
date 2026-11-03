@@ -28,7 +28,7 @@ The transfer engine moves a set of files from one phone to the other: the sender
 
 ## Design
 
-The protocol, state machine and transfer rules are in [ARCHITECTURE.md](../ARCHITECTURE.md), sections "Transfer session", "Protocol spec (v1)" and "Session state machine". What is specific to this implementation:
+The protocol, state machine and transfer rules are in [ARCHITECTURE.md](../ARCHITECTURE.md), sections "Transfer session", "Protocol spec" and "Session state machine". What is specific to this implementation:
 
 **Receiver (`ReceiveServer`)**
 

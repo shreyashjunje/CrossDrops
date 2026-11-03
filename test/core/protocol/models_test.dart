@@ -11,7 +11,7 @@ void main() {
         ],
       );
       final back = SessionOffer.fromJson(offer.toJson());
-      expect(back.protocol, 1);
+      expect(back.protocol, protocolVersion);
       expect(back.sender.platform, 'android');
       expect(back.files.single.fileId, 'f1');
       expect(back.files.single.size, 10);
@@ -19,7 +19,7 @@ void main() {
     });
 
     Map<String, Object?> withFiles(List<Object?> files) => {
-      'protocol': 1,
+      'protocol': 2,
       'sender': {'id': 'a', 'name': 'b', 'platform': 'ios'},
       'files': files,
     };
@@ -145,7 +145,7 @@ void main() {
   test('offer with too many files is rejected', () {
     expect(
       () => SessionOffer.fromJson({
-        'protocol': 1,
+        'protocol': 2,
         'sender': {'id': 'a', 'name': 'b', 'platform': 'ios'},
         'files': [
           for (var i = 0; i <= maxFilesPerOffer; i++)
@@ -169,13 +169,15 @@ void main() {
 
   group('negotiateVersion', () {
     test('picks the highest common version', () {
-      expect(negotiateVersion([1]), 1);
-      expect(negotiateVersion([1, 2, 3]), 1);
+      expect(negotiateVersion([2]), 2);
+      expect(negotiateVersion([1, 2, 3]), 2);
     });
 
     test('returns null when there is none', () {
       expect(negotiateVersion([]), isNull);
-      expect(negotiateVersion([0, 2]), isNull);
+      // Version 1 is refused (D-061).
+      expect(negotiateVersion([1]), isNull);
+      expect(negotiateVersion([0, 3]), isNull);
     });
   });
 

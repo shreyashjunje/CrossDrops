@@ -7,7 +7,7 @@ const _id = '3f2a9c1b-0d4e-4f5a-8b6c-7d8e9f0a1b2c';
 const _fp = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 Map<String, String> _valid() => {
-  'v': '1',
+  'v': '2',
   'id': _id,
   'n': "Shreyash's iPhone",
   'p': 'ios',
@@ -22,7 +22,7 @@ void main() {
       fingerprint: _fp,
     );
     expect(txt.encode(), {
-      'v': '1',
+      'v': '2',
       'id': _id,
       'n': 'Pixel',
       'p': 'android',
@@ -43,7 +43,7 @@ void main() {
 
   test('keys are case-insensitive, id and fp are lowercased', () {
     final txt = TxtRecord.decode({
-      'V': '1',
+      'V': '2',
       'ID': _id.toUpperCase(),
       'N': 'A',
       'P': 'android',
@@ -63,8 +63,8 @@ void main() {
   });
 
   test('newer version needs only v, id and n', () {
-    final txt = TxtRecord.decode({'v': '2', 'id': _id, 'n': 'Future'});
-    expect(txt.version, 2);
+    final txt = TxtRecord.decode({'v': '3', 'id': _id, 'n': 'Future'});
+    expect(txt.version, 3);
     expect(txt.isSupported, isFalse);
     expect(txt.platform, isNull);
     expect(txt.fingerprintHint, isNull);

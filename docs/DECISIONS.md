@@ -496,3 +496,13 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: ARCHITECTURE.md left open whether to use the LocalSend protocol, so CrossDrop could talk to LocalSend users. Phases 1–7 built the custom protocol, including mutual pinned TLS, the signed sender challenge, resume by offset and the 6-digit code, and all of it is unit-tested.
 - Decision: v1 keeps the custom protocol. LocalSend compatibility can be looked at again after v1 passes its device tests, as a separate adapter. It must not weaken the pinning rules.
 - Consequences: CrossDrop does not see LocalSend devices. The open decision in ARCHITECTURE.md is closed.
+
+## D-061: The auth commitment covers both fingerprints; protocol version 2
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The code review of 2026-11-03 (H1) found that the v1 commitment `SHA-256("crossdrop-commit-v1\n" + senderNonce)` fixed only the sender's nonce. The certificate arrived at `/v1/auth`, after the receiver's nonce was known, and the fingerprint is the SHA-256 of the whole DER, so any changed byte gives a new fingerprint for the same key. A man in the middle posing as the receiver to the sender and as a sender to the real receiver learns the sender's code first, then tries about 10^6 certificate variants until the real receiver's code matches. That takes under a second, well inside the 60 s challenge lifetime. D-029's claim of "one chance in a million per attempt" did not hold.
+- Decision:
+  - `commit = SHA-256("crossdrop-commit-v2\n" + receiverFp + "\n" + senderFp + "\n" + senderNonce)`. The receiver recomputes it with its own fingerprint and the fingerprint of the certificate it receives, and refuses any other certificate with `auth_failed`. Including `receiverFp` costs nothing and also binds the commitment to the pinned receiver.
+  - The wire protocol becomes version 2 (`GET /v1/info` `versions`, TXT `v`, QR `v`, offer `protocol`); version 1 is not supported at all, because a receiver that still accepted v1 commitments would leave the attack open. URL paths stay under `/v1`.
+  - Not done: checking the certificate's self-signature. It would not help: an attacker can re-sign the same key as often as it likes.
+- Consequences: Each man-in-the-middle attempt is again one chance in a million, and failures show as codes that differ. Builds from before this change show the other phone as "needs update" and a QR code from them as "Update CrossDrop", instead of failing at authentication. D-029 stays in force for the code formula.

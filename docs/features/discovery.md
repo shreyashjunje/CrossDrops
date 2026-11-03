@@ -32,7 +32,7 @@ Phones on the same Wi-Fi find each other without typing anything. While Receive 
 Follows [ARCHITECTURE.md](../ARCHITECTURE.md) "Discovery advertisement", "Connection flow" and the Discovery and Local network permission rows of "Platform modules". Specific to this feature:
 
 - **Service instance name** is `CrossDrop-<first 8 characters of the device id>`. It carries no personal data and rarely clashes. The user's device name travels only in the TXT `n` key.
-- **TXT record:** `v=1`, `id=<UUID>`, `n=<name, at most 63 UTF-8 bytes>`, `p=ios|android`, `fp=<first 16 hex characters of the certificate SHA-256>`. Until Phase 4 the certificate is created at each launch, so `fp` changes at each launch (D-016). Keys are read case-insensitively. A record with a newer `v` needs only `v`, `id` and `n`, and is listed as "needs update".
+- **TXT record:** `v=2` (`v=1` before D-061), `id=<UUID>`, `n=<name, at most 63 UTF-8 bytes>`, `p=ios|android`, `fp=<first 16 hex characters of the certificate SHA-256>`. Until Phase 4 the certificate is created at each launch, so `fp` changes at each launch (D-016). Keys are read case-insensitively. A record with a newer `v` needs only `v`, `id` and `n`, and is listed as "needs update".
 - **Peer list** (`PeerList`, pure state machine): it keeps the latest record per device id and maps service names to ids, so a `lost` event removes the right device. If one device has several service names, it is removed only when the last name is lost. It ignores records with a bad TXT, our own id, a port outside 1–65535, or no IPv4 address in a local range. The local-range rule means a hostile advertisement cannot point us at the internet (CLAUDE.md rule 8). Each change is emitted as `PeerAdded`, `PeerUpdated` or `PeerRemoved`.
 - **Removal:** a device disappears on a `lost` event, when tapping it fails with a network or identity error, on pull to refresh, and when browsing stops. Android NSD sometimes reports `lost` late; device test P2-6 measures this.
 - **Tap to connect:** `checkPeer` calls `GET /v1/info` with a 5 s timeout. It confirms a common protocol version and that the device id matches the list entry, then opens Send with the IP and port filled in (still editable).
@@ -66,7 +66,7 @@ Follows [ARCHITECTURE.md](../ARCHITECTURE.md) "Discovery advertisement", "Connec
 
 ## Protocol and API
 
-- `GET /v1/info` returns 200 `{"id": "<uuid>", "name": "...", "platform": "ios|android", "versions": [1]}`.
+- `GET /v1/info` returns 200 `{"id": "<uuid>", "name": "...", "platform": "ios|android", "versions": [2]}`.
 - Platform channel `crossdrop/local_network`:
   - `probe({timeoutMs})` returns `"granted" | "denied" | "unknown"`.
   - `openSettings()` opens the app's page in Settings.

@@ -37,7 +37,7 @@ MdnsServiceResolved _peer(String service, String id, String name) =>
       hostAddresses: const ['192.168.1.10'],
       port: 4000,
       attributes: {
-        'v': '1',
+        'v': '2',
         'id': id,
         'n': name,
         'p': 'ios',

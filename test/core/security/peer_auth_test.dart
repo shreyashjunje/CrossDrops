@@ -39,10 +39,34 @@ void main() {
       expect(isValidNonce('${ns.substring(1)}+'), isFalse);
     });
 
-    test('commitNonce is fixed for a nonce, different between nonces', () {
-      expect(commitNonce(ns), commitNonce(ns));
-      expect(commitNonce(ns), isNot(commitNonce(nr)));
-      expect(commitNonce(ns), matches(RegExp(r'^[0-9a-f]{64}$')));
+    String commit({String r = _fpR, String s = _fpS, String? nonce}) =>
+        authCommitment(
+          receiverFingerprint: r,
+          senderFingerprint: s,
+          senderNonce: nonce ?? ns,
+        );
+
+    test('authCommitment is fixed for its inputs, hex SHA-256', () {
+      expect(commit(), commit());
+      expect(commit(), matches(RegExp(r'^[0-9a-f]{64}$')));
+    });
+
+    test('authCommitment binds the nonce and both fingerprints', () {
+      // The sender's certificate is fixed before the receiver's nonce is
+      // known, so a man in the middle cannot pick it later (D-061).
+      expect(commit(nonce: nr), isNot(commit()));
+      expect(commit(s: _fpX), isNot(commit()));
+      expect(commit(r: _fpX), isNot(commit()));
+      expect(commit(r: _fpS, s: _fpR), isNot(commit()));
+    });
+
+    test('authCommitment known answer, so both platforms stay in step', () {
+      // Python: sha256(b"crossdrop-commit-v2\n" + fpR + b"\n" + fpS + b"\n"
+      // + b"A" * 43).hexdigest()
+      expect(
+        commit(nonce: 'A' * 43),
+        'de5904bc6044ae3d85814eed798433c6f213a4389e4c667d97616c69327b0aac',
+      );
     });
   });
 
@@ -149,7 +173,11 @@ void main() {
 
   group('auth messages', () {
     test('AuthChallengeRequest checks the commitment shape', () {
-      final c = commitNonce(ns);
+      final c = authCommitment(
+        receiverFingerprint: _fpR,
+        senderFingerprint: _fpS,
+        senderNonce: ns,
+      );
       expect(AuthChallengeRequest.fromJson({'commit': c}).commit, c);
       expect(
         () => AuthChallengeRequest.fromJson({'commit': 'xyz'}),

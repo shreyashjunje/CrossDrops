@@ -202,7 +202,13 @@ class UploadClient {
       await _requestJson(
         'POST',
         '/v1/auth/challenge',
-        body: AuthChallengeRequest(commit: commitNonce(senderNonce)).toJson(),
+        body: AuthChallengeRequest(
+          commit: authCommitment(
+            receiverFingerprint: fingerprint,
+            senderFingerprint: credentials.fingerprint,
+            senderNonce: senderNonce,
+          ),
+        ).toJson(),
         auth: false,
       ),
     );

@@ -124,7 +124,7 @@ bool isValidSsid(String ssid) {
 }
 
 /// The QR code payload (ARCHITECTURE.md, "QR code payload"):
-/// `crossdrop://connect?v=1&ip=...&port=...&fp=...&id=...&n=...`, plus
+/// `crossdrop://connect?v=2&ip=...&port=...&fp=...&id=...&n=...`, plus
 /// `ws`, `wp` and `wsec` in hotspot mode.
 class ConnectPayload {
   const ConnectPayload({

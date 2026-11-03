@@ -12,7 +12,7 @@ MdnsServiceResolved resolved(String id, int port) => MdnsServiceResolved(
   hostAddresses: const ['192.168.1.23'],
   port: port,
   attributes: {
-    'v': '1',
+    'v': '2',
     'id': id,
     'n': 'Pixel',
     'p': 'android',

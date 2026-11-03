@@ -4,6 +4,9 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 
 ## 2026-11-03
 
+### Fixed (code review 2026-11-03)
+- **Security (H1):** the sender's auth commitment now covers both fingerprints as well as its nonce, so a man in the middle can no longer choose a certificate that makes both pairing codes match. Protocol version 2; version 1 is refused (D-061).
+
 ### Added (Phase 7)
 - Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.
 - iPhone joins that network ([features/iphone-join-hotspot.md](features/iphone-join-hotspot.md)): in-app with NEHotspotConfiguration when the build has the Hotspot Configuration capability (paid Apple account), otherwise guided through Settings with Copy password; handles Cancel, an iPhone already on the network, and removes the network afterwards (D-055).

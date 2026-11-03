@@ -268,7 +268,13 @@ Future<String> authenticateRaw(
     final challenge = AuthChallenge.fromJson(
       await post(
         '/v1/auth/challenge',
-        AuthChallengeRequest(commit: commitNonce(senderNonce)).toJson(),
+        AuthChallengeRequest(
+          commit: authCommitment(
+            receiverFingerprint: receiverFingerprint,
+            senderFingerprint: sender.fingerprint,
+            senderNonce: senderNonce,
+          ),
+        ).toJson(),
       ),
     );
     final input = authSigningInput(

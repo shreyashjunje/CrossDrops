@@ -10,7 +10,7 @@ Map<String, String> _txt(
   String id, {
   String name = 'Phone',
   String platform = 'android',
-  String v = '1',
+  String v = '2',
 }) => {'v': v, 'id': id, 'n': name, 'p': platform, 'fp': '0123456789abcdef'};
 
 void main() {
@@ -25,7 +25,7 @@ void main() {
     int port = 4000,
     String name = 'Phone',
     String platform = 'android',
-    String v = '1',
+    String v = '2',
   }) => list.resolved(
     service,
     hostAddresses: hosts,
@@ -121,7 +121,7 @@ void main() {
           'svc',
           hostAddresses: ['192.168.1.10'],
           port: 4000,
-          attributes: {'v': '1', 'id': 'nope'},
+          attributes: {'v': '2', 'id': 'nope'},
         ),
         isEmpty,
       );
@@ -166,7 +166,7 @@ void main() {
       'svc',
       hostAddresses: ['192.168.1.10'],
       port: 4000,
-      attributes: {'v': '2', 'id': _a, 'n': 'Future'},
+      attributes: {'v': '3', 'id': _a, 'n': 'Future'},
     );
     final peer = (changes.single as PeerAdded).peer;
     expect(peer.isSupported, isFalse);

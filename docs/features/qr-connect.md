@@ -12,7 +12,7 @@ Some Wi-Fi networks block Bonjour, or discovery fails for another reason. For th
 
 **In scope**
 
-- QR code on the Receive screen: `crossdrop://connect?v=1&ip=...&port=...&fp=...&id=...&n=...` ([ARCHITECTURE.md](../ARCHITECTURE.md), "QR code payload").
+- QR code on the Receive screen: `crossdrop://connect?v=2&ip=...&port=...&fp=...&id=...&n=...` ([ARCHITECTURE.md](../ARCHITECTURE.md), "QR code payload").
 - QR scanner with camera permission handling on both platforms.
 - Strict payload parsing that refuses malformed and hostile codes.
 - Manual IP and port entry.

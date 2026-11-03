@@ -15,7 +15,7 @@ MdnsServiceResolved _resolved(String service, String id) => MdnsServiceResolved(
   hostAddresses: const ['192.168.1.10'],
   port: 4000,
   attributes: {
-    'v': '1',
+    'v': '2',
     'id': id,
     'n': 'Phone',
     'p': 'ios',

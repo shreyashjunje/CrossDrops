@@ -31,7 +31,13 @@ void main() {
   }) {
     final w = who ?? sender;
     final senderNonce = newNonce();
-    final nonce = auth.challenge(commitNonce(senderNonce));
+    final nonce = auth.challenge(
+      authCommitment(
+        receiverFingerprint: receiverFp ?? receiver.fingerprint,
+        senderFingerprint: w.fingerprint,
+        senderNonce: senderNonce,
+      ),
+    );
     final sig = w.sign(
       authSigningInput(
         receiverFingerprint: receiverFp ?? receiver.fingerprint,
@@ -101,10 +107,68 @@ void main() {
       expect(() => auth.authenticate(swapped), fails('commitment mismatch'));
     });
 
-    test('a proof for another receiver is refused', () async {
+    test('a certificate other than the committed one is refused', () async {
+      // Review H1: a man in the middle learns both nonces, then tries
+      // certificates until the receiver's code matches the sender's. The
+      // commitment fixed the certificate before the receiver's nonce, so
+      // any other one fails, even with a valid signature from its key.
+      final auth = newAuth();
+      final attacker = await DeviceCredentials.generate();
+      final senderNonce = newNonce();
+      final nonce = auth.challenge(
+        authCommitment(
+          receiverFingerprint: receiver.fingerprint,
+          senderFingerprint: sender.fingerprint,
+          senderNonce: senderNonce,
+        ),
+      );
+      final forged = AuthRequest(
+        certificate: attacker.certificateDer,
+        nonce: nonce,
+        senderNonce: senderNonce,
+        signature: attacker.sign(
+          authSigningInput(
+            receiverFingerprint: receiver.fingerprint,
+            senderFingerprint: attacker.fingerprint,
+            receiverNonce: nonce,
+            senderNonce: senderNonce,
+          ),
+        ),
+      );
+      expect(() => auth.authenticate(forged), fails('commitment mismatch'));
+    });
+
+    test('a commitment made for another receiver is refused', () async {
       final auth = newAuth();
       final other = await DeviceCredentials.generate();
       final (req, _) = prove(auth, receiverFp: other.fingerprint);
+      expect(() => auth.authenticate(req), fails('commitment mismatch'));
+    });
+
+    test('a signature made for another receiver is refused', () async {
+      final auth = newAuth();
+      final other = await DeviceCredentials.generate();
+      final senderNonce = newNonce();
+      final nonce = auth.challenge(
+        authCommitment(
+          receiverFingerprint: receiver.fingerprint,
+          senderFingerprint: sender.fingerprint,
+          senderNonce: senderNonce,
+        ),
+      );
+      final req = AuthRequest(
+        certificate: sender.certificateDer,
+        nonce: nonce,
+        senderNonce: senderNonce,
+        signature: sender.sign(
+          authSigningInput(
+            receiverFingerprint: other.fingerprint,
+            senderFingerprint: sender.fingerprint,
+            receiverNonce: nonce,
+            senderNonce: senderNonce,
+          ),
+        ),
+      );
       expect(() => auth.authenticate(req), fails('bad signature'));
     });
 

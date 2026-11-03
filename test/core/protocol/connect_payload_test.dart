@@ -5,7 +5,7 @@ const _id = '3f2a9c1b-0d4e-4f5a-8b6c-7d8e9f0a1b2c';
 const _fp = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
 String _query({
-  String v = '1',
+  String v = '2',
   String ip = '192.168.1.23',
   String port = '53317',
   String fp = _fp,
@@ -34,7 +34,7 @@ void main() {
       name: "Shreyash's iPhone & café 📱",
     );
     final uri = original.toUri();
-    expect(uri, startsWith('crossdrop://connect?v=1&ip=172.20.10.1&port=8443'));
+    expect(uri, startsWith('crossdrop://connect?v=2&ip=172.20.10.1&port=8443'));
     final parsed = ConnectPayload.parse(uri);
     expect(parsed.ip, original.ip);
     expect(parsed.port, original.port);
@@ -107,14 +107,14 @@ void main() {
     rejects('port in authority', 'crossdrop://connect:80?${_query()}', not);
     rejects('extra path', 'crossdrop://connect/x?${_query()}', not);
     rejects('fragment', '${_uri()}#x', not);
-    rejects('space inside', 'crossdrop://connect?v=1 &${_query()}', not);
+    rejects('space inside', 'crossdrop://connect?v=2 &${_query()}', not);
     rejects('newline inside', 'crossdrop://connect?\n${_query()}', not);
     rejects('null byte inside', 'crossdrop://connect?\u0000${_query()}', not);
 
     // Version.
     rejects(
       'newer version',
-      _uri(_query(v: '2')),
+      _uri(_query(v: '3')),
       ConnectPayloadError.unsupportedVersion,
     );
     rejects('version zero', _uri(_query(v: '0')), bad);
@@ -125,10 +125,10 @@ void main() {
     rejects('bad percent encoding', _uri(_query(n: '%zz')), bad);
     rejects('truncated percent encoding', _uri(_query(n: 'a%2')), bad);
     rejects('invalid UTF-8', _uri(_query(n: '%E2%28')), bad);
-    rejects('missing ip', _uri('v=1&port=1&fp=$_fp&id=$_id&n=a'), bad);
-    rejects('missing n', _uri('v=1&ip=10.0.0.1&port=1&fp=$_fp&id=$_id'), bad);
+    rejects('missing ip', _uri('v=2&port=1&fp=$_fp&id=$_id&n=a'), bad);
+    rejects('missing n', _uri('v=2&ip=10.0.0.1&port=1&fp=$_fp&id=$_id'), bad);
     rejects('repeated ip', '${_uri()}&ip=192.168.1.99', bad);
-    rejects('repeated v', '${_uri()}&v=1', bad);
+    rejects('repeated v', '${_uri()}&v=2', bad);
 
     // IP: never a hostname, never outside the local network.
     for (final ip in [

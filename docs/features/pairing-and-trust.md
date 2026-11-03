@@ -58,7 +58,7 @@ Every later request carries the token. Requests for a session owned by another f
 
 ## Protocol and API
 
-- `POST /v1/auth/challenge` `{"commit"}` → `{"nonce"}`.
+- `POST /v1/auth/challenge` `{"commit"}` → `{"nonce"}`. The commitment covers the pinned receiver fingerprint, the sender's own fingerprint and its nonce (`crossdrop-commit-v2`, D-061).
 - `POST /v1/auth` `{"certificate", "nonce", "senderNonce", "signature"}` → `{"token", "expiresIn"}`; 401 `auth_failed`.
 - `Authorization: Bearer <token>` on every `/v1/sessions…` request, including the WebSocket upgrade; 401 `auth_required` without it.
 - `POST /v1/sessions` reply adds `trusted`.
@@ -72,11 +72,12 @@ Every later request carries the token. Requests for a session owned by another f
   - Code derivation is the same on both sides, and differs for another peer, swapped roles or fresh nonces.
   - Known answer (cross-checked in Python) and spread across the range.
   - The signing input binds every field; message shape checks.
+  - The commitment binds the nonce and both fingerprints, with a known answer (D-061).
 - `pinning_test.dart`: right pin connects. A wrong certificate fails in the handshake and the server sees no request. The chain-substitution attack is refused. A malformed pin is refused. The probe sends nothing.
 - `sender_auth_test.dart`:
   - An honest proof gives a token.
   - A challenge is single-use, even after a failure.
-  - A commitment mismatch, a proof for another receiver, our own certificate and garbage certificates are refused.
+  - A commitment mismatch, a certificate other than the committed one (the review H1 man-in-the-middle), a commitment or signature made for another receiver, our own certificate and garbage certificates are refused.
   - Challenges and tokens expire, and memory is capped.
 - `server_security_test.dart`:
   - Sessions need a token. Another key's signature and a relayed proof are refused.

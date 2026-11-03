@@ -13,7 +13,7 @@ final RegExp _hex64 = RegExp(r'^[0-9a-f]{64}$');
 class AuthChallengeRequest {
   const AuthChallengeRequest({required this.commit});
 
-  /// [commitNonce] of the sender's nonce.
+  /// [authCommitment] of both fingerprints and the sender's nonce.
   final String commit;
 
   Map<String, Object?> toJson() => {'commit': commit};

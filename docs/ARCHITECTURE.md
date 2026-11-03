@@ -126,7 +126,7 @@ sequenceDiagram
 
 Solid arrows are sender requests; dashed arrows are receiver replies and events. After an interruption, the sender asks how much arrived and continues from that byte, so nothing is sent twice.
 
-## Protocol spec (v1)
+## Protocol spec (v2, paths under `/v1`)
 
 The protocol is plain HTTPS with JSON for control and streamed request bodies for file data, plus one WebSocket per session for live events. All endpoints are on the receiver.
 
@@ -134,14 +134,14 @@ The protocol is plain HTTPS with JSON for control and streamed request bodies fo
 
 - Service type: `_crossdrop._tcp`, port = the receiver's random listening port.
 - Instance name: `CrossDrop-<first 8 characters of the device UUID>`. It carries no personal data and rarely clashes; the device name is only in TXT `n`.
-- TXT record: `v=1` (protocol version), `id=<device UUID>`, `n=<device name, at most 63 UTF-8 bytes>`, `p=ios|android`, `fp=<first 16 hex chars of certificate SHA-256>`. Keys are case-insensitive. A record with a newer `v` needs only `v`, `id` and `n` and is listed as "needs update".
+- TXT record: `v=2` (protocol version; a phone with `v=1` is listed as "needs update", D-061), `id=<device UUID>`, `n=<device name, at most 63 UTF-8 bytes>`, `p=ios|android`, `fp=<first 16 hex chars of certificate SHA-256>`. Keys are case-insensitive. A record with a newer `v` needs only `v`, `id` and `n` and is listed as "needs update".
 - The TXT fingerprint is a hint only. The full fingerprint is checked in the TLS handshake.
 - Browsers ignore records with a bad TXT, their own id, or no IPv4 address in a local range (10/8, 172.16/12, 192.168/16, 169.254/16, 100.64/10), so an advertisement can never point the app outside the local network.
 - A phone advertises while CrossDrop is open and Receiving is on, on any screen (D-046; until Phase 5 only on the Receive screen, D-016). It stops 30 s after the app is hidden with nothing in flight. It re-advertises when the Wi-Fi or IP changes, when the app returns to the foreground and when the device is renamed.
 
 **QR code payload**
 
-`crossdrop://connect?v=1&ip=192.168.1.23&port=53317&fp=<full SHA-256 fingerprint>&id=<device UUID>&n=<name>`
+`crossdrop://connect?v=2&ip=192.168.1.23&port=53317&fp=<full SHA-256 fingerprint>&id=<device UUID>&n=<name>`
 
 In offline hotspot mode the Android QR also carries the Wi-Fi network, so one scan joins the network and connects:
 
@@ -164,7 +164,7 @@ Payloads over 1024 characters, or with control characters or stray `%` escapes, 
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/v1/info` | `{"id", "name", "platform", "versions": [1]}`. The sender calls it before every connect to check the protocol version and, from the list or a QR code, the device id. No token needed |
+| GET | `/v1/info` | `{"id", "name", "platform", "versions": [2]}`. The sender calls it before every connect to check the protocol version and, from the list or a QR code, the device id. No token needed |
 | POST | `/v1/auth/challenge` | `{"commit"}` → `{"nonce"}`. Step 1 of sender authentication (see Security model). 429 `rate_limited` |
 | POST | `/v1/auth` | `{"certificate", "nonce", "senderNonce", "signature"}` (certificate and signature base64 DER) → `{"token", "expiresIn"}`. 401 `auth_failed`, 429 `rate_limited` |
 | POST | `/v1/sessions` | Sender offers a session with a file manifest; returns `sessionId`, status `offered` (D-018) and `trusted` (the receiver trusts this sender, so it shows no code). Refusals: 400 `unsupported_version` (with `versions`), 403 `receiving_off`, 409 `sender_busy`, 413 `body_too_large`, 429 `rate_limited`, 503 `busy` (8 sessions open), 507 `no_space` (with `neededBytes`) |
@@ -200,7 +200,7 @@ The events are a convenience. Every fact they carry is also in the HTTP replies,
 
 ```json
 {
-  "protocol": 1,
+  "protocol": 2,
   "sender": {"id": "uuid", "name": "Shreyash's iPhone", "platform": "ios"},
   "files": [
     {"fileId": "f1", "name": "IMG_4021.MOV", "size": 1288490188, "mime": "video/quicktime",
@@ -286,9 +286,9 @@ What `dart:io` can and cannot do was tested on Dart 3.13 before building (D-027)
 
 Sender authentication, inside the pinned TLS connection:
 
-1. The sender picks a random 32-byte `senderNonce` and sends `commit = SHA-256("crossdrop-commit-v1\n" + senderNonce)` to `POST /v1/auth/challenge`. The receiver answers with a random `nonce` (single use, 60 s).
+1. The sender picks a random 32-byte `senderNonce` and sends `commit = SHA-256("crossdrop-commit-v2\n" + receiverFp + "\n" + senderFp + "\n" + senderNonce)` to `POST /v1/auth/challenge`, where `receiverFp` is the pinned fingerprint and `senderFp` its own. The receiver answers with a random `nonce` (single use, 60 s).
 2. The sender sends its certificate, `senderNonce`, and an ECDSA P-256 / SHA-256 signature over `"crossdrop-auth-v1\n" + receiverFp + "\n" + senderFp + "\n" + nonce + "\n" + senderNonce` to `POST /v1/auth`.
-3. The receiver checks the commitment, that the certificate holds a P-256 key, and the signature, using its **own** fingerprint as `receiverFp`. It returns a 32-byte bearer token (memory only; expires after 1 hour unused; lost when the server restarts).
+3. The receiver checks that the certificate holds a P-256 key, recomputes the commitment from its **own** fingerprint, the certificate's fingerprint and `senderNonce`, and checks the signature with its own fingerprint as `receiverFp`. A certificate other than the committed one fails (D-061). It returns a 32-byte bearer token (memory only; expires after 1 hour unused; lost when the server restarts).
 4. Every `/v1/sessions` request carries `Authorization: Bearer <token>`. A session belongs to the fingerprint that offered it; for anyone else it does not exist (404).
 
 Because the signature covers the receiver's fingerprint, a proof made for one receiver is useless at another, so a malicious receiver cannot relay it. The token only travels inside the pinned TLS connection. Nothing ever falls back to an unpinned connection once a fingerprint is known (hard rule 4).
@@ -311,7 +311,7 @@ code = SHA-256("crossdrop-code-v1\n" + senderFp + "\n" + receiverFp + "\n"
        first 6 bytes as a big-endian integer, mod 1,000,000, zero-padded
 ```
 
-The nonces are the ones from sender authentication. A code made from the two fingerprints alone could be forced by a man in the middle: it would generate keys until both of its connections showed the same code (about a million tries, minutes of work). Here the sender commits to its nonce before it sees the receiver's, so each attempt has one chance in a million (D-029). A new code is made for every authentication; the offer shows the code of the authentication that made it. Known answer for tests: senderFp `aa00…00`, receiverFp `bb00…00`, nonces `A`×43 and `B`×43 give `828838`.
+The nonces are the ones from sender authentication. A code made from the two fingerprints alone could be forced by a man in the middle: it would generate keys until both of its connections showed the same code (about a million tries, minutes of work). Here every sender commits to its certificate and its nonce before it sees the receiver's nonce, so each attempt has one chance in a million (D-029, D-061). Committing to the nonce alone is not enough: an attacker would learn both nonces first and then vary its certificate (any changed byte gives a new fingerprint) until the codes matched, in under a second. A new code is made for every authentication; the offer shows the code of the authentication that made it. Known answer for tests: senderFp `aa00…00`, receiverFp `bb00…00`, nonces `A`×43 and `B`×43 give `828838`.
 
 **Trust**
 
@@ -342,7 +342,7 @@ After a successful pairing the receiver can tick "Trust this device" in the Acce
 | Corrupted or tampered file | SHA-256 verified before saving |
 | Server left open in public | Server runs only while the app is open and the switch is on, stops when hidden and idle; new random port each start |
 | Identity copied to another phone | Key in this-device-only Keychain or Keystore storage; Android backup and device transfer off |
-| Old protocol version with a known bug | Minimum supported version in the app; reject below it |
+| Old protocol version with a known bug | Minimum supported version in the app; reject below it. Version 1 is refused because its pairing code could be steered (D-061) |
 
 **Privacy:** no accounts, no analytics on file names or contents, nothing leaves the local network. Logs carry at most the first 8 characters of a fingerprint.
 
