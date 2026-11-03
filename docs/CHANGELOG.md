@@ -15,6 +15,7 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 - **Pause (M4):** a pause asked between two uploads, while connecting or while authenticating, was dropped and the whole file was sent; on iPhone the background task always waited its full 10 s and could be suspended mid-upload. The pause is now kept until an upload sees it, and backgrounding waits only until the upload has stopped.
 - **Cancel (M5):** cancelling while connecting showed "network" failure; cancelling while the offer was on its way could leave the offer on the receiver. Both now end as cancelled, and an offer that arrived is withdrawn.
 - **Saving (L1):** two files with the same name saved at the same moment could end up at one path, the second replacing the first. The save now claims its name by creating the file exclusively first.
+- **Complete (L2):** `/complete` checks the session and file again after reading its body, so two completes of an empty file no longer save it twice and a cancel during the body read no longer leaves a part and folder behind.
 
 ### Added (Phase 7)
 - Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.

@@ -619,6 +619,62 @@ void main() {
     });
   });
 
+  group('complete after its body arrives (review L2)', () {
+    /// Sends a complete's headers now; the returned function sends its
+    /// body and returns the reply's status line.
+    Future<Future<String> Function()> startComplete(String sid) async {
+      final body = utf8.encode(jsonEncode({'sha256': shaOf(const [])}));
+      final socket = await SecureSocket.connect(
+        '127.0.0.1',
+        r.port,
+        onBadCertificate: (_) => true,
+      );
+      addTearDown(socket.destroy);
+      socket.write(
+        'POST /v1/sessions/$sid/files/f1/complete HTTP/1.1\r\n'
+        'host: x\r\n${await authLine()}'
+        'content-type: application/json\r\n'
+        'content-length: ${body.length}\r\n\r\n',
+      );
+      await socket.flush();
+      return () async {
+        final reply = utf8.decoder.bind(socket).first;
+        socket.add(body);
+        await socket.flush();
+        return (await reply).split('\r\n').first;
+      };
+    }
+
+    test('two completes of an empty file save it once', () async {
+      // A second file keeps the session open after the first save.
+      final sid = await createSession(
+        '',
+        0,
+        files: const [
+          FileOffer(fileId: 'f1', name: 'empty.txt', size: 0),
+          FileOffer(fileId: 'f2', name: 'later.bin', size: 1),
+        ],
+      );
+      final first = await startComplete(sid);
+      final second = await startComplete(sid);
+      // Both handlers now wait for their bodies.
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      expect(await first(), contains('200'));
+      expect(await second(), contains('409'), reason: 'already saved');
+      expect(r.saved, hasLength(1));
+    });
+
+    test('a cancel while the body is on its way leaves nothing', () async {
+      final sid = await createSession('empty.txt', 0);
+      final complete = await startComplete(sid);
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await send('DELETE', '/v1/sessions/$sid');
+      expect(await complete(), contains('410'));
+      expect(r.saved, isEmpty);
+      expect(Directory(p.join(r.tempDir, sid)).existsSync(), isFalse);
+    });
+  });
+
   group('hash mismatch', () {
     test('first mismatch restarts the file, second fails it', () async {
       final data = randomBytes(1000);

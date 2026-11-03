@@ -1453,6 +1453,12 @@ class ReceiveServer {
     } on FormatError catch (e) {
       return _error(400, ErrorCodes.badRequest, e.message);
     }
+    // Reading the body awaited: another complete may have saved the file,
+    // or a cancel discarded the session, meanwhile. Without these checks a
+    // 0-byte file was saved twice, or a cancelled session's folder was
+    // created again (review L2).
+    final after = _sessionGate(s) ?? _fileGate(f);
+    if (after != null) return after;
     if (f.busy) {
       return _error(409, ErrorCodes.busy, 'upload still in progress');
     }
