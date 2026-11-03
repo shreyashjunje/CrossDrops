@@ -3,6 +3,7 @@ import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
 import 'package:crossdrop/features/history/history_screen.dart';
+import 'package:crossdrop/features/transfer/transfer_format.dart';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';

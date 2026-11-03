@@ -8,6 +8,7 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../../core/media/format_plan.dart';
 import '../../core/protocol/models.dart';
+import '../transfer/transfer_format.dart';
 
 /// Picks photos and videos from the library (photo_manager). Returns the
 /// chosen items, or null if the user backed out. Only ids and names leave
@@ -304,10 +305,21 @@ class _Tile extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final video = asset.type == AssetType.video;
+    final created = asset.createDateTime;
+    // "Video, 0:42, Live, 3 Nov 2026, selected 2".
+    final label = [
+      video ? 'Video, ${_duration(asset.duration)}' : 'Photo',
+      if (asset.isLivePhoto) 'Live',
+      if (created.year > 1970) formatDay(created, DateTime.now()),
+      if (order != null) 'selected $order',
+    ].join(', ');
     return Semantics(
       selected: order != null,
-      label: video ? 'Video' : 'Photo',
+      label: label,
       button: true,
+      // The children's semantics are replaced, so the tap is declared here.
+      onTap: onTap,
+      excludeSemantics: true,
       child: GestureDetector(
         onTap: onTap,
         child: Stack(

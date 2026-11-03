@@ -66,3 +66,23 @@ String describeSaveLocations(DevicePlatform platform) => switch (platform) {
     'Photos go to Pictures/CrossDrop and videos to Movies/CrossDrop, so '
         'your gallery shows them. Other files go to Download/CrossDrop.',
 };
+
+const _months = [
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/// "Today", "Yesterday", "3 Nov 2026".
+String formatDay(DateTime t, DateTime now) {
+  final day = DateTime(t.year, t.month, t.day);
+  final today = DateTime(now.year, now.month, now.day);
+  final diff = today.difference(day).inDays;
+  if (diff == 0) return 'Today';
+  if (diff == 1) return 'Yesterday';
+  return '${t.day} ${_months[t.month - 1]} ${t.year}';
+}
+
+/// 24-hour "09:05".
+String formatTime(DateTime t) =>
+    '${t.hour.toString().padLeft(2, '0')}:'
+    '${t.minute.toString().padLeft(2, '0')}';
