@@ -33,7 +33,7 @@ ARCHITECTURE.md, Platform modules, "Screen lock during transfer" and "Battery an
   - **`progress`** updates the notification at most once per second.
   - **On iOS, `appBackgrounded`** (the app is hidden: lock, Home, app switcher) begins a background task and calls `onBackground()` on every transfer, then ends the task. The budget is 20 s; iOS gives about 30 s. If iOS asks for the time back early, the task ends at once. **`appResumed`** calls `onForeground()`.
 - **What each side does on iOS backgrounding:**
-  - **Sender:** stops after the current chunk (`UploadClient.requestPause`). The receiver saves what arrived and the session waits `paused`. On return it asks the receiver where to continue and goes on.
+  - **Sender:** stops after the current chunk (`UploadClient.requestPause`). The receiver saves what arrived and the session waits `paused`. On return it asks the receiver where to continue and goes on. `SendSession.pause()` completes once no upload runs, and the background task waits for that (at most 10 s). A pause asked between uploads, while connecting or while authenticating, is kept: the session checks it before each PUT and the client before it sends a byte (review M4).
   - **Receiver:** `checkpointAll()` fsyncs and stores progress of every running upload. Uploads keep running until iOS suspends the app, then the sender sees a drop and retries; time in the background does not use up its retry deadline.
 - **Android:** nothing pauses. The service keeps the process in the foreground state while the transfer runs in the app's own isolate. The service has no periodic task.
 - **A paused received session** (`SessionKeepAlive`, `lib/features/receive/session_keep_alive.dart`, D-062): it keeps the screen on, the service up and the server running for 150 s, the sender's retry deadline plus a margin, then lets go. Before review M3 a paused session held them forever, so an iPhone receiver whose sender went to the background or gave up kept its screen on and "Receiving from X" up, and never reached the hidden-and-idle server stop. A session restored as paused after a restart is not held.
@@ -62,7 +62,7 @@ None on the wire. Platform channel `crossdrop/background` (iOS): `begin`, `end`;
 - `test/app/keep_alive_test.dart`:
   - Android: service lifetime across several transfers, permission asked once and denial not fatal, notification updates, no pausing in the background.
   - iOS: screen only, background task around saving, resume on return, a slow transfer cannot hold the task past the budget, early expiry ends the task once, screen holders.
-- `test/core/engine/send_session_test.dart`: pause stops after the current chunk (no bytes flow while paused) and resume finishes the file.
+- `test/core/engine/send_session_test.dart`: pause stops after the current chunk (no bytes flow while paused) and resume finishes the file. A pause while the file status is fetched is not lost; `pause()` completes once the upload stopped, and at once while waiting for Accept; the client keeps a pause asked before the PUT.
 
 **Device checks**
 

@@ -428,7 +428,7 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     if (s == null) return;
     final phase = s.snapshot.phase;
     if (phase != SendPhase.sending && phase != SendPhase.retrying) return;
-    s.pause();
+    unawaited(s.pause());
     state = state.copyWith(pausedByUser: true);
   }
 
@@ -444,11 +444,10 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     if (s == null || s.snapshot.phase.isFinished || state.pausedByUser) {
       return;
     }
-    s.pause();
-    // Wait until the current chunk is out and the upload stopped.
-    await s.updates
-        .firstWhere((u) => u.phase == SendPhase.paused || u.phase.isFinished)
-        .timeout(const Duration(seconds: 10), onTimeout: () => s.snapshot);
+    // Completes once the current chunk is out and no upload runs. Waiting
+    // for a `paused` update instead missed the one pause() sends at once,
+    // and always took the full 10 s (review M4).
+    await s.pause().timeout(const Duration(seconds: 10), onTimeout: () {});
   }
 
   @override

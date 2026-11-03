@@ -510,6 +510,87 @@ void main() {
     await expectSavedMatches({'v.mp4': sha});
   }, timeout: const Timeout(Duration(minutes: 1)));
 
+  group('pause between uploads (review M4)', () {
+    test('a pause while the file status is fetched is not lost', () async {
+      final (item, sha) = await makeFile('v.mp4', 8 * mb);
+      late SendSession s;
+      var pausedOnce = false;
+      s = session(
+        [item],
+        clientFactory: (h, port) => _HookedClient(
+          host: h,
+          port: port,
+          fingerprint: identity.fingerprint,
+          credentials: me,
+          onFileStatus: () {
+            if (pausedOnce) return;
+            pausedOnce = true;
+            unawaited(s.pause());
+          },
+        ),
+      );
+      final run = s.run();
+      await waitFor(() => pausedOnce && s.snapshot.phase == SendPhase.paused);
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      final file = r.server.sessions.single.files.single;
+      expect(file.receivedBytes, 0, reason: 'nothing sent while paused');
+      expect(s.snapshot.phase, SendPhase.paused);
+      s.resume();
+      final result = await run;
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      await expectSavedMatches({'v.mp4': sha});
+    }, timeout: const Timeout(Duration(minutes: 1)));
+
+    test('pause() completes once the running upload stopped', () async {
+      final (item, sha) = await makeFile('v.mp4', 24 * mb);
+      proxy.latency = const Duration(milliseconds: 2);
+      final s = session([item]);
+      final run = s.run();
+      await waitFor(() => s.snapshot.sentBytes > 3 * mb);
+      // Used to wait for an update that pause() had already sent, so the
+      // iOS background task always took its full 10 s.
+      await s.pause().timeout(const Duration(seconds: 5));
+      expect(s.snapshot.phase, SendPhase.paused);
+      // Bytes already in the socket buffers and the proxy still drain.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      final heldAt = proxy.upBytes;
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+      expect(proxy.upBytes - heldAt, lessThan(64 * 1024), reason: 'no bytes');
+      s.resume();
+      expect((await run).phase, SendPhase.done);
+      await expectSavedMatches({'v.mp4': sha});
+    }, timeout: const Timeout(Duration(minutes: 1)));
+
+    test('pause() while waiting for Accept completes at once', () async {
+      final (item, _) = await makeFile('a.bin', 10);
+      final answer = Completer<bool>();
+      r.decider = (_) => answer.future;
+      final s = session([item]);
+      final run = s.run();
+      await waitFor(() => s.snapshot.phase == SendPhase.waitingForAccept);
+      await s.pause().timeout(const Duration(milliseconds: 200));
+      s.resume();
+      answer.complete(true);
+      expect((await run).phase, SendPhase.done);
+    });
+
+    test('UploadClient keeps a pause asked before the PUT', () async {
+      final (item, _) = await makeFile('a.bin', 2 * mb);
+      final c = clientFor(r, me);
+      addTearDown(c.close);
+      final t = await c.offerFile(item.path);
+      c.requestPause();
+      await expectLater(
+        c.put(t, 0),
+        throwsA(isA<UploadException>().having((e) => e.code, 'code', 'paused')),
+      );
+      expect(r.server.sessions.single.files.single.receivedBytes, 0);
+      // One request stops one upload; the next runs.
+      final status = await c.put(t, 0);
+      expect(status.receivedBytes, 2 * mb);
+    });
+  });
+
   test('progress, speed and time left are reported', () async {
     final (item, _) = await makeFile('v.mp4', 20 * mb);
     proxy.latency = const Duration(milliseconds: 1);
@@ -579,5 +660,29 @@ class _MappedOpener implements SourceOpener {
     openNow++;
     if (openNow > maxOpen) maxOpen = openNow;
     return OpenedSource(o.source, o.length, () async => openNow--);
+  }
+}
+
+/// Calls [onFileStatus] after each `GET .../files/{id}` reply, before the
+/// session goes on to the PUT.
+class _HookedClient extends UploadClient {
+  _HookedClient({
+    required super.host,
+    required super.port,
+    required super.fingerprint,
+    required super.credentials,
+    required this.onFileStatus,
+  }) : super(
+         connectTimeout: const Duration(seconds: 2),
+         stallTimeout: const Duration(seconds: 2),
+       );
+
+  final void Function() onFileStatus;
+
+  @override
+  Future<FileStatus> fileStatus(UploadTarget t) async {
+    final s = await super.fileStatus(t);
+    onFileStatus();
+    return s;
   }
 }

@@ -318,6 +318,9 @@ class SendSession {
   bool _resumedFromPause = false;
   bool _running = false;
 
+  /// Set while a PUT runs; completes when it stops.
+  Completer<void>? _uploading;
+
   Stream<SendSnapshot> get updates => _updates.stream;
 
   String? get sessionId => _sessionId;
@@ -414,12 +417,17 @@ class SendSession {
     }
   }
 
-  /// The app goes to the background: stop after the current chunk.
-  void pause() {
-    if (_phase.isFinished || _pauseGate != null) return;
-    _pauseGate = Completer<void>();
-    _client.requestPause();
-    _emit(SendPhase.paused, force: true);
+  /// The app goes to the background, or the user tapped Pause: stop after
+  /// the current chunk. Completes once no upload is running, so an iOS
+  /// background task knows when bytes have stopped (review M4).
+  Future<void> pause() {
+    if (_phase.isFinished) return Future<void>.value();
+    if (_pauseGate == null) {
+      _pauseGate = Completer<void>();
+      _client.requestPause();
+      _emit(SendPhase.paused, force: true);
+    }
+    return _uploading?.future ?? Future<void>.value();
   }
 
   /// Back in the foreground: continue where the receiver stopped.
@@ -428,6 +436,8 @@ class SendSession {
     if (gate == null) return;
     _pauseGate = null;
     _resumedFromPause = true;
+    // A pause no upload saw would stop the next one for nothing.
+    _client.clearPause();
     gate.complete();
   }
 
@@ -651,16 +661,27 @@ class SendSession {
         if (status.receivedBytes > f.confirmed) backoff.reset();
         await _confirm(f, status.receivedBytes);
         if (status.receivedBytes < f.item.size) {
+          // Paused during the requests above: wait before sending a byte.
+          if (_pauseGate != null) continue;
           f.status = FileTransferStatus.receiving;
           _emit(SendPhase.sending, force: true);
-          await _client.put(
-            target,
-            status.receivedBytes,
-            onProgress: (p) {
-              _tracker.set(f.fileId, p.sentBytes);
-              _emit(SendPhase.sending);
-            },
-          );
+          final uploading = _uploading = Completer<void>();
+          try {
+            await _client.put(
+              target,
+              status.receivedBytes,
+              onProgress: (p) {
+                _tracker.set(f.fileId, p.sentBytes);
+                // The last chunks before a pause takes effect stay paused.
+                _emit(
+                  _pauseGate == null ? SendPhase.sending : SendPhase.paused,
+                );
+              },
+            );
+          } finally {
+            _uploading = null;
+            uploading.complete();
+          }
           await _confirm(f, f.item.size);
         }
         f.status = FileTransferStatus.verifying;

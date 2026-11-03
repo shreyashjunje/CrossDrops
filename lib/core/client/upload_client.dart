@@ -432,6 +432,7 @@ class UploadClient {
 
     try {
       _checkCancelled();
+      _checkPaused();
       final HttpClientResponse res;
       try {
         kick();
@@ -440,6 +441,12 @@ class UploadClient {
           _http.openUrl('PUT', _url(_filePath(t), {'offset': '$offset'})),
         );
         _active = req;
+        if (_pauseRequested) {
+          // Asked while authenticating or connecting: send nothing.
+          _pauseRequested = false;
+          req.abort(_pausedError);
+          throw _pausedError;
+        }
         req.headers.set('authorization', 'Bearer $token');
         req.contentLength = t.size - offset;
         req.headers.contentType = ContentType.binary;
@@ -456,9 +463,8 @@ class UploadClient {
           if (_pauseRequested) {
             // The current chunk is out; the receiver keeps every byte.
             _pauseRequested = false;
-            const paused = UploadException('paused', 'paused by app');
-            req.abort(paused);
-            throw paused;
+            req.abort(_pausedError);
+            throw _pausedError;
           }
           sent += chunk.length;
           meter.add(sent);
@@ -508,9 +514,21 @@ class UploadClient {
   }
 
   /// Stops the running upload after its current chunk with code `paused`
-  /// (app going to the background). The next [put] runs normally.
-  void requestPause() {
-    if (_active != null) _pauseRequested = true;
+  /// (app going to the background). Asked while no upload runs (between
+  /// files, while connecting or authenticating), it is kept, and the next
+  /// [put] stops before sending a byte (review M4). Each request stops one
+  /// upload; [clearPause] drops one no upload has seen.
+  void requestPause() => _pauseRequested = true;
+
+  /// Forgets a pause request (the app came back before any upload saw it).
+  void clearPause() => _pauseRequested = false;
+
+  static const _pausedError = UploadException('paused', 'paused by app');
+
+  void _checkPaused() {
+    if (!_pauseRequested) return;
+    _pauseRequested = false;
+    throw _pausedError;
   }
 
   /// Aborts the running upload. Bytes already received stay on the
