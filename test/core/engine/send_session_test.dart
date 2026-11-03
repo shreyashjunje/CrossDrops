@@ -218,6 +218,52 @@ void main() {
       timeout: const Timeout(Duration(minutes: 2)),
     );
 
+    test(
+      'a given-up send that is discarded frees the receiver (review L5)',
+      () async {
+        final db = AppDatabase(NativeDatabase.memory());
+        addTearDown(db.close);
+        final repo = TransferRepository(db);
+        final (item, _) = await makeFile('v.mp4', 8 * mb);
+        final s = session(
+          [item],
+          port: r.port,
+          repo: repo,
+          giveUp: const Duration(milliseconds: 800),
+          // Every PUT fails at once: the session gives up, resumable.
+          clientFactory: (h, port) => _FailingPutClient(
+            host: h,
+            port: port,
+            fingerprint: identity.fingerprint,
+            credentials: me,
+          ),
+        );
+        final first = await s.run();
+        expect(first.canResume, isTrue, reason: first.reason);
+        final stored = (await repo.unfinished(TransferDirection.send)).single;
+
+        await discardStoredSend(
+          repo,
+          stored,
+          credentials: me,
+          clientFactory: quickClient,
+        );
+
+        expect(await repo.unfinished(TransferDirection.send), isEmpty);
+        final after = await repo.find(stored.sessionId, TransferDirection.send);
+        expect(after!.status, SessionStatus.cancelled);
+        expect(after.reason, SendReasons.discarded);
+        expect(r.server.sessions.single.status, SessionStatus.cancelled);
+        // The next send to the same receiver is not refused as busy.
+        final (small, _) = await makeFile('s.bin', 10);
+        expect(
+          (await session([small], port: r.port).run()).phase,
+          SendPhase.done,
+        );
+      },
+      timeout: const Timeout(Duration(minutes: 1)),
+    );
+
     test('follows the receiver to a new port after its app restarts', () async {
       final (item, sha) = await makeFile('v.mp4', 16 * mb);
       final s = session(
@@ -727,4 +773,25 @@ class _HookedClient extends UploadClient {
     onFileStatus();
     return s;
   }
+}
+
+/// Every PUT fails as a dropped connection, so the session retries and
+/// gives up as `network` (resumable).
+class _FailingPutClient extends UploadClient {
+  _FailingPutClient({
+    required super.host,
+    required super.port,
+    required super.fingerprint,
+    required super.credentials,
+  }) : super(
+         connectTimeout: const Duration(seconds: 2),
+         stallTimeout: const Duration(seconds: 2),
+       );
+
+  @override
+  Future<FileStatus> put(
+    UploadTarget t,
+    int offset, {
+    void Function(TransferProgress)? onProgress,
+  }) async => throw const UploadException('network', 'dropped');
 }

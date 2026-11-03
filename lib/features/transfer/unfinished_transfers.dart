@@ -8,7 +8,7 @@ import 'package:path/path.dart' as p;
 import '../../app/app_dirs.dart';
 import '../../app/media_providers.dart';
 import '../../app/providers.dart';
-import '../../core/client/upload_client.dart';
+import '../../core/engine/send_session.dart';
 import '../../core/log.dart';
 import '../../core/media/prepare.dart';
 import '../../core/protocol/models.dart';
@@ -67,47 +67,35 @@ Future<void> discardOrCancel(WidgetRef ref, StoredSession s) async {
 }
 
 /// Gives up an unfinished transfer: marks it cancelled, deletes partial
-/// files (receive) or tells the receiver (send, best effort).
+/// files (receive) or tells the receiver (send, best effort,
+/// [discardStoredSend]).
 Future<void> discardTransfer(WidgetRef ref, StoredSession s) async {
   final repo = ref.read(transferRepositoryProvider);
+  if (s.direction == TransferDirection.send) {
+    return discardStoredSend(
+      repo,
+      s,
+      credentials: await ref.read(credentialsProvider.future),
+    );
+  }
   await repo.updateSession(
     s.rowId,
     status: SessionStatus.cancelled,
-    reason: 'discarded',
+    reason: SendReasons.discarded,
   );
-  if (s.direction == TransferDirection.receive) {
-    final dirs = await AppDirs.resolve();
-    final store = await ref.read(receivedFileStoreProvider.future);
-    for (final f in s.files) {
-      final loc = f.tempPath;
-      if (loc != null && f.status != FileTransferStatus.saved) {
-        await store.delete(loc);
-      }
+  final dirs = await AppDirs.resolve();
+  final store = await ref.read(receivedFileStoreProvider.future);
+  for (final f in s.files) {
+    final loc = f.tempPath;
+    if (loc != null && f.status != FileTransferStatus.saved) {
+      await store.delete(loc);
     }
-    try {
-      await Directory(p.join(dirs.incomingTemp, s.sessionId))
-          .delete(recursive: true);
-    } on FileSystemException {
-      // Already gone.
-    }
-  } else if (s.peerHost != null &&
-      s.peerPort != null &&
-      s.peerFingerprint != null) {
-    final client = UploadClient(
-      host: s.peerHost!,
-      port: s.peerPort!,
-      fingerprint: s.peerFingerprint!,
-      credentials: await ref.read(credentialsProvider.future),
-      connectTimeout: const Duration(seconds: 3),
-      stallTimeout: const Duration(seconds: 3),
-    );
-    try {
-      await client.cancelSession(s.sessionId);
-    } on UploadException {
-      // The receiver deletes it after 24 hours anyway.
-    } finally {
-      client.close();
-    }
+  }
+  try {
+    await Directory(p.join(dirs.incomingTemp, s.sessionId))
+        .delete(recursive: true);
+  } on FileSystemException {
+    // Already gone.
   }
   logEvent('transfer', 'session ${s.sessionId}: discarded');
 }

@@ -54,6 +54,52 @@ abstract final class SendReasons {
   /// The receiver's certificate is not the pinned one. Never retried
   /// (CLAUDE.md hard rule 4).
   static const pinMismatch = 'pin_mismatch';
+
+  /// The user gave up an unfinished send (Discard, or a new selection
+  /// that released its files). Stored with status `cancelled`.
+  static const discarded = 'discarded';
+}
+
+/// Gives up a stored, unfinished send for good: marks it `cancelled`
+/// ([SendReasons.discarded]) so neither History nor the launch prompt
+/// offers a Resume, then tells the receiver (best effort, short
+/// timeouts). The receiver deletes its partial files and frees this
+/// phone's slot; without that, the next send to it gets `sender_busy`
+/// until its session expires.
+Future<void> discardStoredSend(
+  TransferRepository repo,
+  StoredSession s, {
+  required DeviceCredentials credentials,
+  ClientFactory? clientFactory,
+}) async {
+  if (s.direction != TransferDirection.send || s.status.isTerminal) return;
+  await repo.updateSession(
+    s.rowId,
+    status: SessionStatus.cancelled,
+    reason: SendReasons.discarded,
+  );
+  final host = s.peerHost;
+  final port = s.peerPort;
+  final fingerprint = s.peerFingerprint;
+  if (host == null || port == null || fingerprint == null) return;
+  final client =
+      clientFactory?.call(host, port) ??
+      UploadClient(
+        host: host,
+        port: port,
+        fingerprint: fingerprint,
+        credentials: credentials,
+        connectTimeout: const Duration(seconds: 3),
+        stallTimeout: const Duration(seconds: 3),
+      );
+  try {
+    await client.cancelSession(s.sessionId);
+  } on UploadException {
+    // The receiver expires it after 24 hours anyway.
+  } finally {
+    client.close();
+  }
+  logEvent('send', 'session ${s.sessionId}: discarded');
 }
 
 /// A file to send.

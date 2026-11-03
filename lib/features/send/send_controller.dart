@@ -160,7 +160,10 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   }
 
   void _setPicked(List<PickedItem> picked) {
-    // A new selection starts a new send; the last one's files go.
+    // A new selection starts a new send; the last one's files go. A send
+    // that could still resume cannot without them, so it is given up
+    // rather than left offering a Resume that fails (review L5).
+    unawaited(_discardResumable(state.snapshot));
     unawaited(_releaseLeftovers());
     state = SendState(
       picked: picked,
@@ -188,9 +191,27 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
       for (final p in state.picked)
         if (p is PickedFile) p,
     ];
+    final last = state.snapshot;
     state = const SendState();
+    await _discardResumable(last);
     await _releaseLeftovers();
     await _releaseDocs(docs);
+  }
+
+  /// Gives up [last] if it could still resume: its files are about to be
+  /// released (review L5).
+  Future<void> _discardResumable(SendSnapshot? last) async {
+    final sid = last?.sessionId;
+    if (last == null || !last.canResume || sid == null) return;
+    final repo = ref.read(transferRepositoryProvider);
+    try {
+      final credentials = await ref.read(credentialsProvider.future);
+      final stored = await repo.find(sid, TransferDirection.send);
+      if (stored == null) return;
+      await discardStoredSend(repo, stored, credentials: credentials);
+    } catch (e) {
+      logEvent('send', 'could not discard the last send: ${e.runtimeType}');
+    }
   }
 
   /// Prepares the picked items, offers them to [target] and sends them. A
