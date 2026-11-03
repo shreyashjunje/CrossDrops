@@ -191,6 +191,11 @@ void main() {
           files: const [FileOffer(fileId: 'f1', name: 'x', size: 0)],
         ),
       );
+      // An offer still waiting at a restart is not restored (it becomes
+      // rejected), so wait for the auto-accept; under load it can lag.
+      await waitFor(
+        () => r.server.sessions.single.status != SessionStatus.offered,
+      );
       await r.restart();
       final status = await client.sessionStatus(created.sessionId);
       expect(status.sessionId, created.sessionId);
