@@ -337,7 +337,7 @@ After a successful pairing the receiver can tick "Trust this device" in the Acce
 | Eavesdropping on the Wi-Fi | TLS 1.3 on all traffic |
 | Man-in-the-middle | Pin from QR or trusted record; code from committed nonces on first contact; proofs bound to the receiver's fingerprint |
 | Another sender hijacks a running session | Sessions belong to the authenticated fingerprint; others get 404 |
-| Malicious file name such as `../../evil` | Sanitize names: strip paths, control characters and reserved names; limit length |
+| Malicious file name such as `../../evil` | Sanitize names: strip paths, control characters, invisible bidi and zero-width characters, and reserved names; limit length. Offered names are sanitized on arrival, so the Accept prompt, progress, History and Files show the name that is saved (review L8) |
 | Huge offer to fill the disk | Free-space check before accepting, on sizes capped at 1 TiB per file and 4 TiB per offer; reject if the file is larger than declared |
 | Flood of requests | Rate limits; header and body limits; capped challenge, token and address tables |
 | Corrupted or tampered file | SHA-256 verified before saving |

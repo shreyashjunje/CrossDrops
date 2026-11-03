@@ -9,7 +9,16 @@ const int maxFileNameBytes = 200;
 
 const String _fallbackName = 'file';
 
-final RegExp _forbiddenChars = RegExp(r'[\x00-\x1F\x7F<>:"/\\|?*]');
+final RegExp _forbiddenChars = RegExp(r'[\x00-\x1F\x7F-\x9F<>:"/\\|?*]');
+
+/// Characters that change how a name is shown without being seen: bidi
+/// embeddings, overrides, isolates and marks, zero-width characters, the
+/// soft hyphen and the BOM. `photo\u202Egpj.exe` shows as `photoexe.jpg`
+/// (review L8). They are removed; the name then shows what it is.
+final RegExp _invisibleChars = RegExp(
+  '[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u2064'
+  '\u2066-\u2069\uFEFF\uFFF9-\uFFFB]',
+);
 
 final RegExp _reservedWindowsName = RegExp(
   r'^(con|prn|aux|nul|com[0-9]|lpt[0-9])$',
@@ -18,13 +27,14 @@ final RegExp _reservedWindowsName = RegExp(
 
 /// Turns a name received from the network into a safe single file name.
 ///
-/// Strips any directory part, control and reserved characters, leading dots
-/// and trailing dots or spaces; renames reserved device names; limits the
-/// length while keeping the extension. Never returns an empty name, `.` or
-/// `..`.
+/// Strips any directory part, control and reserved characters, invisible
+/// formatting characters, leading dots and trailing dots or spaces;
+/// renames reserved device names; limits the length while keeping the
+/// extension. Never returns an empty name, `.` or `..`.
 String sanitizeFileName(String input) {
   // Keep only the last path segment, for both separators.
   var name = input.split(RegExp(r'[/\\]')).last;
+  name = name.replaceAll(_invisibleChars, '');
   name = name.replaceAll(_forbiddenChars, '_');
   name = name.trim();
   // Leading dots would hide the file or form "..".

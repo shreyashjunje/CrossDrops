@@ -15,10 +15,12 @@ import '../engine/session_state_machine.dart';
 import '../engine/sha256_isolate.dart';
 import '../log.dart';
 import '../protocol/auth_messages.dart';
+import '../protocol/device_name.dart';
 import '../protocol/events.dart';
 import '../protocol/models.dart';
 import '../security/device_credentials.dart';
 import '../storage/partial_cleanup.dart' show expiredReason;
+import '../storage/file_name_sanitizer.dart';
 import '../storage/transfer_repository.dart';
 import '../storage/trust_repository.dart';
 import 'rate_limiter.dart';
@@ -876,8 +878,8 @@ class ReceiveServer {
     final peer = _peer(req);
     final SessionOffer offer;
     try {
-      offer = SessionOffer.fromJson(
-        await _readJson(req, _limits.maxOfferBodyBytes),
+      offer = _shownAsSaved(
+        SessionOffer.fromJson(await _readJson(req, _limits.maxOfferBodyBytes)),
       );
     } on _BodyTooLarge {
       return _error(413, ErrorCodes.bodyTooLarge, 'offer too large');
@@ -990,6 +992,35 @@ class ReceiveServer {
         status: SessionStatus.offered.name,
         trusted: trust.isTrusted,
       ),
+    );
+  }
+
+  /// [offer] with the names this phone will save and show: each file name
+  /// sanitized ([sanitizeFileName]) and the sender's name cleaned like a
+  /// device name. The Accept prompt, progress, History and Files then all
+  /// show the same name, and no invisible character can make
+  /// `photo<RLO>gpj.exe` look like `photoexe.jpg` (review L8).
+  static SessionOffer _shownAsSaved(SessionOffer offer) {
+    final name = sanitizeDeviceName(offer.sender.name);
+    return SessionOffer(
+      protocol: offer.protocol,
+      sender: SenderInfo(
+        id: offer.sender.id,
+        name: name.isEmpty ? 'Unknown device' : name,
+        platform: offer.sender.platform,
+      ),
+      files: [
+        for (final f in offer.files)
+          FileOffer(
+            fileId: f.fileId,
+            name: sanitizeFileName(f.name),
+            size: f.size,
+            mime: f.mime,
+            kind: f.kind,
+            created: f.created,
+            livePhotoGroup: f.livePhotoGroup,
+          ),
+      ],
     );
   }
 

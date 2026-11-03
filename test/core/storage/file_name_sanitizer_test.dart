@@ -36,6 +36,31 @@ void main() {
       expect(sanitizeFileName('a<b>c:d"e|f?g*h.txt'), 'a_b_c_d_e_f_g_h.txt');
     });
 
+    test('removes bidi and zero-width characters (review L8)', () {
+      // RIGHT-TO-LEFT OVERRIDE: shown as "photoexe.jpg", really an .exe.
+      expect(sanitizeFileName('photo\u202Egpj.exe'), 'photogpj.exe');
+      expect(sanitizeFileName('a\u2066b\u2069c\u200Fd.txt'), 'abcd.txt');
+      expect(
+        sanitizeFileName('in\u200Bvis\u200Dible\uFEFF.pdf'),
+        'invisible.pdf',
+      );
+      expect(sanitizeFileName('soft\u00ADhyphen.jpg'), 'softhyphen.jpg');
+      // Nothing left but invisible characters.
+      expect(sanitizeFileName('\u202E\u200B'), 'file');
+      // An extension hidden behind them is found again.
+      expect(sanitizeFileName('x.\u200Bjpg'), 'x.jpg');
+    });
+
+    test('replaces C1 control characters', () {
+      expect(sanitizeFileName('a\u0085b\u009Fc.txt'), 'a_b_c.txt');
+    });
+
+    test('keeps ordinary non-Latin names', () {
+      expect(sanitizeFileName('写真 2026.heic'), '写真 2026.heic');
+      expect(sanitizeFileName('صورة.jpg'), 'صورة.jpg');
+      expect(sanitizeFileName('😀 party.mov'), '😀 party.mov');
+    });
+
     test('strips trailing dots and spaces', () {
       expect(sanitizeFileName('name.txt. . '), 'name.txt');
     });

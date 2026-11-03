@@ -316,6 +316,41 @@ void main() {
       expect(r.server.sessions, isEmpty);
     });
 
+    test('the prompt and history show names as they will be saved', () async {
+      // Review L8: a RIGHT-TO-LEFT OVERRIDE made an .exe look like .jpg.
+      IncomingOffer? asked;
+      r.decider = (o) async {
+        asked = o;
+        return false;
+      };
+      final (_, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson(
+          [
+            const FileOffer(
+              fileId: 'f1',
+              name: 'x/photo\u202Egpj.exe',
+              size: 1,
+            ),
+          ],
+          sender: const SenderInfo(
+            id: 'a',
+            name: 'Pixel\u202E\u0000',
+            platform: 'android',
+          ),
+        ),
+      );
+      final sid = body['sessionId']! as String;
+      await waitFor(() => asked != null);
+      expect(asked!.files.single.name, 'photogpj.exe');
+      expect(asked!.sender.name, 'Pixel');
+      final offered = r.events.whereType<SessionOffered>().single;
+      expect(offered.files.single.name, 'photogpj.exe');
+      final stored = await r.repo.find(sid, TransferDirection.receive);
+      expect(stored!.files.single.name, 'photogpj.exe');
+    });
+
     test('free space is checked again when the user accepts', () async {
       r.freeBytes = 1000 * mb;
       final decision = Completer<bool>();
