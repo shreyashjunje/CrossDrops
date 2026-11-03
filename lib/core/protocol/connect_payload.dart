@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../security/device_identity.dart';
 import 'device_name.dart';
 import 'models.dart';
@@ -61,8 +63,66 @@ List<int>? parseIPv4(String s) {
   return octets.any((o) => o > 255) ? null : octets;
 }
 
+/// Wi-Fi security of a hotspot in the QR code (`wsec`).
+enum WifiSecurity {
+  wpa2('wpa2'),
+
+  /// WPA3 with WPA2 fallback (transition mode).
+  wpa3Transition('wpa3t'),
+  wpa3('wpa3');
+
+  const WifiSecurity(this.code);
+  final String code;
+
+  static WifiSecurity? fromCode(String code) {
+    for (final s in values) {
+      if (s.code == code) return s;
+    }
+    return null;
+  }
+}
+
+/// The Android hotspot's Wi-Fi name and password, carried in the QR code
+/// in hotspot mode (`ws`, `wp`, `wsec`). Never logged (CLAUDE.md hard
+/// rule 7): [toString] leaves both out.
+class WifiCredentials {
+  const WifiCredentials({
+    required this.ssid,
+    required this.password,
+    this.security = WifiSecurity.wpa2,
+  });
+
+  final String ssid;
+  final String password;
+  final WifiSecurity security;
+
+  @override
+  bool operator ==(Object other) =>
+      other is WifiCredentials &&
+      other.ssid == ssid &&
+      other.password == password &&
+      other.security == security;
+
+  @override
+  int get hashCode => Object.hash(ssid, password, security);
+
+  @override
+  String toString() => 'WifiCredentials(${security.code})';
+}
+
+// WPA passphrase: 8-63 printable ASCII characters (IEEE 802.11i).
+final RegExp _wpaPassphrase = RegExp(r'^[\x20-\x7e]{8,63}$');
+
+/// True if [ssid] is 1-32 bytes of UTF-8 with no control characters.
+bool isValidSsid(String ssid) {
+  if (ssid.isEmpty) return false;
+  if (ssid.runes.any((r) => r < 0x20 || r == 0x7f)) return false;
+  return utf8.encode(ssid).length <= 32;
+}
+
 /// The QR code payload (ARCHITECTURE.md, "QR code payload"):
-/// `crossdrop://connect?v=1&ip=...&port=...&fp=...&id=...&n=...`
+/// `crossdrop://connect?v=1&ip=...&port=...&fp=...&id=...&n=...`, plus
+/// `ws`, `wp` and `wsec` in hotspot mode.
 class ConnectPayload {
   const ConnectPayload({
     required this.ip,
@@ -70,6 +130,7 @@ class ConnectPayload {
     required this.fingerprint,
     required this.deviceId,
     required this.name,
+    this.wifi,
   });
 
   /// Dotted IPv4 on a local network.
@@ -81,6 +142,9 @@ class ConnectPayload {
   final String deviceId;
   final String name;
 
+  /// The hotspot to join first; null outside hotspot mode.
+  final WifiCredentials? wifi;
+
   String toUri() => Uri(
     scheme: 'crossdrop',
     host: 'connect',
@@ -91,13 +155,19 @@ class ConnectPayload {
       'fp': fingerprint,
       'id': deviceId,
       'n': name,
+      if (wifi case final w?) ...{
+        'ws': w.ssid,
+        'wp': w.password,
+        'wsec': w.security.code,
+      },
     },
   ).toString();
 
   /// Parses a scanned QR code. Throws [ConnectPayloadException].
   ///
-  /// Unknown parameters are ignored so later versions can add fields (for
-  /// example the hotspot Wi-Fi name); every known one must appear once.
+  /// Unknown parameters are ignored so later versions can add fields; every
+  /// known one must appear once. The hotspot fields are optional, but `ws`
+  /// and `wp` come together.
   static ConnectPayload parse(String raw) {
     Never fail(ConnectPayloadError e, String detail) =>
         throw ConnectPayloadException(e, detail);
@@ -134,14 +204,15 @@ class ConnectPayload {
       fail(ConnectPayloadError.invalid, 'encoding');
     }
 
-    String field(String key) {
+    String? optional(String key) {
       final values = query[key];
-      if (values == null || values.isEmpty) {
-        fail(ConnectPayloadError.invalid, 'missing $key');
-      }
+      if (values == null || values.isEmpty) return null;
       if (values.length > 1) fail(ConnectPayloadError.invalid, 'repeated $key');
       return values.single;
     }
+
+    String field(String key) =>
+        optional(key) ?? fail(ConnectPayloadError.invalid, 'missing $key');
 
     final v = field('v');
     if (!_version.hasMatch(v)) fail(ConnectPayloadError.invalid, 'v');
@@ -168,12 +239,35 @@ class ConnectPayload {
     final name = sanitizeDeviceName(field('n'));
     if (name.isEmpty) fail(ConnectPayloadError.invalid, 'n');
 
+    final ssid = optional('ws');
+    final password = optional('wp');
+    final securityCode = optional('wsec');
+    WifiCredentials? wifi;
+    if (ssid != null || password != null || securityCode != null) {
+      if (ssid == null || !isValidSsid(ssid)) {
+        fail(ConnectPayloadError.invalid, 'ws');
+      }
+      if (password == null || !_wpaPassphrase.hasMatch(password)) {
+        fail(ConnectPayloadError.invalid, 'wp');
+      }
+      final security = securityCode == null
+          ? WifiSecurity.wpa2
+          : WifiSecurity.fromCode(securityCode) ??
+                fail(ConnectPayloadError.invalid, 'wsec');
+      wifi = WifiCredentials(
+        ssid: ssid,
+        password: password,
+        security: security,
+      );
+    }
+
     return ConnectPayload(
       ip: ip,
       port: port,
       fingerprint: fp,
       deviceId: id,
       name: name,
+      wifi: wifi,
     );
   }
 }

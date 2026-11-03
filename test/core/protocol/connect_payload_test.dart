@@ -177,6 +177,85 @@ void main() {
     }
   });
 
+  group('hotspot Wi-Fi fields', () {
+    const wifi = WifiCredentials(
+      ssid: 'AndroidShare_1234',
+      password: 'p@ss word&=%#?x',
+      security: WifiSecurity.wpa3Transition,
+    );
+
+    test('round-trip, including characters that need escaping', () {
+      const original = ConnectPayload(
+        ip: '192.168.49.1',
+        port: 40000,
+        fingerprint: _fp,
+        deviceId: _id,
+        name: 'Pixel',
+        wifi: wifi,
+      );
+      final parsed = ConnectPayload.parse(original.toUri());
+      expect(parsed.wifi, wifi);
+      expect(parsed.ip, '192.168.49.1');
+    });
+
+    test('absent outside hotspot mode', () {
+      expect(ConnectPayload.parse(_uri()).wifi, isNull);
+    });
+
+    test('security defaults to WPA2', () {
+      final p = ConnectPayload.parse('${_uri()}&ws=Net&wp=12345678');
+      expect(p.wifi!.security, WifiSecurity.wpa2);
+    });
+
+    test('accepts a 32-byte name with non-ASCII characters', () {
+      final name = '${'a' * 29}é'; // 31 bytes
+      final p = ConnectPayload.parse(
+        '${_uri()}&ws=${Uri.encodeQueryComponent(name)}&wp=12345678',
+      );
+      expect(p.wifi!.ssid, name);
+    });
+
+    test('toString leaves out the name and password', () {
+      final p = ConnectPayload.parse(
+        ConnectPayload(
+          ip: '192.168.49.1',
+          port: 1,
+          fingerprint: _fp,
+          deviceId: _id,
+          name: 'x',
+          wifi: wifi,
+        ).toUri(),
+      );
+      expect('${p.wifi}', isNot(contains('AndroidShare')));
+      expect('${p.wifi}', isNot(contains('p@ss')));
+    });
+
+    void rejects(String why, String extra) => test('rejects $why', () {
+      expect(
+        () => ConnectPayload.parse('${_uri()}$extra'),
+        throwsA(
+          isA<ConnectPayloadException>().having(
+            (e) => e.error,
+            'error',
+            ConnectPayloadError.invalid,
+          ),
+        ),
+      );
+    });
+
+    rejects('name without password', '&ws=Net');
+    rejects('password without name', '&wp=12345678');
+    rejects('security alone', '&wsec=wpa2');
+    rejects('empty name', '&ws=&wp=12345678');
+    rejects('name over 32 bytes', '&ws=${'a' * 33}&wp=12345678');
+    rejects('control character in name', '&ws=a%0Ab&wp=12345678');
+    rejects('password too short', '&ws=Net&wp=1234567');
+    rejects('password too long', '&ws=Net&wp=${'a' * 64}');
+    rejects('non-ASCII password', '&ws=Net&wp=12345678%C3%A9');
+    rejects('unknown security', '&ws=Net&wp=12345678&wsec=wep');
+    rejects('repeated name', '&ws=Net&ws=Other&wp=12345678');
+  });
+
   test('isLocalIPv4 and parseIPv4', () {
     expect(parseIPv4('10.1.2.3'), [10, 1, 2, 3]);
     expect(parseIPv4('1.2.3'), isNull);
