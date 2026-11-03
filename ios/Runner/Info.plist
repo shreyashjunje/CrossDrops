@@ -84,5 +84,18 @@
 	<string>CrossDrop saves photos and videos you receive to your library.</string>
 	<key>PHPhotoLibraryPreventAutomaticLimitedAccessAlert</key>
 	<true/>
+	<key>CrossDropAppGroup</key>
+	<string>$(APP_GROUP_ID)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>crossdrop</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

@@ -11,6 +11,7 @@ import '../platform/android_store.dart';
 import '../platform/document_picker.dart';
 import '../platform/ios_export.dart';
 import '../platform/ios_photos.dart';
+import '../platform/share_inbox.dart';
 import 'app_dirs.dart';
 
 /// App folders, resolved once.
@@ -59,3 +60,11 @@ final receivedFileStoreProvider = FutureProvider<ReceivedFileStore>((
 
 /// iOS Photos library saving (D-043); unused on Android.
 final photosSaverProvider = Provider<IosPhotosSaver>((ref) => IosPhotosSaver());
+
+/// The App Group inbox of the iOS Share Extension (D-045). Null until the
+/// app folders are known.
+final iosShareInboxProvider = Provider<ShareInbox?>((ref) {
+  final dirs = ref.watch(appDirsProvider).value;
+  if (dirs == null) return null;
+  return IosShareInbox(stagingRoot: dirs.outgoingStaging);
+});

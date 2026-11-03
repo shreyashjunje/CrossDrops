@@ -9,6 +9,7 @@ import UIKit
   private var background: BackgroundTaskChannel?
   private var export: ExportChannel?
   private var photos: PhotosSaveChannel?
+  private var share: ShareInboxChannel?
 
   override func application(
     _ application: UIApplication,
@@ -33,6 +34,9 @@ import UIKit
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "PhotosSaveChannel") {
       photos = PhotosSaveChannel(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ShareInboxChannel") {
+      share = ShareInboxChannel(messenger: registrar.messenger())
     }
   }
 }

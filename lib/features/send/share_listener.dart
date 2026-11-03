@@ -55,6 +55,9 @@ final shareInboxProvider = Provider<ShareInbox?>((ref) {
   if (Platform.isAndroid) {
     return AndroidShareInbox(ref.read(androidSourcesProvider));
   }
+  if (Platform.isIOS) {
+    return ref.watch(iosShareInboxProvider);
+  }
   return null;
 });
 
@@ -77,10 +80,15 @@ class _ShareListenerState extends ConsumerState<ShareListener>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    final inbox = ref.read(shareInboxProvider);
-    _sub = inbox?.arrivals.listen((_) => _take());
-    // The app may have been started by a share.
-    WidgetsBinding.instance.addPostFrameCallback((_) => _take());
+    // The iOS inbox exists once the app folders are known.
+    ref.listenManual<ShareInbox?>(shareInboxProvider, (_, inbox) {
+      _sub?.cancel();
+      _sub = inbox?.arrivals.listen((_) => _take());
+      // The app may have been started by a share.
+      if (inbox != null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _take());
+      }
+    }, fireImmediately: true);
   }
 
   @override
