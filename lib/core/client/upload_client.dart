@@ -450,31 +450,48 @@ class UploadClient {
         req.headers.set('authorization', 'Bearer $token');
         req.contentLength = t.size - offset;
         req.headers.contentType = ContentType.binary;
-        await for (final chunk in readSourceChunks(
-          t.source,
-          start: offset,
-          end: t.size,
-          chunkSize: chunkSize,
-        )) {
-          req.add(chunk);
-          // At most one chunk waits in the socket buffer.
-          await guarded(req.flush());
-          kick();
-          if (_pauseRequested) {
-            // The current chunk is out; the receiver keeps every byte.
-            _pauseRequested = false;
-            req.abort(_pausedError);
-            throw _pausedError;
+        // Read ahead: the next chunk is read while this one is flushed, so
+        // the disk (or Android's descriptor worker) and the network overlap
+        // instead of taking turns (review, speed item 4). At most two
+        // chunks are in memory, plus the one in the socket buffer.
+        final chunks = StreamIterator(
+          readSourceChunks(
+            t.source,
+            start: offset,
+            end: t.size,
+            chunkSize: chunkSize,
+          ),
+        );
+        var next = chunks.moveNext();
+        try {
+          while (await guarded(next)) {
+            final chunk = chunks.current;
+            next = chunks.moveNext();
+            req.add(chunk);
+            // At most one chunk waits in the socket buffer.
+            await guarded(req.flush());
+            kick();
+            if (_pauseRequested) {
+              // The current chunk is out; the receiver keeps every byte.
+              _pauseRequested = false;
+              req.abort(_pausedError);
+              throw _pausedError;
+            }
+            sent += chunk.length;
+            meter.add(sent);
+            onProgress?.call(
+              TransferProgress(
+                sentBytes: sent,
+                totalBytes: t.size,
+                bytesPerSecond: meter.bytesPerSecond,
+              ),
+            );
           }
-          sent += chunk.length;
-          meter.add(sent);
-          onProgress?.call(
-            TransferProgress(
-              sentBytes: sent,
-              totalBytes: t.size,
-              bytesPerSecond: meter.bytesPerSecond,
-            ),
-          );
+        } finally {
+          // A read still running when the upload stops must not surface
+          // as an uncaught error.
+          next.ignore();
+          await chunks.cancel();
         }
         // Waits for the receiver's response headers, still guarded.
         res = await guarded(req.close());

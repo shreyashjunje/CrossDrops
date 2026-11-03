@@ -469,7 +469,7 @@ crossdrop/
 **Performance design**
 
 - One TLS connection per session, reused for every file.
-- Stream reads and writes with 1 MB buffers to start; benchmark 256 KB, 1 MB and 4 MB.
+- Stream reads and writes with 1 MB buffers to start; benchmark 256 KB, 1 MB and 4 MB. The sender reads one chunk ahead while the current one is flushed; the receiver reads up to 8 MB ahead of its disk (D-064).
 - Hash with SHA-256 incrementally in a background isolate, so the UI never stutters.
 - Don't pass file bytes through platform channels: Dart reads files directly (temp file on iPhone, file descriptor on Android).
 - Save progress every 2 s or 64 MB, whichever comes first, not every write, to keep fsyncs and database writes low (D-065).
