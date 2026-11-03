@@ -36,6 +36,7 @@ ARCHITECTURE.md, Platform modules, "Screen lock during transfer" and "Battery an
   - **Sender:** stops after the current chunk (`UploadClient.requestPause`). The receiver saves what arrived and the session waits `paused`. On return it asks the receiver where to continue and goes on.
   - **Receiver:** `checkpointAll()` fsyncs and stores progress of every running upload. Uploads keep running until iOS suspends the app, then the sender sees a drop and retries; time in the background does not use up its retry deadline.
 - **Android:** nothing pauses. The service keeps the process in the foreground state while the transfer runs in the app's own isolate. The service has no periodic task.
+- **A paused received session** (`SessionKeepAlive`, `lib/features/receive/session_keep_alive.dart`, D-062): it keeps the screen on, the service up and the server running for 150 s, the sender's retry deadline plus a margin, then lets go. Before review M3 a paused session held them forever, so an iPhone receiver whose sender went to the background or gave up kept its screen on and "Receiving from X" up, and never reached the hidden-and-idle server stop. A session restored as paused after a restart is not held.
 - **App-wide sender:** the send controller is not tied to the Send screen, so leaving the screen does not stop a transfer.
 
 Choice of package: D-024.

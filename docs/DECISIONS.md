@@ -506,3 +506,10 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - The wire protocol becomes version 2 (`GET /v1/info` `versions`, TXT `v`, QR `v`, offer `protocol`); version 1 is not supported at all, because a receiver that still accepted v1 commitments would leave the attack open. URL paths stay under `/v1`.
   - Not done: checking the certificate's self-signature. It would not help: an attacker can re-sign the same key as often as it likes.
 - Consequences: Each man-in-the-middle attempt is again one chance in a million, and failures show as codes that differ. Builds from before this change show the other phone as "needs update" and a QR code from them as "Update CrossDrop", instead of failing at authentication. D-029 stays in force for the code formula.
+
+## D-062: A paused received session holds the keep-alive and the server for 150 s
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The code review (M3, L6) found that a paused received session kept the wake lock and the Android foreground service for good, and kept the server up with Receiving off. Releasing them at the first pause is worse: a Wi-Fi drop of a second would let an iPhone receiver whose auto-lock time has passed lock at once and be suspended, ending the transfer that the sender was about to resume.
+- Decision: a session that was moving bytes and pauses stays held for 150 s (the sender's retry deadline of about 2 minutes, D-019, plus a margin), then releases the keep-alive and stops counting for the server's lifetime. Any new upload holds it again. A session restored as paused is not held. The policy is a small pure class, `SessionKeepAlive`, tested with fake timers.
+- Consequences: after a sender goes to the background or gives up, the receiver's screen may sleep and its server may stop 150 s later (30 s more if hidden). The sender then finds it again by device id when both are open.

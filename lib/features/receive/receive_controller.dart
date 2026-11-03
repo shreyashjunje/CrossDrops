@@ -21,6 +21,7 @@ import '../../core/server/receive_server.dart';
 import '../../core/storage/trust_repository.dart';
 import '../transfer/transfer_format.dart';
 import '../transfer/unfinished_transfers.dart';
+import 'session_keep_alive.dart';
 
 class IncomingFile {
   const IncomingFile({
@@ -235,8 +236,12 @@ class ReceiveController extends Notifier<ReceiveState> {
   DateTime _lastUiUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   late KeepAliveCoordinator _keepAlive;
 
-  /// Sessions registered with [_keepAlive].
-  final Set<String> _kept = {};
+  /// Which sessions are registered with [_keepAlive].
+  late final SessionKeepAlive _kept = SessionKeepAlive(
+    onBegin: (sid) => unawaited(_beginKeepAlive(sid)),
+    onEnd: (sid) => unawaited(_keepAlive.end(sid)),
+    onGraceOver: _onPausedGraceOver,
+  );
 
   @override
   ReceiveState build() {
@@ -317,13 +322,10 @@ class ReceiveController extends Notifier<ReceiveState> {
     await _stopIfIdle();
   }
 
-  /// With the switch off, stops the server once no transfer needs it.
+  /// With the switch off, stops the server once no transfer needs it. A
+  /// session paused for longer than its grace does not (review L6).
   Future<void> _stopIfIdle() async {
-    if (_receivingOn || _server == null) return;
-    final busy = state.sessions.values.any(
-      (s) => s.isActive || s.status == SessionStatus.offered,
-    );
-    if (busy) return;
+    if (_receivingOn || _server == null || _holdsServer) return;
     await _stopServer();
     if (ref.mounted) state = state.copyWith(clearPort: true);
   }
@@ -343,6 +345,21 @@ class ReceiveController extends Notifier<ReceiveState> {
         },
       );
 
+  /// [_busy], or a session paused moments ago whose sender is probably
+  /// retrying ([SessionKeepAlive.grace]).
+  bool get _holdsServer => _busy || _kept.anyInGrace;
+
+  /// A paused session's sender did not come back in time: let the server
+  /// stop if nothing else needs it.
+  void _onPausedGraceOver() {
+    if (!ref.mounted) return;
+    unawaited(_stopIfIdle());
+    if (_hidden && !_holdsServer) {
+      _idleTimer?.cancel();
+      _idleTimer = Timer(idleInBackground, _suspendIfIdle);
+    }
+  }
+
   void _onHide() {
     _hidden = true;
     _idleTimer?.cancel();
@@ -358,7 +375,7 @@ class ReceiveController extends Notifier<ReceiveState> {
   }
 
   Future<void> _restartIfIdle() async {
-    if (_server == null || _busy || !ref.mounted) return;
+    if (_server == null || _holdsServer || !ref.mounted) return;
     await _stopServer();
     if (!ref.mounted) return;
     state = state.copyWith(clearPort: true, advertising: false);
@@ -369,7 +386,7 @@ class ReceiveController extends Notifier<ReceiveState> {
   /// looking at it (ARCHITECTURE.md, "Server lifetime").
   Future<void> _suspendIfIdle() async {
     if (!_hidden || _suspended || _server == null || !ref.mounted) return;
-    if (_busy) return;
+    if (_holdsServer) return;
     _suspended = true;
     logEvent('receive', 'hidden and idle: server stopped');
     await _stopServer();
@@ -521,22 +538,14 @@ class ReceiveController extends Notifier<ReceiveState> {
     final server = _server;
     _server = null;
     await server?.close();
-    for (final sid in _kept.toList()) {
-      await _keepAlive.end(sid);
-    }
     _kept.clear();
   }
 
-  /// Keeps the app alive while [sessionId] moves bytes, and stops when it
-  /// ends.
-  Future<void> _trackKeepAlive(String sessionId, SessionStatus status) async {
+  /// Keeps the app alive while [sessionId] moves bytes ([SessionKeepAlive]
+  /// decides when).
+  Future<void> _beginKeepAlive(String sessionId) async {
     final server = _server;
     if (server == null) return;
-    if (status.isTerminal) {
-      if (_kept.remove(sessionId)) await _keepAlive.end(sessionId);
-      return;
-    }
-    if (status == SessionStatus.offered || !_kept.add(sessionId)) return;
     final from = state.sessions[sessionId]?.sender.name ?? 'another phone';
     await _keepAlive.begin(
       sessionId,
@@ -685,14 +694,11 @@ class ReceiveController extends Notifier<ReceiveState> {
             sessions: {...state.sessions}..remove(sessionId),
           );
         } else {
-          _update(
-            sessionId,
-            (s) => s.copyWith(status: status, reason: reason),
-          );
+          _update(sessionId, (s) => s.copyWith(status: status, reason: reason));
         }
-        unawaited(_trackKeepAlive(sessionId, status));
+        _kept.update(sessionId, status);
         if (status.isTerminal) unawaited(_stopIfIdle());
-        if (_hidden && !_busy) {
+        if (_hidden && !_holdsServer) {
           // The last transfer ended while the app was hidden.
           _idleTimer?.cancel();
           _idleTimer = Timer(idleInBackground, _suspendIfIdle);
