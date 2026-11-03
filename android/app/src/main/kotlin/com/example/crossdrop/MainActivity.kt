@@ -11,10 +11,12 @@ import java.io.File
 
 class MainActivity : FlutterActivity() {
     private var source: SourceChannel? = null
+    private var save: SaveChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         source = SourceChannel(this, flutterEngine.dartExecutor.binaryMessenger)
+        save = SaveChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         // Dart side: lib/platform/local_network.dart. Android has no Local
         // Network permission, so `probe` always answers "granted".
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "crossdrop/local_network")

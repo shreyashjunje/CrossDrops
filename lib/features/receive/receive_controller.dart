@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/app_dirs.dart';
 import '../../app/keep_alive.dart';
+import '../../app/media_providers.dart';
 import '../../app/providers.dart';
 import '../../core/discovery/discovery_service.dart';
 import '../../core/discovery/network_monitor.dart';
@@ -12,6 +13,7 @@ import '../../core/discovery/txt_record.dart';
 import '../../core/engine/progress_tracker.dart';
 import '../../core/log.dart';
 import '../../core/protocol/connect_payload.dart';
+import '../../core/media/save_target.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/server/receive_server.dart';
@@ -25,6 +27,8 @@ class IncomingFile {
     this.receivedBytes = 0,
     this.status = FileTransferStatus.pending,
     this.savedPath,
+    this.savedTo,
+    this.saveFallback,
     this.error,
   });
 
@@ -33,12 +37,20 @@ class IncomingFile {
   final int receivedBytes;
   final FileTransferStatus status;
   final String? savedPath;
+
+  /// Where the user finds it, once saved.
+  final SaveCollection? savedTo;
+
+  /// Why a photo or video is not in the gallery ([SaveFallback]).
+  final String? saveFallback;
   final String? error;
 
   IncomingFile copyWith({
     int? receivedBytes,
     FileTransferStatus? status,
     String? savedPath,
+    SaveCollection? savedTo,
+    String? saveFallback,
     String? error,
   }) => IncomingFile(
     name: name,
@@ -46,6 +58,8 @@ class IncomingFile {
     receivedBytes: receivedBytes ?? this.receivedBytes,
     status: status ?? this.status,
     savedPath: savedPath ?? this.savedPath,
+    savedTo: savedTo ?? this.savedTo,
+    saveFallback: saveFallback ?? this.saveFallback,
     error: error ?? this.error,
   );
 }
@@ -320,6 +334,7 @@ class ReceiveController extends Notifier<ReceiveState> {
         credentials: identity,
         tempDir: dirs.incomingTemp,
         saveDir: dirs.received,
+        store: await ref.read(receivedFileStoreProvider.future),
         repository: ref.read(transferRepositoryProvider),
         decider: _ask,
         trustLookup: _lookupTrust,
@@ -597,7 +612,13 @@ class ReceiveController extends Notifier<ReceiveState> {
             status: FileTransferStatus.receiving,
           ),
         );
-      case FileSaved(:final sessionId, :final fileId, :final savedPath):
+      case FileSaved(
+        :final sessionId,
+        :final fileId,
+        :final savedPath,
+        :final collection,
+        :final fallback,
+      ):
         final tracker = _trackers[sessionId];
         tracker?.set(fileId, tracker.sizeOf(fileId));
         _updateFile(
@@ -607,6 +628,8 @@ class ReceiveController extends Notifier<ReceiveState> {
             receivedBytes: f.size,
             status: FileTransferStatus.saved,
             savedPath: savedPath,
+            savedTo: collection,
+            saveFallback: fallback,
           ),
         );
       case FileFailed(:final sessionId, :final fileId, :final code):

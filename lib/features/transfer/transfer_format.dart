@@ -1,3 +1,7 @@
+import '../../core/media/save_target.dart';
+import '../../core/security/device_identity.dart';
+import '../../core/server/file_store.dart';
+
 /// Megabytes as 10^6 bytes, matching the MB/s figures in BENCHMARKS.md.
 String formatMegabytes(int bytes) => '${(bytes / 1e6).toStringAsFixed(1)} MB';
 
@@ -25,3 +29,40 @@ String formatTimeLeft(Duration? eta) {
   final m = (s % 3600) ~/ 60;
   return 'about $h h $m min left';
 }
+
+/// Where a received file is, for the user: "Saved to Photos",
+/// "Saved to Download/CrossDrop (the gallery cannot open this format)".
+String formatSavedTo(
+  SaveCollection collection,
+  String? fallback, {
+  required DevicePlatform platform,
+}) {
+  final where = switch ((platform, collection)) {
+    (DevicePlatform.ios, SaveCollection.photos || SaveCollection.videos) =>
+      'Photos',
+    (DevicePlatform.ios, SaveCollection.files) =>
+      'Files > On My iPhone > CrossDrop',
+    (DevicePlatform.android, SaveCollection.photos) => 'Pictures/CrossDrop',
+    (DevicePlatform.android, SaveCollection.videos) => 'Movies/CrossDrop',
+    (DevicePlatform.android, SaveCollection.files) => 'Download/CrossDrop',
+  };
+  final why = switch (fallback) {
+    SaveFallback.unsupported =>
+      platform == DevicePlatform.ios
+          ? ' (Photos cannot import this format)'
+          : ' (the gallery cannot open this format)',
+    SaveFallback.permission => ' (CrossDrop may not add to Photos)',
+    _ => '',
+  };
+  return 'Saved to $where$why';
+}
+
+/// Where received files go, shown on the Receive screen.
+String describeSaveLocations(DevicePlatform platform) => switch (platform) {
+  DevicePlatform.ios =>
+    'Photos and videos go to your Photos library. Other files go to '
+        'Files > On My iPhone > CrossDrop.',
+  DevicePlatform.android =>
+    'Photos go to Pictures/CrossDrop and videos to Movies/CrossDrop, so '
+        'your gallery shows them. Other files go to Download/CrossDrop.',
+};

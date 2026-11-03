@@ -5,7 +5,9 @@ import 'package:photo_manager/photo_manager.dart';
 
 import '../core/engine/source_opener.dart';
 import '../core/media/prepare.dart';
+import '../core/server/file_store.dart';
 import '../platform/android_source.dart';
+import '../platform/android_store.dart';
 import '../platform/document_picker.dart';
 import '../platform/ios_export.dart';
 import 'app_dirs.dart';
@@ -42,4 +44,14 @@ final documentPickerProvider = FutureProvider<DocumentPicker>((ref) async {
   }
   final dirs = await ref.read(appDirsProvider.future);
   return IosDocumentPicker(dirs.outgoingStaging);
+});
+
+/// Where received files go: MediaStore on Android (D-040), the app folder
+/// with Photos on iOS.
+final receivedFileStoreProvider = FutureProvider<ReceivedFileStore>((
+  ref,
+) async {
+  if (Platform.isAndroid) return MediaStoreFileStore(ChannelMediaStore());
+  final dirs = await ref.read(appDirsProvider.future);
+  return FolderStore(dirs.received);
 });

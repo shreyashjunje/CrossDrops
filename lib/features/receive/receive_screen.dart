@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../core/protocol/models.dart';
+import '../../core/security/device_identity.dart';
 import '../transfer/transfer_format.dart';
 import 'accept_dialog.dart';
 import 'receive_controller.dart';
@@ -144,7 +145,8 @@ class _ReceiveScreenState extends ConsumerState<ReceiveScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Keep this screen open. Files are saved to:\n${state.saveDir}',
+              'Keep this screen open. '
+              '${describeSaveLocations(DevicePlatform.current)}',
               style: theme.textTheme.bodySmall,
             ),
           ],
@@ -248,10 +250,24 @@ class _FileRow extends StatelessWidget {
       child: Row(
         children: [
           Expanded(
-            child: Text(
-              file.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                if (file.savedTo case final to?)
+                  Text(
+                    formatSavedTo(
+                      to,
+                      file.saveFallback,
+                      platform: DevicePlatform.current,
+                    ),
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: file.saveFallback == null
+                          ? null
+                          : Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+              ],
             ),
           ),
           const SizedBox(width: 8),

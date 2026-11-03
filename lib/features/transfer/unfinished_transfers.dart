@@ -6,12 +6,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
 
 import '../../app/app_dirs.dart';
+import '../../app/media_providers.dart';
 import '../../app/providers.dart';
 import '../../core/client/upload_client.dart';
 import '../../core/log.dart';
 import '../../core/media/prepare.dart';
 import '../../core/protocol/models.dart';
 import '../../core/storage/partial_cleanup.dart';
+import '../../platform/android_store.dart';
 import '../../core/storage/transfer_repository.dart';
 import '../receive/receive_screen.dart';
 import '../send/send_controller.dart';
@@ -26,10 +28,19 @@ final unfinishedTransfersProvider = FutureProvider<List<StoredSession>>((
   final repo = ref.read(transferRepositoryProvider);
   try {
     final dirs = await AppDirs.resolve();
+    final store = await ref.read(receivedFileStoreProvider.future);
     await PartialCleanup(
       repository: repo,
       incomingTemp: dirs.incomingTemp,
+      deletePart: store.delete,
     ).run();
+    if (store is MediaStoreFileStore) {
+      // Pending items a crash left before their URI was stored.
+      await store.cleanupOrphans({
+        for (final s in await repo.unfinished())
+          for (final f in s.files) ?f.tempPath,
+      });
+    }
     // After PartialCleanup, which expires sends older than 24 hours.
     await cleanStaging(dirs.outgoingStaging, [
       for (final s in await repo.unfinished())
@@ -53,6 +64,13 @@ Future<void> discardTransfer(WidgetRef ref, StoredSession s) async {
   );
   if (s.direction == TransferDirection.receive) {
     final dirs = await AppDirs.resolve();
+    final store = await ref.read(receivedFileStoreProvider.future);
+    for (final f in s.files) {
+      final loc = f.tempPath;
+      if (loc != null && f.status != FileTransferStatus.saved) {
+        await store.delete(loc);
+      }
+    }
     try {
       await Directory(p.join(dirs.incomingTemp, s.sessionId))
           .delete(recursive: true);

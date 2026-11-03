@@ -23,6 +23,9 @@ abstract interface class PartFile {
 
   Future<void> truncate(int length);
 
+  /// Sets the file's modification time (the sender's creation date).
+  Future<void> setModified(DateTime time);
+
   /// For hashing the bytes on disk; valid until [close].
   ByteSource get source;
 
@@ -274,6 +277,9 @@ class _FilePart implements PartFile {
 
   @override
   Future<void> truncate(int length) => _raf.truncate(length);
+
+  @override
+  Future<void> setModified(DateTime time) => File(path).setLastModified(time);
 
   @override
   ByteSource get source => PathSource(path);
