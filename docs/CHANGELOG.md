@@ -4,6 +4,20 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 
 ## 2026-11-03
 
+### Added (Phase 7)
+- Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.
+- iPhone joins that network ([features/iphone-join-hotspot.md](features/iphone-join-hotspot.md)): in-app with NEHotspotConfiguration when the build has the Hotspot Configuration capability (paid Apple account), otherwise guided through Settings with Copy password; handles Cancel, an iPhone already on the network, and removes the network afterwards (D-055).
+- Android network binding ([features/android-network-binding.md](features/android-network-binding.md)): on a Wi-Fi without internet, CrossDrop's traffic stays on the Wi-Fi instead of mobile data (D-056).
+- iPhone Personal Hotspot guide in three steps with a live check of the hotspot, the join and the same subnet ([features/iphone-personal-hotspot-guide.md](features/iphone-personal-hotspot-guide.md)).
+- Nearby suggests hotspot mode, with an explanation of guest and public Wi-Fi, when nothing was found and a QR code or address did not answer.
+- Benchmark builds (`--dart-define=CROSSDROP_BENCH=true`, CI input `bench`): Settings > Benchmark runs sizes × buffers × repeats through the real engine and writes CSV with MB/s, peak, CPU and memory from both phones ([features/benchmark-mode.md](features/benchmark-mode.md), D-058). Benchmark protocol and LocalSend comparison in [BENCHMARKS.md](BENCHMARKS.md).
+- QR payload: optional `ws`, `wp`, `wsec` fields.
+- Docs: decisions D-054 to D-059, Phase 7 device checks.
+
+### Changed (Phase 7)
+- The upload buffer size is a parameter (default still 1 MB) so it can be benchmarked.
+- `fake_async` is a declared dev dependency (already pulled in by `flutter_test`), for timer tests.
+
 ### Added (Phase 6)
 - Screens ([features/ui-navigation.md](features/ui-navigation.md)):
   - Home: "Ready to receive" with the device name, the Receiving switch, Show my QR code, transfers in progress and one large Send button.

@@ -1,6 +1,6 @@
 # CrossDrop Architecture: iPhone ↔ Android File Sharing
 
-Nov 1, 2026 · updated Nov 3, 2026 (Phase 6) · @yash
+Nov 1, 2026 · updated Nov 3, 2026 (Phase 7) · @yash
 
 CrossDrop v1 is a Flutter app in which each phone runs a small encrypted HTTPS server. The phones find each other over the local network (or connect through a hotspot) and send files straight to each other, with no cloud server. This document covers only iPhone ↔ Android, in both directions.
 
@@ -64,16 +64,18 @@ Three scenarios are supported in v1: shared Wi-Fi, an Android hotspot, and an iP
 | --- | --- | --- | --- |
 | 1 | Both on the same home or office Wi-Fi | Yes (primary) | Bonjour/mDNS discovery, direct HTTPS over the router |
 | 2 | Same Wi-Fi, but mDNS is blocked or filtered (some mesh routers, office networks) | Yes | Discovery fails, so the receiver shows a QR code with its IP, port and certificate fingerprint; the sender scans it |
-| 3 | Guest or public Wi-Fi with client isolation (cafe, hotel, airport) | No direct path | Detected when both discovery and QR connect time out; the app suggests offline hotspot mode |
-| 4 | No Wi-Fi; Android creates a hotspot, iPhone joins | Yes (recommended offline mode) | Android starts a LocalOnlyHotspot and shows one QR with Wi-Fi name, password and connection info; iPhone joins in-app via NEHotspotConfiguration |
-| 5 | No Wi-Fi; iPhone Personal Hotspot, Android joins | Yes (manual) | User turns on Personal Hotspot in iOS Settings (apps can't); Android joins; then discovery or QR as usual |
+| 3 | Guest or public Wi-Fi with client isolation (cafe, hotel, airport) | No direct path | When the nearby search found nobody and a QR code or typed address did not answer, Nearby shows a card explaining guest and public Wi-Fi, with Use hotspot mode |
+| 4 | No Wi-Fi; Android creates a hotspot, iPhone joins | Yes (recommended offline mode) | Android starts a LocalOnlyHotspot and shows one QR with Wi-Fi name, password and connection info, plus a standard Wi-Fi QR for the iPhone Camera. The iPhone joins in-app via NEHotspotConfiguration when the build has the Hotspot Configuration capability (paid Apple account); otherwise it guides the user through Settings > Wi-Fi and goes on once the Android answers (D-054, D-055) |
+| 5 | No Wi-Fi; iPhone Personal Hotspot, Android joins | Yes (manual) | User turns on Personal Hotspot in iOS Settings (apps can't); Android joins in its Settings; a three-step guide shows whether the hotspot is on, the Android has joined and the other phone is on the same subnet; then discovery or QR as usual (D-057) |
 | 6 | Same Wi-Fi but one phone has a VPN on | Sometimes | Some VPNs route or block local traffic; if connect fails and a VPN is detected, ask the user to pause it |
-| 7 | Android joined a Wi-Fi with no internet (hotspot) | Yes, with care | Android may send traffic over mobile data instead; the app binds its sockets to the Wi-Fi network |
+| 7 | Android joined a Wi-Fi with no internet (hotspot) | Yes | Android keeps mobile data as the default; when Wi-Fi is connected, not validated and not the default, the app binds its process to the Wi-Fi network (D-056) |
 | 8 | Router splits 2.4 GHz and 5 GHz, or mesh nodes | Usually yes | Same subnet works; separate VLANs act like scenario 3 |
 | 9 | Phones on different networks or mobile data only | No (future) | Needs a relay (WebRTC + TURN); message: "Get on the same Wi-Fi or use hotspot mode" |
 | 10 | No Wi-Fi and no hotspot possible, direct radio link | No (future) | Wi-Fi Aware on iOS 26+ newer iPhones and supporting Androids; research later |
 
-**Which mode is fastest?** Usually the hotspot modes. On a router, data goes phone → router → phone, sharing airtime twice. In hotspot mode one phone is the access point, so the data crosses the air once. Measure this on your devices before stating it in the app.
+**Which mode is fastest?** Usually the hotspot modes. On a router, data goes phone → router → phone, sharing airtime twice. In hotspot mode one phone is the access point, so the data crosses the air once. Measure this on your devices before stating it in the app: benchmark builds do that (Performance design, [features/benchmark-mode.md](features/benchmark-mode.md)).
+
+Hotspot details: [features/android-hotspot.md](features/android-hotspot.md), [features/iphone-join-hotspot.md](features/iphone-join-hotspot.md), [features/iphone-personal-hotspot-guide.md](features/iphone-personal-hotspot-guide.md), [features/android-network-binding.md](features/android-network-binding.md).
 
 ## Connection flow
 
@@ -141,7 +143,11 @@ The protocol is plain HTTPS with JSON for control and streamed request bodies fo
 
 `crossdrop://connect?v=1&ip=192.168.1.23&port=53317&fp=<full SHA-256 fingerprint>&id=<device UUID>&n=<name>`
 
-In offline hotspot mode the Android QR also carries the Wi-Fi name and password, so one scan joins the network and connects.
+In offline hotspot mode the Android QR also carries the Wi-Fi network, so one scan joins the network and connects:
+
+`...&ws=<Wi-Fi name>&wp=<password>&wsec=wpa2|wpa3t|wpa3`
+
+`ws` and `wp` come together or not at all; `wsec` defaults to `wpa2`.
 
 Parsing is strict. Every listed parameter must appear exactly once, and unknown parameters are ignored, so later versions can add fields. Each field is checked:
 
@@ -150,6 +156,7 @@ Parsing is strict. Every listed parameter must appear exactly once, and unknown 
 - `fp`: 64 hex characters.
 - `id`: a UUID.
 - `n`: sanitized.
+- `ws`: 1–32 bytes of UTF-8 without control characters; `wp`: 8–63 printable ASCII characters; `wsec`: one of the three values.
 
 Payloads over 1024 characters, or with control characters or stray `%` escapes, are refused. QR payloads are never logged. A typed IP and port follows the same address rules.
 
@@ -346,7 +353,7 @@ Most platform risk sits in four areas: how files are read, how they are saved, w
 | Area | iPhone (Swift) | Android (Kotlin) |
 | --- | --- | --- |
 | Discovery | Bonjour through the `bonsoir` plugin (NWBrowser and DNSServiceRegister). Avoid raw multicast sockets: they need a special Apple entitlement. Requires `NSBonjourServices` and `NSLocalNetworkUsageDescription`. | NsdManager (same plugin). A Wi-Fi multicast lock is held while browsing or advertising: bonsoir takes it on start and releases it on stop, and the app stops browsing in the background. Permissions: `CHANGE_WIFI_MULTICAST_STATE`, `ACCESS_WIFI_STATE`, `ACCESS_NETWORK_STATE`; no location. |
-| Local network permission | System prompt on first discovery. If denied, nothing is found and connections fail. Detection (D-015): after 5 s with no peers, a Swift probe advertises and browses a short-lived Bonjour service; still `PolicyDenied` at 8 s means denied. The app then explains why and links to Settings. | No prompt on same Wi-Fi. `NEARBY_WIFI_DEVICES` on Android 13+ for hotspot features. |
+| Local network permission | System prompt on first discovery. If denied, nothing is found and connections fail. Detection (D-015): after 5 s with no peers, a Swift probe advertises and browses a short-lived Bonjour service; still `PolicyDenied` at 8 s means denied. The app then explains why and links to Settings. | No prompt on same Wi-Fi. Hotspot mode asks for `NEARBY_WIFI_DEVICES` (`neverForLocation`) on Android 13+, or `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION` (max SDK 32) on Android 10–12, when the user taps Start. |
 | QR scanning | `mobile_scanner` (AVFoundation); needs `NSCameraUsageDescription`. | `mobile_scanner` (ML Kit); `CAMERA` asked at runtime. |
 | Picking photos and videos | Our own grid on `photo_manager` (permission, Limited access with "Select more", albums, thumbnails). It returns ids only; the file is exported when sending (D-038). The automatic Limited prompt is off. | Same grid. `READ_MEDIA_IMAGES`, `READ_MEDIA_VIDEO`, `READ_MEDIA_VISUAL_USER_SELECTED` (Android 14 partial access) and `ACCESS_MEDIA_LOCATION`, so the original keeps its GPS (`setRequireOriginal`, D-037). |
 | iCloud-only originals | Downloaded while preparing, before the offer, with progress ("Preparing 2 of 5: downloading from iCloud 40%") and Cancel. A failure or 90 s without progress leaves that item out with a message (D-038). | Not applicable. |
@@ -360,9 +367,9 @@ Most platform risk sits in four areas: how files are read, how they are saved, w
 | Android → iPhone formats | JPEG, PNG, HEIC, WebP, MP4 and MOV go to Photos. WebM, Matroska, AVI and anything Photos refuses go to Files, with a note on the Done screen. Motion Photos arrive as stills. | Not applicable. |
 | Screen lock during transfer | Keep the screen on during a transfer (`wakelock_plus`). Use a short background task to finish the current chunk and save progress; resume when the app returns. | Foreground service of type data sync with a progress notification; transfer continues with the screen off. Needs `POST_NOTIFICATIONS`. |
 | Battery and OEM killers | Not applicable. | Some brands (Xiaomi, Oppo, Vivo, OnePlus) kill background apps aggressively. Ask the user to exempt CrossDrop from battery optimization if transfers stop. |
-| Hotspot | Can't create one from an app; the user turns on Personal Hotspot. Can join an Android hotspot in-app via NEHotspotConfiguration (needs the Hotspot Configuration capability). | LocalOnlyHotspot creates one with a random name and password; no internet sharing. |
+| Hotspot | Can't create one from an app; the user turns on Personal Hotspot (guide with a live check, D-057). Joins an Android hotspot in-app with `NEHotspotConfigurationManager.apply`, `joinOnce` off and the network removed after use. Needs the Hotspot Configuration capability, which Apple gives to paid Developer Program accounts only; `RunnerHotspot.entitlements` holds it, and builds without it guide the user through Settings (D-055). | `WifiManager.startLocalOnlyHotspot` with a random name and password, read from `getSoftApConfiguration()` (API 30+) or `getWifiConfiguration()` (API 29); no internet sharing. Stops with the hotspot screen or 60 s after the last transfer (D-054). |
 | Creation dates | Photos: `creationDate`. Files: modification date only (D-042). | `DATE_TAKEN` and the file time; Downloads keep only the file time. Files without EXIF (PNG) may show the receive time. |
-| Network binding | Local subnet traffic goes over Wi-Fi even without internet. | When the Wi-Fi has no internet, bind the process or socket to that Wi-Fi network, or traffic may go over mobile data. |
+| Network binding | Local subnet traffic goes over Wi-Fi even without internet. | `ConnectivityManager.bindProcessToNetwork` when Wi-Fi is connected, not validated and not the default; cleared otherwise and when the Wi-Fi is lost. Whole process, because `dart:io` makes its own sockets (D-056). |
 | Share from other apps | Share Extension target: clones the files into an App Group inbox (no file in memory), writes a manifest, opens `crossdrop://share`. The app checks the manifest, moves the files into staging and opens Send with them selected (D-045). | Intent filters for `SEND` and `SEND_MULTIPLE` on a `singleTask` activity; only content URIs of other apps; read in place (D-044). |
 
 ## Screens
@@ -433,7 +440,8 @@ crossdrop/
       send/         # file picking, offer screen
       receive/      # receiving host, incoming request, my QR code
       transfer/     # progress, speed, pause, cancel, done, failed
-      hotspot/      # offline mode flow
+      hotspot/      # Android hotspot, iPhone join, Personal Hotspot guide
+      bench/        # benchmark screen (benchmark builds only)
       history/      # past transfers
       settings/
     core/
@@ -445,6 +453,7 @@ crossdrop/
       security/     # identity, certs, pinning, 6-digit code
       storage/      # database, temp files, cleanup
       media/        # prepare before offer, format plan, save collection
+      bench/        # benchmark runner, stats, CSV (benchmark builds only)
     platform/       # Dart side of platform channels
   ios/
     Runner/         # PhotoKit export/save, hotspot join, background task
@@ -465,6 +474,7 @@ crossdrop/
 - Save progress every 4 MB, not every write, to keep database writes low.
 - Calculate speed as a moving average over the last 3 seconds.
 - Benchmark matrix: 10 MB, 100 MB, 1 GB, 2 GB files × router 2.4 GHz, router 5 GHz, Android hotspot, iPhone hotspot × both directions. Compare with LocalSend on the same phones.
+- Benchmark builds (`--dart-define=CROSSDROP_BENCH=true`, release mode) run that matrix through the real engine and write CSV ([features/benchmark-mode.md](features/benchmark-mode.md), D-058). One stream per transfer until the measurements show a clear gain from more (D-059).
 
 ## Open decisions
 

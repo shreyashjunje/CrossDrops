@@ -8,7 +8,8 @@ CrossDrop is a Flutter app that sends photos, videos and files directly between 
 - **Phase 3, transfer engine:** built and tested on devices.
 - **Phase 4, security:** built and tested on devices.
 - **Phase 5, media and sharing:** built and tested on devices.
-- **Phase 6, UI and onboarding:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 6) are pending.
+- **Phase 6, UI and onboarding:** built and tested on devices.
+- **Phase 7, hotspot mode and benchmarks:** built and unit-tested. Device checks (`docs/DEVICE_TESTS.md`, Phase 7) and benchmark runs (`docs/BENCHMARKS.md`, Phase 7) are pending.
 
 What works in the code today:
 
@@ -26,9 +27,12 @@ What works in the code today:
 - Share from Photos, Gallery, Files or any app opens CrossDrop with the files selected.
 - Screens: Home, Send (files first, then the phone), Incoming request, Progress with Pause, Done with Open, Failed with the reason and next step, History, Settings, a three-page introduction. Dark mode, large text and screen readers are supported.
 
+- Hotspot mode without Wi-Fi: the Android phone makes a network from the app and shows one QR code; the iPhone joins it (in-app with a paid Apple account build, otherwise guided through Settings). An iPhone Personal Hotspot guide checks that both phones are on the same network. On a Wi-Fi without internet, Android keeps CrossDrop's traffic on the Wi-Fi.
+- Benchmark builds measure speed, CPU and memory for buffer sizes and network modes.
+
 Requirements: iOS 15 or later, Android 10 or later.
 
-Not yet built: starting or joining a hotspot from the app (the screens and the iPhone Personal Hotspot guide exist), and Android network binding on a hotspot without internet (Phase 7).
+The iPhone builds from CI are signed with a free Apple ID, which Apple does not allow to join a Wi-Fi network from an app; those builds guide the user through Settings > Wi-Fi instead.
 
 ## Build and test
 
@@ -39,6 +43,7 @@ flutter test                      # unit tests, no phones needed
 flutter test --run-skipped --tags large  # 2 GB test, needs ~4 GB disk
 dart run tool/crossdrop_cli.dart        # dev tool: send to / receive from a phone, fake-qr
 flutter run --release -d <device> # Android from any PC; iPhone needs a Mac with Xcode
+flutter build apk --release --dart-define=CROSSDROP_BENCH=true  # benchmark build, test phones only
 ```
 
 After changing database tables in `lib/core/storage/database.dart`, run `dart run build_runner build`.

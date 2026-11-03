@@ -1106,3 +1106,168 @@ Covered by tests on the PC:
 | P6-9 Settings | | | | | | |
 | P6-10 VoiceOver and TalkBack | | | | | | |
 | Screen review checklist | | | | | | |
+
+## Phase 7: hotspot mode and benchmarks
+
+Feature docs: [features/android-hotspot.md](features/android-hotspot.md), [features/iphone-join-hotspot.md](features/iphone-join-hotspot.md), [features/iphone-personal-hotspot-guide.md](features/iphone-personal-hotspot-guide.md), [features/android-network-binding.md](features/android-network-binding.md), [features/benchmark-mode.md](features/benchmark-mode.md). The speed protocol is in [BENCHMARKS.md](BENCHMARKS.md), "Phase 7".
+
+**Important for the iPhone:** the CI build is signed by Sideloadly with a free Apple ID. Apple gives the Hotspot Configuration capability to paid Developer Program accounts only, so **this build cannot join a network from the app**. It shows the manual path instead (P7-4). In-app join (P7-5) needs a paid account; skip P7-5 until then.
+
+### Preparation (once)
+
+1. **Build both phones from the same commit**, normal build (bench off), and install over the Phase 6 app ([Installing the CI builds](#installing-the-ci-builds-no-mac-needed)).
+   - New Swift file: `ios/Runner/HotspotJoinChannel.swift`. If the **iPhone unsigned IPA** job fails, paste its red lines and stop.
+   - The Android debug and release APKs (also with the bench flag) were built on the PC before committing, so the Kotlin compiles. Nothing has run on a phone yet.
+2. **For P7-9 and BENCHMARKS.md only**, a second pair of builds with **bench** ticked.
+3. **Logs:** as in Phase 6. New lines (no names, passwords or addresses):
+   - `[crossdrop.hotspot] started (wpa2|wpa3t|wpa3)`, `running on <interface>`, `start failed: <code>`, `stopped`, `stopped by the system or the user`, `stopping: idle after the last transfer`
+   - `[crossdrop.hotspot] join: <outcome>`, `join step: <step>`, `removing the joined network`
+   - `[crossdrop.network] bound to Wi-Fi (no internet there)`, `binding cleared`, `binding to Wi-Fi failed`
+   - `[crossdrop.bench] <size> / <buffer> #<n>: <x> MB/s, retries <n>`
+4. Note the Android version: on **Android 10–12** the permission is Location; on **13+** it is Nearby devices.
+
+### P7-1: Android starts the hotspot and shows one QR code
+
+1. Android: turn off the phone's own hotspot. Wi-Fi may be on or off.
+2. Send > pick a file > Send > **Can't find the other phone?** > Hotspot mode > **This phone makes the network** > **Start**.
+   - First time, expected: the system asks for **Nearby devices** (13+) or **Location** (10–12). Tap **Don't allow**.
+   - Expected: "CrossDrop needs the Nearby devices permission…", **Try again**, **Open app settings**, and "Or use this phone's own hotspot".
+3. Tap **Try again** and allow.
+   - Expected within a few seconds: a QR code, "Network: <name>  Password: <password>", **Show a code for the iPhone Camera**, **Send files to the iPhone**.
+   - Android's status bar shows a hotspot icon.
+4. Logs: `started (...)` and `running on ...`. Write down the security (`wpa2`, `wpa3t`, `wpa3`) and the interface.
+5. Press Back. Expected: back to Hotspot mode, the hotspot icon disappears, log `stopped`.
+
+**Paste back:** screenshot of step 3 (cover the password if you like), the two log lines, Android version.
+
+### P7-2: Refusals and stopping
+
+1. **Tethering on:** turn on Android's own hotspot in quick settings, then Start in CrossDrop.
+   - Expected: "Turn off the phone's own hotspot (tethering) first". Turn tethering off, **Try again**: works.
+   - Some phones can run both; if the network simply starts, write that down.
+2. **Android 10–12 only, location off:** turn off Location in quick settings, Start.
+   - Expected: "Turn on Location in quick settings…".
+3. **Stopped elsewhere:** with the network running, turn the hotspot off from quick settings (if the phone shows it).
+   - Expected: "The network was stopped…" and Try again. Log `stopped by the system or the user`.
+4. **After a transfer:** start the network, join from the iPhone (P7-3 or P7-4), send one photo.
+   - Expected on Android after the transfer: "Transfer done. The network stops in 60 s." counting down.
+   - Tap **Keep on**: the card goes away and the network stays.
+   - Send another photo, then wait 60 s. Expected: the network stops by itself, log `stopping: idle after the last transfer`.
+5. **Leaving during a transfer:** start a large transfer over the hotspot, press Back on the Android hotspot screen.
+   - Expected: "Stop the network?" dialog. **Stay** keeps it; **Stop and leave** stops it and the transfer pauses (the sender shows reconnecting).
+
+**Paste back:** which steps behaved as expected, and logs for any that did not.
+
+### P7-3: The iPhone Camera joins with the Wi-Fi code
+
+1. Start the network on Android, tap **Show a code for the iPhone Camera**.
+2. iPhone: open the **Camera** app (not CrossDrop), point it at the code, tap the "Join network" banner > **Join**.
+   - Expected: the iPhone joins; Settings > Wi-Fi shows the network with "No Internet Connection".
+3. On Android tap **Show the CrossDrop code**. On the iPhone: CrossDrop > Send > pick a photo > Send > **Scan QR code**, scan it.
+   - Expected: no join step (already joined: log `join step: checking` then `connected`), then the usual connect and transfer.
+
+**Paste back:** whether the Camera offered to join, and whether the transfer finished.
+
+### P7-4: iPhone joins from the CrossDrop code, free Apple ID build
+
+1. iPhone: forget the Android network if it is known (Settings > Wi-Fi > ⓘ > Forget). Stay on your normal Wi-Fi or turn Wi-Fi on with no network.
+2. Android: start the network. iPhone: CrossDrop > Send > pick 2 photos > Send > **Scan QR code**, scan the CrossDrop code.
+   - Expected: "Join <name>'s network" with steps, the network name and password, **Copy password** and "Waiting for the network…". (This build cannot join in-app; log `join step: manual`.)
+3. Tap **Copy password**, open Settings > Wi-Fi, tap the network, paste, **Join**. Come back to CrossDrop.
+   - Expected within a few seconds: the screen closes by itself and the transfer starts (code check if not trusted). Log `join step: connected`.
+4. **Other direction:** on Android tap **Send files to the iPhone**, pick a photo, Send.
+   - Expected: the iPhone appears in the list (or use the iPhone's Show my QR code), and the photo arrives.
+5. **Already connected:** iPhone, still on the Android's network: Hotspot mode > Join the Android phone's network > **Scan QR code**, scan again.
+   - Expected: straight to "Connected to <name>'s network", no steps.
+6. **Wrong network:** stop the hotspot on Android and start it again (new code). On the iPhone scan the **old** screenshot if you have one, or wait on the manual screen with the network off.
+   - Expected: it keeps waiting; Back leaves cleanly.
+
+**Paste back:** screenshots of steps 2 and 3, logs from the iPhone (`[crossdrop.hotspot]` lines), whether step 4 found the iPhone in the list or needed the QR code.
+
+### P7-5: In-app join (paid Apple Developer account only)
+
+Skip until a paid account is set up: enable **Hotspot** on the App ID, sign with `Runner/RunnerHotspot.entitlements` ([features/iphone-join-hotspot.md](features/iphone-join-hotspot.md)).
+
+1. Scan the CrossDrop code. Expected: iOS asks "CrossDrop wants to join Wi-Fi network …". Tap **Cancel**.
+   - Expected: "The iPhone did not join, because Cancel was tapped", **Try again**, **Join in Settings instead**.
+2. **Try again** > **Join**. Expected: "Joining…", then connected and the transfer starts.
+3. After the transfer, wait 60 s. Expected: the iPhone leaves the network and returns to its usual Wi-Fi; log `removing the joined network`.
+4. Lock the iPhone during a large transfer for 30 s, unlock. Expected: still on the network, the transfer resumes.
+
+### P7-6: Android network binding on a Wi-Fi without internet
+
+Needs a Wi-Fi with no internet that the Android can join as a client. Easiest: a spare router, or your router with its internet (WAN) cable unplugged. (An iPhone Personal Hotspot usually has internet through the iPhone's mobile data, and iOS will not turn it on with mobile data off.)
+
+1. Android: **mobile data on**, join the no-internet Wi-Fi. When Android says "no internet", choose to stay connected (or it may stay by itself).
+2. iPhone: join the same Wi-Fi.
+3. Open CrossDrop on both. Android log, expected: `bound to Wi-Fi (no internet there)`.
+4. Send a 100 MB file Android → iPhone, then iPhone → Android.
+   - Expected: both finish. Android Settings > Network > data usage for CrossDrop: mobile data does not grow by 100 MB.
+5. Plug the internet back in (or join your normal Wi-Fi). Expected: `binding cleared`; transfers still work.
+6. **Control (optional, shows why it is needed):** in step 1, with Wi-Fi without internet and mobile data on, the Phase 6 build should fail to send from Android. Only if you still have it installed; skip otherwise.
+
+**Paste back:** the `[crossdrop.network]` lines, whether both transfers finished, the mobile data counter before and after.
+
+### P7-7: iPhone Personal Hotspot guide, for real
+
+1. Turn off Wi-Fi on both phones. On both: Send > … > Hotspot mode > the Personal Hotspot choice ("Join the iPhone's Personal Hotspot" on Android, "This iPhone makes the network" on iPhone).
+   - Expected: "Step 1 of 3: Turn on Personal Hotspot" and a status line: iPhone "No phone has joined this iPhone yet", Android "This phone is not on an iPhone's hotspot yet".
+2. iPhone: Settings > Personal Hotspot > Allow Others to Join. Android: join it in Settings > Wi-Fi.
+   - Expected within 2 s, back in CrossDrop: iPhone "Personal Hotspot is on and a phone has joined." Android "This phone is on an iPhone's Personal Hotspot."
+3. **Next** to step 3 on both. Expected: "<other phone> is on the same network" (if discovery works over the hotspot), or "Looking for the other phone…" (then use the QR code).
+4. Send a photo each way (Send files; or Show my QR code / Scan QR code).
+5. If the Android could not see the iPhone's network, turn on **Maximize Compatibility** and repeat; write down that it was needed.
+
+**Paste back:** screenshots of step 2 on both phones, whether step 3 found the other phone by itself, logs if a transfer failed.
+
+### P7-8: Hotspot suggestion on a Wi-Fi that keeps phones apart
+
+Needs a guest Wi-Fi with client isolation, or two different networks: put the Android on one Wi-Fi and the iPhone on another (for example the router's guest network).
+
+1. iPhone: Send > pick a photo > Send. Wait until "Can't find the other phone?" appears (about 5 s).
+2. Android: Home > **Show my QR code**. iPhone: **Scan QR code**, scan it.
+   - Expected: "Could not connect … guest and public Wi-Fi … use hotspot mode" message, and at the top of the list a card "The phones can't reach each other on this Wi-Fi" with **Use hotspot mode**.
+3. Tap **Use hotspot mode**. Expected: Hotspot mode with the iPhone choices.
+
+**Paste back:** screenshot of the card.
+
+### P7-9: Benchmark build smoke test
+
+With the **bench** builds on both phones:
+
+1. Trust each other and turn on **Auto-accept** for the other phone on both (Settings > Trusted devices).
+2. Both: Settings > **Benchmark (test build)**. Network: the real one. Android: Choose > the iPhone. Sizes **10 MB**, all three buffers, runs **1** > **Start series**.
+   - Expected: three runs finish in under a minute; Results show three sender lines on the Android and three receiver lines on the iPhone, each with MB/s and CPU.
+3. iPhone: Files > On My iPhone > CrossDrop: `crossdrop-bench.csv` exists; **no** `crossdrop-bench-*.bin` files were saved. Android: Downloads has **no** `crossdrop-bench-*.bin`.
+4. **Copy CSV** on both and paste here.
+5. Repeat from the iPhone as sender.
+6. Then run the protocol in [BENCHMARKS.md](BENCHMARKS.md), "Phase 7".
+
+**Paste back:** both CSVs.
+
+### Not checked on devices
+
+Covered by tests on the PC:
+- QR Wi-Fi fields: every refusal, escaping, password never in `toString`.
+- Hotspot address detection, the 60 s stop and Keep on, the join flow for every iOS answer, the network removal timers.
+- The binding rule for every combination, binding after Wi-Fi loss, failed binds retried.
+- Same-subnet checks, the iPhone hotspot range.
+- Benchmark: 8 runs over loopback HTTPS with verification and discard, best-buffer rule, CSV format, CPU time on Linux and macOS (CI), buffer step sizes.
+
+Not covered anywhere yet: real `startLocalOnlyHotspot` behaviour on your Android brand, NEHotspotConfiguration (needs a paid account), WPA3-only hotspots with an older iPhone.
+
+### Results
+
+| Check | Date | iPhone, iOS | Android, version | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Build and install (prep 1) | | | | | | |
+| Bench builds (prep 2) | | | | | | |
+| P7-1 start, permission, QR, stop on Back | | | | | | |
+| P7-2 tethering, location, stopped elsewhere, 60 s, leave | | | | | | |
+| P7-3 Camera Wi-Fi code | | | | | | |
+| P7-4 join from CrossDrop code (free ID), both directions | | | | | | |
+| P7-5 in-app join (paid account) | | | | | | |
+| P7-6 network binding without internet | | | | | | |
+| P7-7 Personal Hotspot guide | | | | | | |
+| P7-8 hotspot suggestion | | | | | | |
+| P7-9 benchmark smoke test | | | | | | |

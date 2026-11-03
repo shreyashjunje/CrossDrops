@@ -435,3 +435,57 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: The brief asks for Pause on the Progress screen. The engine already pauses after the current chunk when iOS backgrounds the app, and resumes from the receiver's `receivedBytes`.
 - Decision: Pause on the sender uses that same engine pause. A user pause is remembered, so returning to the foreground does not resume it, and the app going to the background does not pause it twice. The receiver has no Pause: it cannot stop the sender without the protocol, and Cancel covers it.
 - Consequences: No protocol change. While paused, the receiver shows "Waiting for the sender to reconnect". After 24 hours the paused session expires as before.
+
+## D-054: Android hotspot: LocalOnlyHotspot, owned by its screen
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Scenario 4 needs the Android phone to make a network the iPhone joins, with one QR code. `WifiManager.startLocalOnlyHotspot` (API 26) gives a random name and password and no internet. `startLocalOnlyHotspotWithConfiguration` exists only from API 36. The hotspot's address has no public API.
+- Decision:
+  - Use `startLocalOnlyHotspot`. Read the network from `getSoftApConfiguration()` (API 30+; name from `getWifiSsid()` on 33+) or `getWifiConfiguration()` (API 29). Refuse open and OWE networks.
+  - Permissions, asked when the user taps Start: `NEARBY_WIFI_DEVICES` with `neverForLocation` on 13+; `ACCESS_FINE_LOCATION` and `ACCESS_COARSE_LOCATION`, capped at SDK 32, on 10–12. Location services off on 10–12 is its own error.
+  - Find the address by comparing the address list before and after the start (`pickHotspotAddress`), waiting up to 10 s.
+  - The hotspot belongs to the hotspot screen: leaving stops it (with a question if a transfer runs), and it stops 60 s after the last transfer, with Keep on.
+  - The QR code gains optional `ws`, `wp`, `wsec`. A second, standard `WIFI:` code is shown for the iPhone Camera app.
+- Consequences: No new package. Phones that cannot run a hotspot and Wi-Fi together lose their Wi-Fi while the hotspot is on. Unknown interface names fall back to "any new local address".
+
+## D-055: iPhone joins with NEHotspotConfiguration when the build can, Settings otherwise
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Joining a network from an app needs the Hotspot Configuration capability. Apple's "Supported capabilities (iOS)" table gives Hotspot to Apple Developer Program and Enterprise members only; free Apple IDs, which the CI builds use (D-017), cannot have it. `joinOnce = true` drops the network after 15 s in the background or when the device sleeps.
+- Decision:
+  - Join with `NEHotspotConfigurationManager.apply`, `joinOnce = false`. CrossDrop removes the network it added 60 s after the last transfer, or 10 minutes after joining without a transfer, and removes older CrossDrop networks before a new join.
+  - Before joining, a 1.5 s connect to the receiver: if it answers, the iPhone is already on that network. No `fetchCurrent`, which needs another paid capability or location.
+  - The app reads its own embedded provisioning profile to know whether it has the entitlement. Without it, or when iOS answers `internal`, the user joins in Settings with the name and a Copy password button, and the app checks every 2 s until the receiver answers.
+  - `Runner.entitlements` stays free-account safe; `RunnerHotspot.entitlements` adds the capability for paid-account builds.
+- Consequences: The CI build works today through Settings. In-app join needs a paid account, an App ID with Hotspot enabled and the other entitlements file; nothing else changes.
+
+## D-056: Android binds the whole process to a Wi-Fi without internet
+- Date: 2026-11-03
+- Status: Accepted
+- Context: On a Wi-Fi without internet, Android keeps mobile data as the default network, so new sockets go over mobile data. Android recommends `Network.getSocketFactory()`, but `dart:io` creates its own sockets.
+- Decision: `ConnectivityManager.bindProcessToNetwork(wifi)` when Wi-Fi is connected, not validated and not the default; clear it otherwise, and at once when the Wi-Fi is lost. The rule (`shouldBindToWifi`) is in Dart; Kotlin reports Wi-Fi and default-network changes.
+- Consequences: Every socket CrossDrop opens afterwards uses the Wi-Fi. CrossDrop makes no calls outside the local network, so nothing else is affected. A VPN that is the default is left alone.
+
+## D-057: The Personal Hotspot guide checks prefixes, not names
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Apps cannot turn on Personal Hotspot or read the Wi-Fi name without extra capabilities or location. The guide should still say when the phones are on the same network.
+- Decision: The platform channels list IPv4 addresses with prefix lengths (`java.net.NetworkInterface` on Android, `getifaddrs` on iOS). The guide marks "hotspot on" (iPhone, `bridge*` in 172.20.10.0/28) and "joined" (Android, `wlan*` in that range) as hints, and says the phones share a network when a discovered phone's address is in one of this phone's subnets.
+- Consequences: No permission. If iOS changes the hotspot range, only the hints stop; the same-network check keeps working.
+
+## D-058: Benchmark builds: a release-mode flag, and benchmark files are discarded after verification
+- Date: 2026-11-03
+- Status: Accepted
+- Context: The brief asked for benchmark mode in debug builds only. Flutter debug builds run Dart without full compilation and are several times slower, so their numbers are useless (BENCHMARKS.md already requires release). Hundreds of test files up to 2 GB would fill the receiver's gallery or Downloads. The Phase 7 plan proposed an optional `purpose` field in the offer for that.
+- Decision:
+  - Benchmark mode exists only with `--dart-define=CROSSDROP_BENCH=true`, on a release build. The flag is a `const bool`, so normal builds compile it out. CI has a `bench` input that makes `*-bench*` artifacts.
+  - Instead of a protocol field, benchmark builds wrap the file store: a file named `crossdrop-bench-<size>-<runId>.bin` is received and verified like any other, then deleted instead of saved. Normal builds save it like any file. No protocol change.
+  - CPU time comes from `getrusage` through `dart:ffi` (Android, iOS, Linux); memory from `ProcessInfo.currentRss`. Both phones write CSV rows that join on the run id.
+- Consequences: The numbers are release numbers. A benchmark build must never reach users; the Settings entry says "test build".
+
+## D-059: One stream per transfer until the benchmark shows a clear gain
+- Date: 2026-11-03
+- Status: Accepted
+- Context: Parallel streams can help on lossy or high-latency links, but cost complexity in resume, hashing and the receiver.
+- Decision: Keep one TLS connection and one file at a time. Consider parallel streams only if the Phase 7 benchmark shows a single stream clearly below the link's capacity while neither phone's CPU is the limit: CPU well under one core, and MB/s well under an iperf3 baseline on the same network. The measurements come first, then a proposal.
+- Consequences: Nothing changes now.
