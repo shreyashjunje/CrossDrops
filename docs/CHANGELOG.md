@@ -13,6 +13,7 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 - **Receiver keep-alive (M3, L6):** a paused received session no longer keeps the screen on, the Android notification up and the server running for good; it lets go 150 s after the pause, also with Receiving off (D-062).
 - **iPhone receiver after the lock screen (M6):** when CrossDrop comes back on screen it checks that its server still answers and restarts it on a new port if iOS took the socket back while suspended. Needs a device check.
 - **Pause (M4):** a pause asked between two uploads, while connecting or while authenticating, was dropped and the whole file was sent; on iPhone the background task always waited its full 10 s and could be suspended mid-upload. The pause is now kept until an upload sees it, and backgrounding waits only until the upload has stopped.
+- **Cancel (M5):** cancelling while connecting showed "network" failure; cancelling while the offer was on its way could leave the offer on the receiver. Both now end as cancelled, and an offer that arrived is withdrawn.
 
 ### Added (Phase 7)
 - Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.

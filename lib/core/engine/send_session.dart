@@ -321,6 +321,10 @@ class SendSession {
   /// Set while a PUT runs; completes when it stops.
   Completer<void>? _uploading;
 
+  /// `POST /v1/sessions` is on its way; a cancel waits for it briefly.
+  bool _offering = false;
+  Timer? _offerCancel;
+
   Stream<SendSnapshot> get updates => _updates.stream;
 
   String? get sessionId => _sessionId;
@@ -402,7 +406,14 @@ class SendSession {
     if (decision != null && !decision.isCompleted) {
       decision.complete(const CancelledEvent('sender'));
     }
-    _client.cancel();
+    if (_offering) {
+      // Let an offer on its way finish, so _offer can withdraw it instead
+      // of leaving it on the receiver (review M5); not for long on a dead
+      // network.
+      _offerCancel = Timer(const Duration(seconds: 3), _client.cancel);
+    } else {
+      _client.cancel();
+    }
     final sid = _sessionId;
     if (sid != null) {
       final c = _clientFactory(_host, _port);
@@ -449,8 +460,11 @@ class SendSession {
     try {
       info = await _client.info();
     } on UploadException catch (e) {
+      // A cancel kills the connection: that is a cancel, not "network".
+      _checkStop();
       throw _Stop(SendPhase.failed, e.code);
     } on FormatError {
+      _checkStop();
       throw const _Stop(SendPhase.failed, 'bad_response');
     }
     if (negotiateVersion(info.versions) == null) {
@@ -466,7 +480,9 @@ class SendSession {
         throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
       }
     }
+    _checkStop();
     final SessionCreated created;
+    _offering = true;
     try {
       created = await _client.offer(
         SessionOffer(
@@ -486,6 +502,7 @@ class SendSession {
         ),
       );
     } on UploadException catch (e) {
+      _checkStop();
       // Not retried: a lost reply could leave a duplicate offer behind.
       throw switch (e.code) {
         ErrorCodes.noSpace => _Stop(
@@ -507,8 +524,19 @@ class SendSession {
         ),
         _ => _Stop(SendPhase.failed, e.code),
       };
+    } finally {
+      _offering = false;
+      _offerCancel?.cancel();
+      _offerCancel = null;
     }
     _sessionId = created.sessionId;
+    if (_localCancel) {
+      // Cancelled while the offer was on its way: withdraw it, or the
+      // receiver keeps it and, if accepted, waits for bytes (review M5).
+      _log('session ${created.sessionId}: cancelled while offering');
+      await _cancelRemote();
+      throw const _Stop(SendPhase.cancelled, 'sender');
+    }
     // The receiver shows the code of the authentication behind this offer.
     _pairingCode = created.trusted ? null : _client.pairingCode;
     _log('session ${created.sessionId}: offered ${_files.length} file(s)');
@@ -558,6 +586,7 @@ class SendSession {
         return;
       } on UploadException catch (e) {
         if (!_isTransient(e) && e.code != SendReasons.identityMismatch) {
+          _checkStop();
           throw _Stop(SendPhase.failed, e.code);
         }
         await _retryWait(backoff, relocateAfter: 1);

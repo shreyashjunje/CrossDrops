@@ -47,7 +47,7 @@ The protocol, state machine and transfer rules are in [ARCHITECTURE.md](../ARCHI
 4. Files go in manifest order. For each file: `GET` the status, `PUT` from `receivedBytes`, then `complete` with the SHA-256. Retry and resume rules are in [resume.md](resume.md).
 5. A hash mismatch with `retry: true` sends the file again from zero. The receiver allows that once; the second mismatch fails the file and the session moves on to the next one.
 
-**Cancel.** The sender sends `DELETE` and stops at once. The receiver stops a running upload after its current chunk, deletes the partial files, and sends `cancelled` with `by: sender|receiver`. Cancelling twice, or after the end, does nothing.
+**Cancel.** The sender sends `DELETE` and stops at once. The receiver stops a running upload after its current chunk, deletes the partial files, and sends `cancelled` with `by: sender|receiver`. Cancelling twice, or after the end, does nothing. A cancel while connecting ends as cancelled, not as a network failure; a cancel while the offer is on its way lets the offer finish (at most 3 s) and then withdraws it with `DELETE`, so the receiver is not left with an offer nobody will feed (review M5).
 
 ## Code
 
@@ -86,7 +86,7 @@ New or changed against Phase 1 (full table in ARCHITECTURE.md):
 - `test/core/protocol/`: manifest fields and limits, events, version negotiation, status reply, file types.
 - `test/core/engine/session_state_machine_test.dart`: every legal and illegal move, cancel from every state.
 - `test/core/server/receive_server_test.dart`: offer and Accept, decline, timeout, no space (before and at Accept), sender busy, open-session limit, bad versions, full flow, resume, wrong offset, too many bytes (declared and counted), hostile names, empty file, hash mismatch once and twice, cancel from both sides in every state, the late-socket replay.
-- `test/core/engine/send_session_test.dart`: several files, 150 small files over a handful of connections, hash mismatch, changed source, decline, no space, cancel while waiting, sending, retrying and paused, receiver cancel, progress and time left.
+- `test/core/engine/send_session_test.dart`: several files, 150 small files over a handful of connections, hash mismatch, changed source, decline, no space, cancel while connecting, while offering, while waiting, sending, retrying and paused, receiver cancel, progress and time left.
 - `test/core/transfer_test.dart`: 50 MB end to end with a memory check.
 
 **Device checks**

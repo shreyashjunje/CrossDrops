@@ -11,6 +11,7 @@ import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
+import 'package:crossdrop/core/storage/trust_repository.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -412,6 +413,47 @@ void main() {
       expect(result.reason, RejectReasons.noSpace);
       expect(result.neededBytes, 2 * mb);
     });
+
+    test('cancel while connecting ends cancelled, not network', () async {
+      // Review M5: killing the connection made info() fail as `network`.
+      final (item, _) = await makeFile('a.bin', 1000);
+      proxy.latency = const Duration(seconds: 1);
+      final s = session([item]);
+      final run = s.run();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      await s.cancel();
+      final result = await run;
+      expect(result.phase, SendPhase.cancelled);
+      expect(result.reason, 'sender');
+      expect(r.server.sessions, isEmpty);
+    }, timeout: const Timeout(Duration(minutes: 1)));
+
+    test('cancel while the offer is on its way withdraws it', () async {
+      // Review M5: the offer reached the receiver but the sender never
+      // learned its id, so no DELETE was sent; an Accept then waited for
+      // bytes that never came.
+      final (item, _) = await makeFile('a.bin', 1000);
+      final gate = Completer<void>();
+      r.trustLookup = (_, _) async {
+        await gate.future;
+        return PeerTrust.unknown;
+      };
+      final s = session([item]);
+      final run = s.run();
+      await waitFor(() => s.snapshot.phase == SendPhase.connecting);
+      // Give info() and the source checks time; the offer then waits in
+      // the receiver's trust lookup.
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      await s.cancel();
+      gate.complete();
+      final result = await run;
+      expect(result.phase, SendPhase.cancelled);
+      expect(result.reason, 'sender');
+      await waitFor(() => r.server.sessions.isNotEmpty);
+      await waitFor(
+        () => r.server.sessions.single.status == SessionStatus.cancelled,
+      );
+    }, timeout: const Timeout(Duration(minutes: 1)));
 
     test('sender cancels while waiting for Accept', () async {
       r.decider = (_) => Completer<bool>().future;
