@@ -10,8 +10,11 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 
 class MainActivity : FlutterActivity() {
+    private var source: SourceChannel? = null
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        source = SourceChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         // Dart side: lib/platform/local_network.dart. Android has no Local
         // Network permission, so `probe` always answers "granted".
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "crossdrop/local_network")
@@ -53,5 +56,12 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // FlutterActivity is not a ComponentActivity, so the document picker
+    // uses the classic result callback.
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (source?.onActivityResult(requestCode, resultCode, data) == true) return
+        super.onActivityResult(requestCode, resultCode, data)
     }
 }

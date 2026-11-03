@@ -17,6 +17,21 @@
     <!-- Android 13+: the progress notification; asked when a transfer starts. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- Picking photos and videos (photo_manager), asked when the gallery
+         picker opens. Android 14+: the user may allow only some photos
+         (READ_MEDIA_VISUAL_USER_SELECTED). Android 12 and older use
+         READ_EXTERNAL_STORAGE. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
+    <uses-permission android:name="android.permission.READ_MEDIA_VISUAL_USER_SELECTED"/>
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
+    <!-- Without it Android strips the GPS location from photos we read, so
+         the receiver would not get the original file (D-037). -->
+    <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION"/>
+    <!-- Saving received files needs no permission on Android 10+: the app
+         writes its own MediaStore items (D-040). -->
     <!-- No backup (D-030): the identity key must not move to another
          phone, and a reinstall must get a new identity. -->
     <application
