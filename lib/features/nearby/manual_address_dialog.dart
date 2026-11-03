@@ -7,7 +7,9 @@ import '../../core/protocol/connect_payload.dart';
 String? validateManualHost(String text) {
   final octets = parseIPv4(text.trim());
   if (octets == null) return 'Enter an address like 192.168.1.23';
-  if (!isLocalIPv4(octets)) return 'Use the local address shown on Receive';
+  if (!isLocalIPv4(octets)) {
+    return 'Use the local address shown under "Show my QR code"';
+  }
   return null;
 }
 
@@ -15,7 +17,7 @@ String? validateManualHost(String text) {
 String? validateManualPort(String text) {
   final port = int.tryParse(text.trim());
   if (port == null || port < 1 || port > 65535 || text.trim() != '$port') {
-    return 'Enter the port shown on Receive';
+    return 'Enter the port shown under "Show my QR code"';
   }
   return null;
 }

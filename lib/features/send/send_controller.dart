@@ -348,8 +348,8 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     'identity_mismatch' => 'A different device answered at this address.',
     'version' => 'Update CrossDrop on the other phone.',
     _ =>
-      'Could not reach that phone. Check the IP and port on its Receive '
-          'screen.',
+      'Could not reach that phone. Check the IP and port under "Show my QR '
+          'code" on it.',
   };
 
   /// Continues the last session after it gave up (network) or the

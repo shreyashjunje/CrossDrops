@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/navigation.dart';
 import '../../app/providers.dart';
 import '../../core/client/peer_check.dart';
 import '../../core/client/upload_client.dart';
 import '../../core/discovery/peer_list.dart';
 import '../../core/protocol/connect_payload.dart';
-import '../../core/security/device_identity.dart';
+import '../transfer/failure_messages.dart';
+import '../transfer/widgets.dart';
+import 'find_help_screen.dart';
 import 'local_network_denied_view.dart';
 import 'lookalike_dialog.dart';
 import 'manual_address_dialog.dart';
@@ -42,31 +45,37 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       Navigator.of(context).pop(target);
     } on UploadException catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(_message(e, fromQr: fromQr))));
+      _showError(describeConnectError(e.code, fromQr: fromQr));
     } finally {
       if (mounted) setState(() => _connecting = false);
     }
   }
 
-  static String _message(UploadException e, {required bool fromQr}) =>
-      switch (e.code) {
-        'network' when fromQr =>
-          'Could not connect. This Wi-Fi may block phone-to-phone traffic, '
-              'or a VPN is on. Try a hotspot.',
-        'network' =>
-          'Could not reach that phone. Check that Receive is open on it and '
-              'that both phones are on the same Wi-Fi.',
-        'pin_mismatch' =>
-          "This isn't the device you scanned: its security key is "
-              'different. Nothing was sent.',
-        'identity_mismatch' when fromQr =>
-          "This isn't the device you scanned. Scan the code again.",
-        'identity_mismatch' =>
-          'A different device answered. Pull down to refresh the list.',
-        'version' => 'Update CrossDrop on the other phone.',
-        _ => 'The other phone gave an unexpected answer.',
-      };
+  void _showError(FailureMessage m) {
+    final (label, run) = switch (m.action) {
+      NextAction.scanQr => ('Scan QR', _scanQr),
+      NextAction.findHelp => ('Help', _openHelp),
+      _ => (null, null),
+    };
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        duration: const Duration(seconds: 8),
+        content: Text('${m.title}. ${m.reason} ${m.next}'),
+        action: label == null
+            ? null
+            : SnackBarAction(label: label, onPressed: run!),
+      ),
+    );
+  }
+
+  Future<void> _openHelp() async {
+    final result = await pushScreen<FindHelpResult>(
+      context,
+      Routes.findHelp,
+      const FindHelpScreen(),
+    );
+    if (result == FindHelpResult.scanQr && mounted) await _scanQr();
+  }
 
   Future<void> _scanQr() async {
     final payload = await Navigator.of(context).push<ConnectPayload>(
@@ -123,7 +132,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
                 onTap: () =>
                     _connect(() => _controller.connectToPeer(p), fromQr: false),
               ),
-            if (peers.isEmpty) _EmptyState(searchedLong: state.searchedLong),
+            if (peers.isEmpty)
+              _EmptyState(searchedLong: state.searchedLong, onHelp: _openHelp),
           ],
         ),
       );
@@ -142,30 +152,38 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
         bottom: _connecting
             ? const PreferredSize(
                 preferredSize: Size.fromHeight(4),
-                child: LinearProgressIndicator(),
+                child: LinearProgressIndicator(semanticsLabel: 'Connecting'),
               )
             : null,
       ),
       body: body,
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Row(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: FilledButton.icon(
-                  onPressed: _connecting ? null : _scanQr,
-                  icon: const Icon(Icons.qr_code_scanner),
-                  label: const Text('Scan QR code'),
-                ),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                alignment: WrapAlignment.center,
+                children: [
+                  FilledButton.icon(
+                    onPressed: _connecting ? null : _scanQr,
+                    icon: const Icon(Icons.qr_code_scanner),
+                    label: const Text('Scan QR code'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: _connecting ? null : _enterAddress,
+                    icon: const Icon(Icons.keyboard),
+                    label: const Text('Enter IP'),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: _connecting ? null : _enterAddress,
-                  icon: const Icon(Icons.keyboard),
-                  label: const Text('Enter IP'),
-                ),
+              TextButton(
+                onPressed: _openHelp,
+                child: const Text("Can't find the other phone?"),
               ),
             ],
           ),
@@ -174,6 +192,11 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     );
   }
 }
+
+/// How this phone reaches [host]: iPhone Personal Hotspot hands out
+/// 172.20.10.x; anything else found by discovery is on the same network.
+String connectionHint(String host) =>
+    host.startsWith('172.20.10.') ? 'via iPhone hotspot' : 'same Wi-Fi';
 
 class _PeerTile extends StatelessWidget {
   const _PeerTile({
@@ -188,29 +211,30 @@ class _PeerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final icon = switch (peer.platform) {
-      DevicePlatform.ios => Icons.phone_iphone,
-      DevicePlatform.android => Icons.phone_android,
-      null => Icons.device_unknown,
-    };
-    return ListTile(
-      leading: Icon(icon, size: 36),
-      title: Text(peer.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        peer.isSupported
-            ? '${peer.host}:${peer.port}'
-            : 'Needs a newer CrossDrop on this phone',
+    return Card(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      child: ListTile(
+        leading: PlatformIcon(platform: peer.platform, size: 40),
+        title: Text(peer.name, maxLines: 2, overflow: TextOverflow.ellipsis),
+        subtitle: Text(
+          peer.isSupported
+              ? '${platformLabel(peer.platform)} · '
+                    '${connectionHint(peer.host)}'
+              : 'Needs a newer CrossDrop on this phone',
+        ),
+        trailing: const Icon(Icons.chevron_right),
+        enabled: enabled,
+        onTap: onTap,
       ),
-      enabled: enabled,
-      onTap: onTap,
     );
   }
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.searchedLong});
+  const _EmptyState({required this.searchedLong, required this.onHelp});
 
   final bool searchedLong;
+  final VoidCallback onHelp;
 
   @override
   Widget build(BuildContext context) {
@@ -220,7 +244,9 @@ class _EmptyState extends StatelessWidget {
       child: Column(
         children: [
           if (!searchedLong) ...[
-            const CircularProgressIndicator(),
+            const CircularProgressIndicator(
+              semanticsLabel: 'Looking for nearby phones',
+            ),
             const SizedBox(height: 16),
             Text(
               'Looking for nearby phones…',
@@ -228,7 +254,8 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             const Text(
-              'Open CrossDrop on the other phone and tap Receive.',
+              'Open CrossDrop on the other phone. It must show "Ready to '
+              'receive".',
               textAlign: TextAlign.center,
             ),
           ] else ...[
@@ -237,10 +264,14 @@ class _EmptyState extends StatelessWidget {
             Text('No phones found yet', style: theme.textTheme.titleMedium),
             const SizedBox(height: 8),
             const Text(
-              'Check that the other phone shows Receive and is on the same '
-              'Wi-Fi. Some Wi-Fi networks hide phones from each other: scan '
-              'the QR code on the other phone instead.',
+              'Some Wi-Fi networks hide phones from each other. Scan the QR '
+              'code on the other phone, or use hotspot mode.',
               textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            FilledButton.tonal(
+              onPressed: onHelp,
+              child: const Text("Can't find the other phone?"),
             ),
           ],
         ],
@@ -256,15 +287,8 @@ class _Banner extends StatelessWidget {
   final String text;
 
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Card(
-      color: scheme.errorContainer,
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: ListTile(
-        leading: Icon(icon, color: scheme.onErrorContainer),
-        title: Text(text, style: TextStyle(color: scheme.onErrorContainer)),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+    child: WarningBox(icon: icon, text: text),
+  );
 }

@@ -57,7 +57,7 @@ String formatSavedTo(
   return 'Saved to $where$why';
 }
 
-/// Where received files go, shown on the Receive screen.
+/// Where received files go.
 String describeSaveLocations(DevicePlatform platform) => switch (platform) {
   DevicePlatform.ios =>
     'Photos and videos go to your Photos library. Other files go to '

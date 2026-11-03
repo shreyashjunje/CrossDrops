@@ -43,8 +43,8 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
         setState(
           () => _message = switch (e.error) {
             ConnectPayloadError.notCrossDrop =>
-              'This is not a CrossDrop code. Scan the code on the other '
-                  "phone's Receive screen.",
+              'This is not a CrossDrop code. On the other phone, tap '
+                  '"Show my QR code" and scan that.',
             ConnectPayloadError.unsupportedVersion =>
               'The other phone has a newer CrossDrop. Update CrossDrop on '
                   'this phone.',
@@ -78,8 +78,8 @@ class _QrScanScreenState extends ConsumerState<QrScanScreen> {
             padding: const EdgeInsets.all(16),
             child: Text(
               _message ??
-                  "Point the camera at the QR code on the other phone's "
-                      'Receive screen.',
+                  'Point the camera at the code the other phone shows under '
+                      '"Show my QR code".',
               style: _message == null
                   ? null
                   : TextStyle(color: theme.colorScheme.error),

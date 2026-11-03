@@ -65,7 +65,7 @@ class IncomingFile {
   );
 }
 
-/// One session as the Receive screen shows it.
+/// One received session, as the transfer screens show it.
 class IncomingSession {
   const IncomingSession({
     required this.sessionId,
