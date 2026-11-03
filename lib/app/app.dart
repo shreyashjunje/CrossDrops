@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../features/home/home_screen.dart';
+import '../features/send/share_listener.dart';
 
 class CrossDropApp extends StatelessWidget {
   const CrossDropApp({super.key});
@@ -10,7 +11,10 @@ class CrossDropApp extends StatelessWidget {
     return MaterialApp(
       title: 'CrossDrop',
       theme: ThemeData(colorSchemeSeed: Colors.teal),
-      home: const HomeScreen(),
+      navigatorKey: navigatorKey,
+      scaffoldMessengerKey: scaffoldMessengerKey,
+      navigatorObservers: [topRouteObserver],
+      home: const ShareListener(child: HomeScreen()),
     );
   }
 }

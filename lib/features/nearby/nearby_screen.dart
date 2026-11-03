@@ -8,6 +8,7 @@ import '../../core/discovery/peer_list.dart';
 import '../../core/protocol/connect_payload.dart';
 import '../../core/security/device_identity.dart';
 import '../send/send_screen.dart';
+import '../send/share_listener.dart';
 import 'local_network_denied_view.dart';
 import 'lookalike_dialog.dart';
 import 'manual_address_dialog.dart';
@@ -40,7 +41,10 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       if (!mounted) return;
       if (!await confirmLookalike(context, target) || !mounted) return;
       await Navigator.of(context).push(
-        MaterialPageRoute<void>(builder: (_) => SendScreen(target: target)),
+        MaterialPageRoute<void>(
+          settings: const RouteSettings(name: Routes.send),
+          builder: (_) => SendScreen(target: target),
+        ),
       );
     } on UploadException catch (e) {
       if (!mounted) return;

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../nearby/nearby_screen.dart';
 import '../receive/receive_screen.dart';
+import '../send/share_listener.dart';
 import '../settings/settings_screen.dart';
 import '../transfer/unfinished_transfers.dart';
 
@@ -17,9 +18,12 @@ class HomeScreen extends ConsumerStatefulWidget {
 class _HomeScreenState extends ConsumerState<HomeScreen> {
   bool _askedAboutUnfinished = false;
 
-  void _open(Widget screen) =>
-      Navigator.of(context)
-          .push(MaterialPageRoute<void>(builder: (_) => screen));
+  void _open(Widget screen, {String? name}) => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      settings: RouteSettings(name: name),
+      builder: (_) => screen,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -74,7 +78,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             ),
             const SizedBox(height: 16),
             OutlinedButton(
-              onPressed: () => _open(const NearbyScreen()),
+              onPressed: () => _open(const NearbyScreen(), name: Routes.nearby),
               child: const Padding(
                 padding: EdgeInsets.all(16),
                 child: Text('Send'),

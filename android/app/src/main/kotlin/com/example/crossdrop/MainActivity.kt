@@ -2,6 +2,7 @@ package com.example.crossdrop
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import android.os.StatFs
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
@@ -12,11 +13,13 @@ import java.io.File
 class MainActivity : FlutterActivity() {
     private var source: SourceChannel? = null
     private var save: SaveChannel? = null
+    private var share: ShareChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         source = SourceChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         save = SaveChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
+        share = ShareChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         // Dart side: lib/platform/local_network.dart. Android has no Local
         // Network permission, so `probe` always answers "granted".
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "crossdrop/local_network")
@@ -58,6 +61,18 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState) // runs configureFlutterEngine
+        // A recreated activity (rotation, process restore) already had it.
+        if (savedInstanceState == null) share?.handle(intent)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        share?.handle(intent)
     }
 
     // FlutterActivity is not a ComponentActivity, so the document picker
