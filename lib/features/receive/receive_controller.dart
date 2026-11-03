@@ -251,6 +251,14 @@ class ReceiveController extends Notifier<ReceiveState> {
       final on = next.value;
       if (on != null) unawaited(_onSwitch(on));
     });
+    // Renamed in Settings: advertise and show the new name.
+    ref.listen(identityProvider, (prev, next) {
+      final before = prev?.value?.deviceName;
+      final now = next.value?.deviceName;
+      if (before != null && now != null && before != now) {
+        unawaited(_restartIfIdle());
+      }
+    });
     unawaited(_start());
     return const ReceiveState();
   }
@@ -341,6 +349,14 @@ class ReceiveController extends Notifier<ReceiveState> {
     if (!_suspended || !ref.mounted) return;
     _suspended = false;
     if (_receivingOn) await _start();
+  }
+
+  Future<void> _restartIfIdle() async {
+    if (_server == null || _busy || !ref.mounted) return;
+    await _stopServer();
+    if (!ref.mounted) return;
+    state = state.copyWith(clearPort: true, advertising: false);
+    await _start();
   }
 
   /// Hidden for a while: nobody should find a phone whose owner is not
