@@ -1,15 +1,21 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/navigation.dart';
 import '../../app/providers.dart';
 import '../../core/protocol/device_name.dart';
-import '../../core/security/fingerprint.dart';
-import '../../core/storage/trust_repository.dart';
+import '../../core/security/device_identity.dart';
+import '../nearby/find_help_screen.dart';
+import 'about_screen.dart';
+import 'trusted_devices_screen.dart';
 
+/// Device name, the Receiving setting, photo formats (iPhone), trusted
+/// devices, help and About (docs/features/settings.md).
 class SettingsScreen extends ConsumerStatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.platform});
+
+  /// This phone; defaults to the real platform. Set in tests.
+  final DevicePlatform? platform;
 
   @override
   ConsumerState<SettingsScreen> createState() => _SettingsScreenState();
@@ -36,155 +42,126 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
     if (!mounted) return;
     _name.text = clean;
     setState(() => _error = null);
-    ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('Name saved')));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Name saved. Other phones see it the next time they '
+          'search.',
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final identity = ref.watch(identityProvider);
-    final device = identity.value;
+    final device = ref.watch(identityProvider).value;
     if (device != null && !_loaded) {
       _loaded = true;
       _name.text = device.deviceName;
     }
+    final me = widget.platform ?? DevicePlatform.current;
+    final trusted = ref.watch(trustedDevicesProvider).value?.length ?? 0;
     return Scaffold(
       appBar: AppBar(title: const Text('Settings')),
       body: device == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.symmetric(vertical: 8),
               children: [
-                TextField(
-                  controller: _name,
-                  decoration: InputDecoration(
-                    labelText: 'Device name',
-                    helperText: 'Other phones on the same Wi-Fi see this name.',
-                    errorText: _error,
+                const _Header('This phone'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: TextField(
+                    controller: _name,
+                    decoration: InputDecoration(
+                      labelText: 'Device name',
+                      helperText: 'Other phones see this name.',
+                      errorText: _error,
+                      suffixIcon: IconButton(
+                        tooltip: 'Save name',
+                        icon: const Icon(Icons.check),
+                        onPressed: _save,
+                      ),
+                    ),
+                    maxLength: maxDeviceNameBytes,
+                    textInputAction: TextInputAction.done,
+                    onSubmitted: (_) => _save(),
                   ),
-                  maxLength: maxDeviceNameBytes,
-                  textInputAction: TextInputAction.done,
-                  onSubmitted: (_) => _save(),
                 ),
-                const SizedBox(height: 8),
-                FilledButton(onPressed: _save, child: const Text('Save')),
-                const SizedBox(height: 16),
+                const _Header('Receiving'),
                 SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Receiving'),
+                  title: const Text('Ready to receive when CrossDrop is open'),
                   subtitle: const Text(
-                    'Off: this phone is hidden and refuses transfers from '
-                    'devices you have not trusted.',
+                    'Off: this phone is hidden from other phones and refuses '
+                    'files from devices you have not trusted. Same as the '
+                    'switch on the home screen.',
                   ),
                   value: ref.watch(receivingEnabledProvider).value ?? true,
                   onChanged: (on) => ref
                       .read(settingsRepositoryProvider)
                       .setReceivingEnabled(on),
                 ),
-                if (Platform.isIOS) const _FormatSettings(),
-                const SizedBox(height: 16),
-                Text(
-                  'Trusted devices',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const _TrustedDevices(),
-                const SizedBox(height: 24),
-                Text(
-                  'Device ID ${device.deviceId.substring(0, 8)}',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
-                if (ref.watch(credentialsProvider).value?.fingerprint
-                    case final fp?)
-                  Text(
-                    'Security key ${shortFingerprint(fp)}',
-                    style: Theme.of(context).textTheme.bodySmall,
+                if (me == DevicePlatform.ios) const _FormatSettings(),
+                const _Header('Security'),
+                ListTile(
+                  leading: const Icon(Icons.verified_user_outlined),
+                  title: const Text('Trusted devices'),
+                  subtitle: Text(
+                    trusted == 0
+                        ? 'None'
+                        : '$trusted ${trusted == 1 ? 'device' : 'devices'}',
                   ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => pushScreen<void>(
+                    context,
+                    Routes.settings,
+                    const TrustedDevicesScreen(),
+                  ),
+                ),
+                const _Header('Help'),
+                ListTile(
+                  leading: const Icon(Icons.help_outline),
+                  title: const Text("Can't find the other phone?"),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => pushScreen<void>(
+                    context,
+                    Routes.findHelp,
+                    FindHelpScreen(platform: me),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.info_outline),
+                  title: const Text('About CrossDrop'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => pushScreen<void>(
+                    context,
+                    Routes.settings,
+                    const AboutScreen(),
+                  ),
+                ),
               ],
             ),
     );
   }
 }
 
-/// Trusted devices with their auto-accept switch. A device is listed by
-/// name, but known by its key, shown shortened under the name.
-class _TrustedDevices extends ConsumerWidget {
-  const _TrustedDevices();
+class _Header extends StatelessWidget {
+  const _Header(this.text);
+
+  final String text;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final devices = ref.watch(trustedDevicesProvider).value ?? const [];
-    if (devices.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: Text(
-          'None yet. After a transfer, choose "Trust this device" to skip '
-          'the code check next time.',
-        ),
-      );
-    }
-    final repo = ref.read(trustRepositoryProvider);
-    return Column(
-      children: [
-        for (final d in devices)
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              d.platform == 'ios' ? Icons.phone_iphone : Icons.phone_android,
-            ),
-            title: Text(d.name),
-            subtitle: Text(shortFingerprint(d.fingerprint)),
-            trailing: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Tooltip(
-                  message: 'Accept files without asking',
-                  child: Switch(
-                    value: d.autoAccept,
-                    onChanged: (v) => repo.setAutoAccept(d.fingerprint, v),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Forget',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () => _forget(context, repo, d),
-                ),
-              ],
-            ),
-          ),
-        const Text(
-          'Auto-accept: files from that device are saved without the Accept '
-          'prompt.',
-        ),
-      ],
-    );
-  }
-
-  static Future<void> _forget(
-    BuildContext context,
-    TrustRepository repo,
-    TrustedDevice d,
-  ) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Forget ${d.name}?'),
-        content: const Text(
-          'Its next transfer needs the code check and your Accept again.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Forget'),
-          ),
-        ],
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+    child: Semantics(
+      header: true,
+      child: Text(
+        text,
+        style: Theme.of(context).textTheme.titleSmall
+            ?.copyWith(color: Theme.of(context).colorScheme.primary),
       ),
-    );
-    if (ok ?? false) await repo.remove(d.fingerprint);
-  }
+    ),
+  );
 }
 
 /// Format choices for photos sent from this iPhone to an Android phone
@@ -197,29 +174,25 @@ class _FormatSettings extends ConsumerWidget {
     final settings = ref.watch(formatSettingsProvider).value;
     final repo = ref.read(settingsRepositoryProvider);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const SizedBox(height: 16),
-        Text(
-          'Sending photos to Android',
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
+        const _Header('Sending photos to Android'),
         SwitchListTile(
-          contentPadding: EdgeInsets.zero,
           title: const Text('Convert HEIC to JPEG'),
           subtitle: const Text(
             'For older Android galleries that cannot open HEIC. Takes a '
-            'moment per photo and loses a little quality and HDR.',
+            'moment per photo and loses a little quality and HDR. Off: '
+            'photos are sent as they are.',
           ),
           value: settings?.convertHeicToJpeg ?? false,
           onChanged: settings == null ? null : repo.setConvertHeicToJpeg,
         ),
         SwitchListTile(
-          contentPadding: EdgeInsets.zero,
           title: const Text('Send Live Photo videos'),
           subtitle: const Text(
             'Also send the short video of each Live Photo, as a separate '
-            'file. Android cannot play them as Live Photos.',
+            'file. Android cannot play them as Live Photos. Off: only the '
+            'photo is sent.',
           ),
           value: settings?.sendLivePhotoVideo ?? false,
           onChanged: settings == null ? null : repo.setSendLivePhotoVideo,
