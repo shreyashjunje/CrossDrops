@@ -76,6 +76,31 @@ void main() {
       expect(File(first.location).lastModifiedSync().toUtc(), when);
     });
 
+    test('two saves of one name at once keep both files', () async {
+      // Review L1: both picked the same free name, and the second rename
+      // silently replaced the first file.
+      final s = FolderStore(save, platform: DevicePlatform.android);
+      final parts = <(String, FileOffer)>[];
+      for (var i = 0; i < 6; i++) {
+        final o = FileOffer(fileId: 'f$i', name: 'same.bin', size: 1);
+        final dir = p.join(root.path, 'tmp', 's$i');
+        final loc = s.initialLocation(dir, o);
+        final (pf, _) = await s.open(loc, sessionDir: dir, offer: o);
+        await pf.append(Uint8List.fromList([i]));
+        await pf.close();
+        parts.add((loc, o));
+      }
+      final saved = await Future.wait([
+        for (final (loc, o) in parts) s.save(loc, o),
+      ]);
+      final paths = {for (final r in saved) r.location};
+      expect(paths, hasLength(6));
+      final contents = {
+        for (final path in paths) File(path).readAsBytesSync()[0],
+      };
+      expect(contents, {0, 1, 2, 3, 4, 5});
+    });
+
     test('a photo goes to the gallery saver, which takes the file', () async {
       final saver = _FakeSaver(const GallerySave.saved('photos:ABC'));
       final s = FolderStore(

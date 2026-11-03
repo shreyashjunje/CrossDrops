@@ -204,10 +204,16 @@ class FolderStore implements ReceivedFileStore {
       fallback = r.fallback;
     }
     await Directory(saveDir).create(recursive: true);
-    final dest = availablePath(saveDir, safeName);
+    final dest = await claimPath(saveDir, safeName);
     try {
       await _move(location, dest);
     } on FileSystemException catch (e) {
+      // The empty placeholder; the part is still where it was.
+      try {
+        await File(dest).delete();
+      } on FileSystemException {
+        // Gone already.
+      }
       if (isNoSpace(e)) throw const StoreFull();
       rethrow;
     }

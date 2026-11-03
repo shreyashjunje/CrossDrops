@@ -76,4 +76,27 @@ void main() {
       expect(availablePath(dir.path, 'a.txt'), p.join(dir.path, 'a (2).txt'));
     });
   });
+
+  group('claimPath', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('cd_claim'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    test('creates the file and skips taken names', () async {
+      File(p.join(dir.path, 'a.txt')).writeAsStringSync('x');
+      Directory(p.join(dir.path, 'a (1).txt')).createSync();
+      final got = await claimPath(dir.path, 'a.txt');
+      expect(got, p.join(dir.path, 'a (2).txt'));
+      expect(File(got).lengthSync(), 0);
+      expect(File(p.join(dir.path, 'a.txt')).readAsStringSync(), 'x');
+    });
+
+    test('parallel claims never share a name (review L1)', () async {
+      final got = await Future.wait([
+        for (var i = 0; i < 20; i++) claimPath(dir.path, 'IMG_1.JPG'),
+      ]);
+      expect(got.toSet(), hasLength(20));
+      expect(got.every((path) => File(path).existsSync()), isTrue);
+    });
+  });
 }

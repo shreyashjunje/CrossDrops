@@ -66,7 +66,8 @@ String _truncateUtf8(String s, int maxBytes) {
 /// adding " (1)", " (2)", ... before the extension if needed.
 ///
 /// [safeName] must already be sanitized. Throws if the result would escape
-/// [dir].
+/// [dir]. Only a guess: another writer may take the name before the caller
+/// does. To write there, use [claimPath].
 String availablePath(String dir, String safeName) {
   final ext = p.extension(safeName);
   final base = p.basenameWithoutExtension(safeName);
@@ -82,4 +83,28 @@ String availablePath(String dir, String safeName) {
     throw StateError('refusing to write outside $dir');
   }
   return candidate;
+}
+
+/// Like [availablePath], but creates the file, empty and exclusively, and
+/// returns its path. Two saves of the same name at once get two names;
+/// with [availablePath] both could pick one and the second rename would
+/// silently replace the first file (review L1). The caller moves its file
+/// over the placeholder, or deletes it on failure.
+Future<String> claimPath(String dir, String safeName) async {
+  final ext = p.extension(safeName);
+  final base = p.basenameWithoutExtension(safeName);
+  for (var i = 0; i < 100000; i++) {
+    final candidate = p.join(dir, i == 0 ? safeName : '$base ($i)$ext');
+    if (!p.isWithin(dir, candidate)) {
+      throw StateError('refusing to write outside $dir');
+    }
+    if (await Directory(candidate).exists()) continue;
+    try {
+      await File(candidate).create(exclusive: true);
+      return candidate;
+    } on PathExistsException {
+      continue; // taken, maybe a moment ago
+    }
+  }
+  throw FileSystemException('no free name', p.join(dir, safeName));
 }

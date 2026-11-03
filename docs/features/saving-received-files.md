@@ -42,7 +42,7 @@ ARCHITECTURE.md, "Platform modules": saving received media and other files. Deci
   - **Photos and videos:** when verified, `PHAssetCreationRequest` with `shouldMoveFile`, the original name and the creation date.
   - **Add-only access:** asked when the user taps Accept on an offer with media; a save waits for the answer.
   - **Photos refuses the file, or access is denied:** it goes to Documents, with a note.
-  - **Other files:** go to Documents directly. Name clashes become "name (1).ext". The modification date is the creation date.
+  - **Other files:** go to Documents directly. Name clashes become "name (1).ext"; the name is claimed by creating the file exclusively before the move, so two saves at once never share one (review L1). The modification date is the creation date.
 - **Receive screen:** "Photos go to … other files go to …" while waiting. Each saved file shows "Saved to Photos" or "Saved to Download/CrossDrop (the gallery cannot open this format)".
 - **Database:** moved out of Documents to Application Support (D-034), so Files shows only received files.
 
