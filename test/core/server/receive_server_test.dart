@@ -274,6 +274,27 @@ void main() {
       expect(r.events.whereType<OfferRefused>().single.reason, 'no_space');
     });
 
+    test('sizes that wrap a 64-bit sum never reach the prompt', () async {
+      // Review H2: 4 * 2^62 + 1 KB summed to 1 KB and passed the space
+      // check; after Accept the sender could fill the disk.
+      r.freeBytes = 1000 * mb;
+      var asked = false;
+      r.decider = (_) async => asked = true;
+      final (code, body) = await send(
+        'POST',
+        '/v1/sessions',
+        json: offerJson([
+          for (var i = 0; i < 4; i++)
+            FileOffer(fileId: 'f$i', name: 'x$i', size: 1 << 62),
+          const FileOffer(fileId: 'f4', name: 'small', size: 1024),
+        ]),
+      );
+      expect(code, 400);
+      expect(body['error'], ErrorCodes.badRequest);
+      expect(asked, isFalse);
+      expect(r.server.sessions, isEmpty);
+    });
+
     test('free space is checked again when the user accepts', () async {
       r.freeBytes = 1000 * mb;
       final decision = Completer<bool>();

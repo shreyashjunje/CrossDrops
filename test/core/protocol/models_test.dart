@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -154,6 +156,60 @@ void main() {
       }),
       throwsA(isA<FormatError>()),
     );
+  });
+
+  group('declared sizes are bounded (review H2)', () {
+    Map<String, Object?> offer(List<int> sizes) => {
+      'protocol': 2,
+      'sender': {'id': 'a', 'name': 'b', 'platform': 'ios'},
+      'files': [
+        for (final (i, s) in sizes.indexed)
+          {'fileId': 'f$i', 'name': 'a', 'size': s},
+      ],
+    };
+
+    test('a file of exactly 1 TiB is accepted, one byte more is not', () {
+      expect(
+        SessionOffer.fromJson(offer([maxFileBytes])).totalBytes,
+        maxFileBytes,
+      );
+      expect(
+        () => SessionOffer.fromJson(offer([maxFileBytes + 1])),
+        throwsA(isA<FormatError>()),
+      );
+    });
+
+    test('sizes that would wrap a 64-bit sum are refused', () {
+      // 4 * 2^62 + 1024 wraps to 1024: the old check showed "1 KB".
+      expect(
+        () => SessionOffer.fromJson(
+          offer([1 << 62, 1 << 62, 1 << 62, 1 << 62, 1024]),
+        ),
+        throwsA(isA<FormatError>()),
+      );
+    });
+
+    test('the total is capped at 4 TiB', () {
+      expect(
+        SessionOffer.fromJson(
+          offer([maxFileBytes, maxFileBytes, maxFileBytes, maxFileBytes]),
+        ).totalBytes,
+        maxOfferBytes,
+      );
+      expect(
+        () => SessionOffer.fromJson(
+          offer([maxFileBytes, maxFileBytes, maxFileBytes, maxFileBytes, 1]),
+        ),
+        throwsA(isA<FormatError>()),
+      );
+    });
+
+    test('a size beyond 64 bits arrives as a double and is refused', () {
+      final json = jsonDecode(
+        '{"fileId":"f","name":"a","size":99999999999999999999}',
+      ) as Map<String, Object?>;
+      expect(() => FileOffer.fromJson(json), throwsA(isA<FormatError>()));
+    });
   });
 
   test('SessionOffer.totalBytes sums the sizes', () {

@@ -32,6 +32,14 @@ const int maxFilesPerOffer = 10000;
 /// sanitizing. Longer names are refused rather than silently cut.
 const int maxOfferedNameLength = 1024;
 
+/// Largest file an offer may declare: 1 TiB, more than any phone holds.
+/// With [maxFilesPerOffer] it keeps every sum of declared sizes far below
+/// 2^63, so totals and the free-space check cannot wrap around.
+const int maxFileBytes = 1 << 40;
+
+/// Largest total an offer may declare: 4 TiB.
+const int maxOfferBytes = 4 << 40;
+
 /// Allowed characters for ids that end up in URL paths and temp file names.
 final RegExp _idPattern = RegExp(r'^[A-Za-z0-9_-]{1,64}$');
 
@@ -105,7 +113,9 @@ class FileOffer {
     if (name is! String || name.isEmpty || name.length > maxOfferedNameLength) {
       throw FormatError('invalid name');
     }
-    if (size is! int || size < 0) throw FormatError('invalid size');
+    if (size is! int || size < 0 || size > maxFileBytes) {
+      throw FormatError('invalid size');
+    }
     if (mime != null && (mime is! String || mime.length > 255)) {
       throw FormatError('invalid mime');
     }
@@ -243,6 +253,12 @@ class SessionOffer {
     final parsed = [for (final f in files) FileOffer.fromJson(f)];
     final ids = parsed.map((f) => f.fileId).toSet();
     if (ids.length != parsed.length) throw FormatError('duplicate fileId');
+    // Each size is at most maxFileBytes, so this sum cannot overflow.
+    var total = 0;
+    for (final f in parsed) {
+      total += f.size;
+      if (total > maxOfferBytes) throw FormatError('offer too large');
+    }
     return SessionOffer(
       protocol: protocol,
       sender: SenderInfo.fromJson(json['sender']),

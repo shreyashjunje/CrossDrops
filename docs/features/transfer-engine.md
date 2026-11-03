@@ -32,7 +32,7 @@ The protocol, state machine and transfer rules are in [ARCHITECTURE.md](../ARCHI
 
 **Receiver (`ReceiveServer`)**
 
-1. `POST /v1/sessions` checks, in order: the manifest's format and limits (10,000 files, 1,024-character names), the protocol version, whether this sender already has an unfinished session (409 `sender_busy`), whether 8 sessions are already open (503), and free space (507 `no_space`). Free space must cover the offer, the bytes still expected by other open sessions, and a 64 MB reserve, on both the temp and save volumes. Only then is the session stored as `offered` and the prompt shown.
+1. `POST /v1/sessions` checks, in order: the manifest's format and limits (10,000 files, 1,024-character names, at most 1 TiB per file and 4 TiB in all), the protocol version, whether this sender already has an unfinished session (409 `sender_busy`), whether 8 sessions are already open (503), and free space (507 `no_space`). Free space must cover the offer, the bytes still expected by other open sessions, and a 64 MB reserve, on both the temp and save volumes. Only then is the session stored as `offered` and the prompt shown.
 2. The prompt has 60 s. No answer means `rejected` with reason `timeout`. When the user accepts, free space is checked again (the prompt may have been open a while), then the session moves to `accepted` and the `accepted` event goes out.
 3. Bytes sent before Accept get 403 `not_accepted`. Bytes sent to a closed session get 410 `session_closed` with the status and reason.
 4. The events WebSocket first replays where the session stands (`accepted`, then `file_done` or `progress` per file), so a sender that connects late or reconnects misses nothing. At most 4 sockets per session; the oldest is closed.

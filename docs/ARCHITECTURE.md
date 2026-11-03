@@ -194,7 +194,7 @@ One JSON text frame per event, with a `type` field. Unknown types are ignored, s
 
 The events are a convenience. Every fact they carry is also in the HTTP replies, so a lost socket never stops a transfer.
 
-**Limits on an offer:** at most 10,000 files, names at most 1,024 characters before sanitizing, one unfinished session per sender fingerprint, 8 open sessions in total (D-023), 3 offers at once per IP address then one every 20 s (D-032).
+**Limits on an offer:** at most 10,000 files, each declared size at most 1 TiB and the total at most 4 TiB (so no sum of sizes can overflow, review H2), names at most 1,024 characters before sanitizing, one unfinished session per sender fingerprint, 8 open sessions in total (D-023), 3 offers at once per IP address then one every 20 s (D-032).
 
 **Offer manifest (POST /v1/sessions)**
 
@@ -337,7 +337,7 @@ After a successful pairing the receiver can tick "Trust this device" in the Acce
 | Man-in-the-middle | Pin from QR or trusted record; code from committed nonces on first contact; proofs bound to the receiver's fingerprint |
 | Another sender hijacks a running session | Sessions belong to the authenticated fingerprint; others get 404 |
 | Malicious file name such as `../../evil` | Sanitize names: strip paths, control characters and reserved names; limit length |
-| Huge offer to fill the disk | Free-space check before accepting; reject if the file is larger than declared |
+| Huge offer to fill the disk | Free-space check before accepting, on sizes capped at 1 TiB per file and 4 TiB per offer; reject if the file is larger than declared |
 | Flood of requests | Rate limits; header and body limits; capped challenge, token and address tables |
 | Corrupted or tampered file | SHA-256 verified before saving |
 | Server left open in public | Server runs only while the app is open and the switch is on, stops when hidden and idle; new random port each start |
