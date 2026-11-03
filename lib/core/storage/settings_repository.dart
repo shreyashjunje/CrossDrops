@@ -26,6 +26,22 @@ class SettingsRepository {
         ),
       );
 
+  /// The first-launch introduction was shown (D-050). Off by default, so
+  /// installs from before Phase 6 see it once too.
+  Stream<bool> watchOnboardingDone() => _db
+      .select(_db.settings)
+      .watchSingleOrNull()
+      .map((row) => row?.onboardingDone ?? false);
+
+  Future<void> setOnboardingDone(bool value) => _db
+      .into(_db.settings)
+      .insertOnConflictUpdate(
+        SettingsCompanion.insert(
+          slot: const Value(1),
+          onboardingDone: Value(value),
+        ),
+      );
+
   /// Format settings for sending photos (D-039); both off by default.
   Stream<FormatSettings> watchFormatSettings() => _db
       .select(_db.settings)

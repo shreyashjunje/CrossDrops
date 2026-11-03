@@ -141,6 +141,10 @@ class Settings extends Table {
   BoolColumn get sendLivePhotoVideo =>
       boolean().withDefault(const Constant(false))();
 
+  /// The first-launch introduction was shown (D-050).
+  BoolColumn get onboardingDone =>
+      boolean().withDefault(const Constant(false))();
+
   @override
   Set<Column<Object>> get primaryKey => {slot};
 }
@@ -155,7 +159,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.executor);
 
   @override
-  int get schemaVersion => 4;
+  int get schemaVersion => 5;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -174,6 +178,9 @@ class AppDatabase extends _$AppDatabase {
       if (from >= 3 && from < 4) {
         await m.addColumn(settings, settings.convertHeicToJpeg);
         await m.addColumn(settings, settings.sendLivePhotoVideo);
+      }
+      if (from >= 3 && from < 5) {
+        await m.addColumn(settings, settings.onboardingDone);
       }
     },
     beforeOpen: (details) async {

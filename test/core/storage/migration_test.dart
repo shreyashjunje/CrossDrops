@@ -38,7 +38,7 @@ void main() {
     expect(await TrustRepository(db).all(), isEmpty);
     expect(await SettingsRepository(db).receivingEnabled(), isTrue);
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 4);
+    expect(version.read<int>('user_version'), 5);
   });
 
   test(
@@ -57,6 +57,9 @@ void main() {
         'ALTER TABLE settings DROP COLUMN send_live_photo_video',
       );
       await db.customStatement(
+        'ALTER TABLE settings DROP COLUMN onboarding_done',
+      );
+      await db.customStatement(
         'INSERT INTO settings (slot, receiving_enabled) VALUES (1, 0)',
       );
       await db.customStatement('PRAGMA user_version = 3');
@@ -69,6 +72,36 @@ void main() {
       expect(await settings.formatSettings(), const FormatSettings());
       await settings.setConvertHeicToJpeg(true);
       expect((await settings.formatSettings()).convertHeicToJpeg, isTrue);
+      expect(await settings.receivingEnabled(), isFalse);
+    },
+  );
+  test(
+    'a Phase 5 database (schema 4) upgrades to 5: introduction not shown yet',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('cd_migrate5');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File(p.join(dir.path, 'db.sqlite'));
+
+      var db = AppDatabase(NativeDatabase(file));
+      await db.customSelect('SELECT 1').get();
+      await db.customStatement(
+        'ALTER TABLE settings DROP COLUMN onboarding_done',
+      );
+      await db.customStatement(
+        'INSERT INTO settings (slot, receiving_enabled, convert_heic_to_jpeg) '
+        'VALUES (1, 0, 1)',
+      );
+      await db.customStatement('PRAGMA user_version = 4');
+      await db.close();
+
+      db = AppDatabase(NativeDatabase(file));
+      addTearDown(db.close);
+      final settings = SettingsRepository(db);
+      expect(await settings.watchOnboardingDone().first, isFalse);
+      expect(await settings.receivingEnabled(), isFalse);
+      expect((await settings.formatSettings()).convertHeicToJpeg, isTrue);
+      await settings.setOnboardingDone(true);
+      expect(await settings.watchOnboardingDone().first, isTrue);
       expect(await settings.receivingEnabled(), isFalse);
     },
   );

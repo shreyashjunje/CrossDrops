@@ -106,6 +106,11 @@ final receivingEnabledProvider = StreamProvider<bool>(
   (ref) => ref.watch(settingsRepositoryProvider).watchReceivingEnabled(),
 );
 
+/// The first-launch introduction was shown (D-050).
+final onboardingDoneProvider = StreamProvider<bool>(
+  (ref) => ref.watch(settingsRepositoryProvider).watchOnboardingDone(),
+);
+
 final formatSettingsProvider = StreamProvider<FormatSettings>(
   (ref) => ref.watch(settingsRepositoryProvider).watchFormatSettings(),
 );

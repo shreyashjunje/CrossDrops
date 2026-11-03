@@ -6,6 +6,7 @@ import '../../app/providers.dart';
 import '../../core/protocol/device_name.dart';
 import '../../core/security/device_identity.dart';
 import '../nearby/find_help_screen.dart';
+import '../onboarding/onboarding_screen.dart';
 import 'about_screen.dart';
 import 'trusted_devices_screen.dart';
 
@@ -127,6 +128,16 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
                     context,
                     Routes.findHelp,
                     FindHelpScreen(platform: me),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.school_outlined),
+                  title: const Text('Show the introduction'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => pushScreen<void>(
+                    context,
+                    Routes.settings,
+                    OnboardingScreen(replay: true, platform: me),
                   ),
                 ),
                 ListTile(

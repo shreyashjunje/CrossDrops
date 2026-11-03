@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/navigation.dart';
+import '../../app/providers.dart';
 import '../../core/server/receive_server.dart';
 import '../transfer/transfer_screen.dart';
 import 'incoming_request_screen.dart';
@@ -11,7 +12,9 @@ import 'receive_controller.dart';
 
 /// Receiving may start: false until onboarding has explained the Local
 /// Network permission, so its iOS prompt comes right after (D-050).
-final receiveAllowedProvider = Provider<bool>((ref) => true);
+final receiveAllowedProvider = Provider<bool>(
+  (ref) => ref.watch(onboardingDoneProvider).value ?? false,
+);
 
 /// What screens show about receiving. Use this, not
 /// [receiveControllerProvider], in widgets: watching the controller starts
