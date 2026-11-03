@@ -25,6 +25,21 @@ class FakeHotspot implements HotspotService {
   /// Addresses the phone has after a start.
   List<LocalAddress> addresses = [_client];
 
+  /// When set, [start] waits for it, as the system does.
+  Completer<void>? startGate;
+
+  /// When set, listing the addresses waits for it.
+  Completer<void>? listGate;
+
+  /// Like the Kotlin side since review H3: a stop during a start makes
+  /// that start fail with `cancelled`. Off: the start still succeeds, as
+  /// the system would hand over a reservation after the stop.
+  bool stopCancelsStart = false;
+  Completer<void>? _cancel;
+
+  /// A hotspot is up and nobody stopped it.
+  bool running = false;
+
   @override
   Future<HotspotSupport> support() async => HotspotSupport.available;
 
@@ -32,14 +47,26 @@ class FakeHotspot implements HotspotService {
   Future<WifiCredentials> start() async {
     starts++;
     if (failWith != null) throw HotspotException(failWith!);
+    final gate = startGate;
+    if (gate != null) {
+      final cancel = _cancel = Completer<void>();
+      await Future.any([gate.future, cancel.future]);
+      _cancel = null;
+      if (cancel.isCompleted) {
+        throw const HotspotException(HotspotErrors.cancelled);
+      }
+    }
     addresses = [_client, _ap];
+    running = true;
     return _wifi;
   }
 
   @override
   Future<void> stop() async {
     stops++;
+    if (stopCancelsStart) _cancel?.complete();
     addresses = [_client];
+    running = false;
   }
 
   @override
@@ -61,7 +88,10 @@ ProviderContainer containerFor(FakeHotspot hotspot) {
   final c = ProviderContainer(
     overrides: [
       hotspotServiceProvider.overrideWithValue(hotspot),
-      localAddressesProvider.overrideWithValue(() async => hotspot.addresses),
+      localAddressesProvider.overrideWithValue(() async {
+        await hotspot.listGate?.future;
+        return hotspot.addresses;
+      }),
       transfersActiveProvider.overrideWith(
         (ref) => ref.watch(fakeActiveProvider),
       ),
@@ -106,6 +136,48 @@ void main() {
       expect(s.phase, HotspotPhase.failed);
       expect(s.error, 'no_address');
       expect(hotspot.stops, 1);
+      c.dispose();
+    });
+  });
+
+  group('leaving or stopping while it starts (review H3)', () {
+    test('closed while the system starts it: stopped once it is up', () async {
+      final hotspot = FakeHotspot()..startGate = Completer<void>();
+      final c = containerFor(hotspot);
+      final starting = c.read(hotspotControllerProvider.notifier).start();
+      await pumpEventQueue();
+      expect(hotspot.starts, 1);
+      c.dispose();
+      // The system hands the hotspot over after the screen is gone.
+      hotspot.startGate!.complete();
+      await starting;
+      expect(hotspot.running, isFalse);
+    });
+
+    test('closed while the addresses are read: nothing starts', () async {
+      final hotspot = FakeHotspot()..listGate = Completer<void>();
+      final c = containerFor(hotspot);
+      final starting = c.read(hotspotControllerProvider.notifier).start();
+      await pumpEventQueue();
+      c.dispose();
+      hotspot.listGate!.complete();
+      await starting;
+      expect(hotspot.starts, 0);
+      expect(hotspot.running, isFalse);
+    });
+
+    test('Stop while starting cancels it, without a failure', () async {
+      final hotspot = FakeHotspot()
+        ..startGate = Completer<void>()
+        ..stopCancelsStart = true;
+      final c = containerFor(hotspot);
+      final ctrl = c.read(hotspotControllerProvider.notifier);
+      final starting = ctrl.start();
+      await pumpEventQueue();
+      await ctrl.stop();
+      await starting;
+      expect(c.read(hotspotControllerProvider).phase, HotspotPhase.idle);
+      expect(hotspot.running, isFalse);
       c.dispose();
     });
   });

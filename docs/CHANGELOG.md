@@ -7,6 +7,7 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 ### Fixed (code review 2026-11-03)
 - **Security (H1):** the sender's auth commitment now covers both fingerprints as well as its nonce, so a man in the middle can no longer choose a certificate that makes both pairing codes match. Protocol version 2; version 1 is refused (D-061).
 - **Security (H2):** declared file sizes are capped at 1 TiB and an offer at 4 TiB, so sizes can no longer wrap the 64-bit total and slip past the free-space check.
+- **Hotspot (H3):** leaving the hotspot screen, or tapping Stop, while the hotspot is still starting no longer leaves it running with no screen.
 
 ### Added (Phase 7)
 - Android hotspot from the app ([features/android-hotspot.md](features/android-hotspot.md)): LocalOnlyHotspot with one QR code holding the Wi-Fi name, password and connection info, plus a Wi-Fi code for the iPhone Camera. Asks for Nearby devices (Android 13+) or Location (10–12) at Start, explains every refusal, stops when the screen closes or 60 s after the last transfer, with Keep on.

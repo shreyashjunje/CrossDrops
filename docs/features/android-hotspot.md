@@ -56,7 +56,7 @@ When there is no shared Wi-Fi, or the Wi-Fi keeps phones apart, the Android phon
 
 Every error also shows "Or use this phone's own hotspot" with the manual steps.
 
-**Stopping** (D-054): the hotspot belongs to the hotspot screen. Leaving the screen stops it; if a transfer is running, a dialog asks first. When the last transfer in either direction ends, a card says "The network stops in 60 s" with **Keep on**. A new transfer cancels the countdown. Closing the reservation is the documented way to stop; the system tears the network down when no app holds it.
+**Stopping** (D-054): the hotspot belongs to the hotspot screen. Leaving the screen stops it; if a transfer is running, a dialog asks first. When the last transfer in either direction ends, a card says "The network stops in 60 s" with **Keep on**. A new transfer cancels the countdown. Closing the reservation is the documented way to stop; the system tears the network down when no app holds it. Leaving or tapping Stop while the hotspot is still starting cancels the start: Kotlin answers that start with `cancelled` and closes the reservation if the system hands one over afterwards, and Dart stops the service again if it was disposed meanwhile (review H3).
 
 **Sending the other way:** **Send files to the iPhone** opens Send on top of the hotspot screen, so the network stays up. The iPhone, once joined, is found by discovery or by its own QR code.
 
@@ -90,7 +90,7 @@ QR payload, optional fields (ARCHITECTURE.md, "QR code payload"):
 
 - `test/core/protocol/connect_payload_test.dart`: Wi-Fi fields round trip, escaping, every refusal, `toString` hides both.
 - `test/core/discovery/subnet_test.dart`: `pickHotspotAddress` for new interfaces, Wi-Fi dropped, shared hotspot, mobile data.
-- `test/features/hotspot/hotspot_controller_test.dart`: start, failure, no address, stopped elsewhere, 60 s stop, Keep on, Wi-Fi QR escaping.
+- `test/features/hotspot/hotspot_controller_test.dart`: start, failure, no address, stopped elsewhere, 60 s stop, Keep on, Wi-Fi QR escaping; leaving while the system starts it or while the addresses are read, and Stop while starting, never leave a hotspot running.
 - `test/features/hotspot/hotspot_screens_test.dart`: Start, leave stops it, error messages, permission button.
 
 **Device checks**

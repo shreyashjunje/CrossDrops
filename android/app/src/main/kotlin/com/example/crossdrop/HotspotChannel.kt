@@ -23,9 +23,9 @@ import io.flutter.plugin.common.MethodChannel
  * - `start` -> `{ssid, password, security}`, after asking for the
  *   permission if needed. Errors: `permission`, `location_off`,
  *   `tethering_on`, `no_channel`, `disallowed`, `unsupported_security`,
- *   `failed`.
- * - `stop` closes the reservation; the system tears the hotspot down when
- *   no app holds one.
+ *   `failed`, or `cancelled` when `stop` came first.
+ * - `stop` closes the reservation, or cancels a start still running; the
+ *   system tears the hotspot down when no app holds one.
  * - Native to Dart `stopped` when the user or the system stops it.
  *
  * Permissions: Android 13+ NEARBY_WIFI_DEVICES (neverForLocation);
@@ -39,6 +39,14 @@ class HotspotChannel(private val activity: Activity, messenger: BinaryMessenger)
     private var reservation: WifiManager.LocalOnlyHotspotReservation? = null
     private var pendingStart: MethodChannel.Result? = null
     private var pendingPermission: MethodChannel.Result? = null
+    private var startTimeout: Runnable? = null
+
+    /**
+     * Bumped by every start and stop. A callback from an older start (one
+     * that was stopped or timed out meanwhile) closes what it gets instead
+     * of keeping a hotspot nobody shows.
+     */
+    private var generation = 0
 
     init {
         channel.setMethodCallHandler { call, result ->
@@ -98,19 +106,22 @@ class HotspotChannel(private val activity: Activity, messenger: BinaryMessenger)
         // Only one request per app: close a leftover one first.
         reservation?.close()
         reservation = null
+        val gen = ++generation
         pendingStart = result
-        val timeout = Runnable { finishStart(error = "failed") }
+        val timeout = Runnable { if (gen == generation) finishStart(error = "failed") }
+        startTimeout = timeout
         main.postDelayed(timeout, START_TIMEOUT_MS)
         try {
             wifi.startLocalOnlyHotspot(
                 object : WifiManager.LocalOnlyHotspotCallback() {
                     override fun onStarted(r: WifiManager.LocalOnlyHotspotReservation) {
                         main.removeCallbacks(timeout)
-                        val info = describe(r)
-                        if (pendingStart == null) {
-                            r.close() // Timed out meanwhile.
+                        if (gen != generation || pendingStart == null) {
+                            // Stopped or timed out meanwhile: nobody wants it.
+                            r.close()
                             return
                         }
+                        val info = describe(r)
                         if (info == null) {
                             r.close()
                             finishStart(error = "unsupported_security")
@@ -122,6 +133,7 @@ class HotspotChannel(private val activity: Activity, messenger: BinaryMessenger)
 
                     override fun onStopped() {
                         main.removeCallbacks(timeout)
+                        if (gen != generation) return
                         reservation = null
                         if (pendingStart != null) {
                             finishStart(error = "failed")
@@ -132,6 +144,7 @@ class HotspotChannel(private val activity: Activity, messenger: BinaryMessenger)
 
                     override fun onFailed(reason: Int) {
                         main.removeCallbacks(timeout)
+                        if (gen != generation) return
                         finishStart(error = failure(reason))
                     }
                 },
@@ -150,10 +163,23 @@ class HotspotChannel(private val activity: Activity, messenger: BinaryMessenger)
     private fun finishStart(value: Map<String, String>? = null, error: String? = null) {
         val result = pendingStart ?: return
         pendingStart = null
+        startTimeout?.let { main.removeCallbacks(it) }
+        startTimeout = null
         if (error != null) result.error(error, null, null) else result.success(value)
     }
 
+    /**
+     * Closes the hotspot, and cancels a start still waiting for the system
+     * or for the permission prompt: the screen that asked is gone (review
+     * H3). A reservation that arrives later is closed in onStarted.
+     */
     fun stop() {
+        generation++
+        finishStart(error = "cancelled")
+        pendingPermission?.let {
+            pendingPermission = null
+            it.error("cancelled", null, null)
+        }
         reservation?.close()
         reservation = null
     }

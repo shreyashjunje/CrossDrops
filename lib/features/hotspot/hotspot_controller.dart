@@ -107,18 +107,27 @@ class HotspotController extends Notifier<HotspotState> {
     state = const HotspotState(phase: HotspotPhase.starting);
     final list = ref.read(localAddressesProvider);
     final before = await list();
+    // The screen closed, or Stop was tapped, while the list was read: no
+    // start at all (review H3).
+    if (!ref.mounted || state.phase != HotspotPhase.starting) return;
     final WifiCredentials wifi;
     _live = true;
     try {
       wifi = await _service.start();
     } on HotspotException catch (e) {
       _live = false;
-      if (ref.mounted) {
+      // A stop while starting cancels the start; that is not a failure.
+      if (ref.mounted && state.phase == HotspotPhase.starting) {
         state = HotspotState(phase: HotspotPhase.failed, error: e.code);
       }
       return;
     }
-    if (!ref.mounted) return; // onDispose stopped it.
+    if (!ref.mounted) {
+      // Disposed while starting. onDispose asked for a stop, but the
+      // hotspot may have come up after it; a second stop is harmless.
+      await _service.stop();
+      return;
+    }
     if (state.phase != HotspotPhase.starting) {
       // Stopped while starting: the stop came before the hotspot was up.
       await _service.stop();

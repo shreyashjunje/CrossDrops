@@ -55,6 +55,9 @@ abstract final class HotspotErrors {
   static const unsupportedSecurity = 'unsupported_security';
   static const busy = 'busy';
   static const failed = 'failed';
+
+  /// [HotspotService.stop] was called while the start was still running.
+  static const cancelled = 'cancelled';
 }
 
 /// [HotspotService] over the `crossdrop/hotspot` channel
