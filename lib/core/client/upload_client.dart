@@ -57,16 +57,19 @@ class UploadException implements Exception {
 /// A file offered to the receiver; pass it to [UploadClient.transfer] to
 /// send it, and again to resume after an interruption.
 class UploadTarget {
-  const UploadTarget({
+  UploadTarget({
     required this.sessionId,
     required this.fileId,
-    required this.path,
     required this.size,
-  });
+    String path = '',
+    ByteSource? source,
+  }) : source = source ?? PathSource(path);
 
   final String sessionId;
   final String fileId;
-  final String path;
+
+  /// Where the bytes come from: a file path or an Android descriptor.
+  final ByteSource source;
   final int size;
 }
 
@@ -343,7 +346,7 @@ class UploadClient {
   }) async {
     _cancelled = false;
     final ownHash = hash == null;
-    final h = hash ?? BackgroundFileHash.start(t.path, t.size);
+    final h = hash ?? BackgroundFileHash.startSource(t.source, t.size);
     try {
       for (var attempt = 1; ; attempt++) {
         final status = await fileStatus(t);
@@ -429,8 +432,8 @@ class UploadClient {
         req.headers.set('authorization', 'Bearer $token');
         req.contentLength = t.size - offset;
         req.headers.contentType = ContentType.binary;
-        await for (final chunk in readFileChunks(
-          t.path,
+        await for (final chunk in readSourceChunks(
+          t.source,
           start: offset,
           end: t.size,
         )) {

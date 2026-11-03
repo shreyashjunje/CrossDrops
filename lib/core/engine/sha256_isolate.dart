@@ -98,9 +98,13 @@ class Sha256Isolate {
   /// Hashes bytes [0, length) of [path], read from disk inside the worker.
   /// Used on resume to rebuild the hash state of bytes sent or received
   /// earlier.
-  Future<void> addFilePrefix(String path, int length) async {
+  Future<void> addFilePrefix(String path, int length) =>
+      addSourcePrefix(PathSource(path), length);
+
+  /// [addFilePrefix] for any [ByteSource] (a descriptor on Android).
+  Future<void> addSourcePrefix(ByteSource source, int length) async {
     if (length <= 0) return;
-    await _send(['file', path, length]);
+    await _send(['file', source, length]);
   }
 
   /// Adds [chunk] to the hash. Waits if too many chunks are in flight.
@@ -185,17 +189,22 @@ class BackgroundFileHash {
   bool _aborted = false;
   late final Future<void> _running;
 
-  static BackgroundFileHash start(String path, int length) {
+  static BackgroundFileHash start(String path, int length) =>
+      startSource(PathSource(path), length);
+
+  /// [start] for any [ByteSource]. The source must stay open until
+  /// [digest] completes or [abort] returns.
+  static BackgroundFileHash startSource(ByteSource source, int length) {
     final h = BackgroundFileHash._(Completer<String>());
-    h._running = h._run(path, length);
+    h._running = h._run(source, length);
     return h;
   }
 
-  Future<void> _run(String path, int length) async {
+  Future<void> _run(ByteSource source, int length) async {
     try {
       final hasher = _hasher = await Sha256Isolate.spawn(maxInFlight: 1);
       if (_aborted) return hasher.abort();
-      await hasher.addFilePrefix(path, length);
+      await hasher.addSourcePrefix(source, length);
       final digest = await hasher.close();
       if (!_done.isCompleted) _done.complete(digest);
     } catch (e, st) {
@@ -252,8 +261,8 @@ Future<void> _workerMain(SendPort toMain) async {
           toMain.send('ack');
         case 'file':
           // Breaking out closes the file.
-          await for (final chunk in readFileChunks(
-            list[1] as String,
+          await for (final chunk in readSourceChunksInIsolate(
+            list[1] as ByteSource,
             end: list[2] as int,
           )) {
             if (stopped) break loop;

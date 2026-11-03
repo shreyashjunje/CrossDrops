@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import '../client/upload_client.dart';
 import '../log.dart';
@@ -10,6 +9,7 @@ import '../storage/transfer_repository.dart';
 import 'backoff.dart';
 import 'progress_tracker.dart';
 import 'sha256_isolate.dart';
+import 'source_opener.dart';
 
 enum SendPhase {
   connecting,
@@ -66,6 +66,8 @@ class SendItem {
     this.created,
   });
 
+  /// A file path, or a `content://` URI on Android, opened by the
+  /// session's [SourceOpener].
   final String path;
   final String name;
   final int size;
@@ -183,6 +185,7 @@ class SendSession {
     PeerLocator? locate,
     ClientFactory? clientFactory,
     Backoff Function()? backoff,
+    SourceOpener? opener,
     this.acceptTimeout = const Duration(seconds: 75),
     this.pollInterval = const Duration(seconds: 2),
   }) : _host = host,
@@ -198,6 +201,7 @@ class SendSession {
              credentials: credentials,
            )),
        _newBackoff = backoff ?? Backoff.new,
+       _opener = opener ?? const FileSourceOpener(),
        _files = [for (final (i, item) in items.indexed) _File('f$i', item)] {
     _client = _clientFactory(host, port);
     _tracker = ProgressTracker({for (final f in _files) f.fileId: f.item.size});
@@ -214,6 +218,7 @@ class SendSession {
     PeerLocator? locate,
     ClientFactory? clientFactory,
     Backoff Function()? backoff,
+    SourceOpener? opener,
   }) {
     final fingerprint = stored.peerFingerprint;
     if (fingerprint == null) {
@@ -241,6 +246,7 @@ class SendSession {
       locate: locate,
       clientFactory: clientFactory,
       backoff: backoff,
+      opener: opener,
     );
     s._sessionId = stored.sessionId;
     s._rowId = stored.rowId;
@@ -277,6 +283,10 @@ class SendSession {
   late UploadClient _client;
   late final ProgressTracker _tracker;
   final Map<String, BackgroundFileHash> _hashes = {};
+
+  /// Sources open for the file being sent, closed when it ends.
+  final Map<String, OpenedSource> _opened = {};
+  final SourceOpener _opener;
   final StreamController<SendSnapshot> _updates = StreamController.broadcast();
   EventConnection? _events;
   StreamSubscription<SessionEvent>? _eventSub;
@@ -360,6 +370,11 @@ class SendSession {
       for (final h in _hashes.values) {
         await h.abort();
       }
+      // After the hashers: they read the same descriptors.
+      for (final o in _opened.values) {
+        await o.close();
+      }
+      _opened.clear();
       _client.close();
     }
     return snapshot;
@@ -586,18 +601,19 @@ class SendSession {
   };
 
   Future<void> _sendFile(_File f) async {
-    final target = UploadTarget(
-      sessionId: _sessionId!,
-      fileId: f.fileId,
-      path: f.item.path,
-      size: f.item.size,
-    );
-    if (!await _sourceIntact(f)) {
+    final opened = await _openFor(f);
+    if (opened == null) {
       await _cancelRemote();
       throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
     }
-    final hash = _hashes[f.fileId] ??= BackgroundFileHash.start(
-      f.item.path,
+    final target = UploadTarget(
+      sessionId: _sessionId!,
+      fileId: f.fileId,
+      source: opened.source,
+      size: f.item.size,
+    );
+    final hash = _hashes[f.fileId] ??= BackgroundFileHash.startSource(
+      opened.source,
       f.item.size,
     );
     final backoff = _newBackoff();
@@ -801,12 +817,36 @@ class SendSession {
 
   // ------------------------------------------------------------- helpers
 
-  static Future<bool> _sourceIntact(_File f) async {
+  /// The source still exists and has the offered size. Opens and closes
+  /// it, so checking 10,000 files never holds 10,000 descriptors.
+  Future<bool> _sourceIntact(_File f) async {
     try {
-      return await File(f.item.path).length() == f.item.size;
-    } on FileSystemException {
+      final o = await _opener.open(f.item.path);
+      await o.close();
+      return o.length == f.item.size;
+    } on SourceUnavailable {
       return false;
     }
+  }
+
+  /// The open source for [f], opened once per file. Null if it is gone or
+  /// changed size since the offer.
+  Future<OpenedSource?> _openFor(_File f) async {
+    final open = _opened[f.fileId];
+    if (open != null) return open;
+    final OpenedSource o;
+    try {
+      o = await _opener.open(f.item.path);
+    } on SourceUnavailable catch (e) {
+      _log('file ${f.fileId}: source unavailable (${e.reason})');
+      return null;
+    }
+    if (o.length != f.item.size) {
+      await o.close();
+      _log('file ${f.fileId}: source changed size');
+      return null;
+    }
+    return _opened[f.fileId] = o;
   }
 
   Future<void> _confirm(_File f, int bytes) async {
@@ -836,6 +876,7 @@ class SendSession {
       _tracker.drop(f.fileId);
     }
     await _hashes.remove(f.fileId)?.abort();
+    await _opened.remove(f.fileId)?.close();
     _log('file ${f.fileId}: ${status.name}');
     final row = _rowId;
     if (row != null) {

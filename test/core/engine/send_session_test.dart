@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/engine/backoff.dart';
 import 'package:crossdrop/core/engine/send_session.dart';
+import 'package:crossdrop/core/engine/source_opener.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_credentials.dart';
 import 'package:crossdrop/core/storage/database.dart';
@@ -74,6 +75,7 @@ void main() {
     TransferRepository? repo,
     PeerLocator? locate,
     ClientFactory? clientFactory,
+    SourceOpener? opener,
   }) => SendSession(
     host: '127.0.0.1',
     port: port ?? proxy.port,
@@ -87,6 +89,7 @@ void main() {
     clientFactory: clientFactory ?? quickClient,
     backoff: () => fastBackoff(giveUp: giveUp),
     pollInterval: const Duration(milliseconds: 50),
+    opener: opener,
   );
 
   Future<(SendItem, String)> makeFile(
@@ -353,6 +356,45 @@ void main() {
     });
   });
 
+  group('content URIs through a SourceOpener', () {
+    test('each source is opened for its file and always closed', () async {
+      final a = await makeFile('a.jpg', 2 * mb + 3, seed: 4);
+      final b = await makeFile('b.mov', 3 * mb, seed: 5);
+      final opener = _MappedOpener({
+        'content://media/1': a.$1.path,
+        'content://media/2': b.$1.path,
+      });
+      final s = session([
+        SendItem(path: 'content://media/1', name: 'a.jpg', size: a.$1.size),
+        SendItem(path: 'content://media/2', name: 'b.mov', size: b.$1.size),
+      ], opener: opener);
+
+      final result = await s.run();
+
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      await expectSavedMatches({'a.jpg': a.$2, 'b.mov': b.$2});
+      expect(opener.openNow, 0, reason: 'every source closed');
+      expect(opener.maxOpen, 1, reason: 'one file at a time');
+    });
+
+    test('a permission revoked mid-session stops the send', () async {
+      final a = await makeFile('a.jpg', 1000, seed: 6);
+      final b = await makeFile('b.jpg', 1000, seed: 7);
+      final opener = _MappedOpener({
+        'content://x/1': a.$1.path,
+        'content://x/2': b.$1.path,
+      }, failAfter: 3); // 2 checks before the offer, then file 1 only
+      final result = await session([
+        SendItem(path: 'content://x/1', name: 'a.jpg', size: 1000),
+        SendItem(path: 'content://x/2', name: 'b.jpg', size: 1000),
+      ], opener: opener).run();
+
+      expect(result.phase, SendPhase.failed);
+      expect(result.reason, SendReasons.sourceUnreadable);
+      expect(opener.openNow, 0);
+    });
+  });
+
   group('cancel and reject', () {
     test('declined by the receiver', () async {
       r.decider = (_) async => false;
@@ -513,5 +555,29 @@ class _CorruptingClient extends UploadClient {
   Future<void> complete(UploadTarget t, String sha) {
     final hit = (onlyFile == null || t.fileId == onlyFile) && corrupt();
     return super.complete(t, hit ? '0' * 64 : sha);
+  }
+}
+
+/// Maps fake content URIs to temp files and counts open descriptors.
+class _MappedOpener implements SourceOpener {
+  _MappedOpener(this.map, {this.failAfter});
+
+  final Map<String, String> map;
+  final int? failAfter;
+  int opens = 0;
+  int openNow = 0;
+  int maxOpen = 0;
+
+  @override
+  Future<OpenedSource> open(String ref) async {
+    opens++;
+    final path = map[ref];
+    if (path == null || (failAfter != null && opens > failAfter!)) {
+      throw const SourceUnavailable('permission revoked');
+    }
+    final o = await const FileSourceOpener().open(path);
+    openNow++;
+    if (openNow > maxOpen) maxOpen = openNow;
+    return OpenedSource(o.source, o.length, () async => openNow--);
   }
 }

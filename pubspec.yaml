@@ -52,6 +52,7 @@ dependencies:
   shelf_web_socket: ^3.0.0
   flutter_foreground_task: ^11.0.3
   flutter_secure_storage: ^11.2.0
+  ffi: ^2.2.0
 
 dev_dependencies:
   flutter_test:

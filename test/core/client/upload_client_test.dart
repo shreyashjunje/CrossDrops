@@ -126,9 +126,7 @@ void main() {
     );
     addTearDown(client.close);
     await expectLater(
-      client.fileStatus(
-        const UploadTarget(sessionId: 's', fileId: 'f1', path: '', size: 0),
-      ),
+      client.fileStatus(UploadTarget(sessionId: 's', fileId: 'f1', size: 0)),
       throwsA(isA<UploadException>().having((e) => e.code, 'code', 'network')),
     );
   });
