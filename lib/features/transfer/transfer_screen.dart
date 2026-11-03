@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/media_providers.dart';
+import '../../app/navigation.dart';
+import '../../core/media/save_target.dart';
 import '../../core/security/device_identity.dart';
+import '../nearby/nearby_screen.dart';
 import '../receive/receive_controller.dart';
 import '../receive/receive_host.dart';
 import '../send/send_controller.dart';
+import 'failure_messages.dart';
 import 'progress_view.dart';
+import 'result_view.dart';
+import 'transfer_format.dart';
 import 'transfer_view.dart';
 
 /// One transfer: progress while it runs, then Done or Failed. With no
@@ -39,6 +46,14 @@ class TransferScreen extends ConsumerWidget {
         );
       } else if (view == null) {
         body = const Center(child: CircularProgressIndicator());
+      } else if (view.stage.isFinished) {
+        body = ResultView(
+          view: view,
+          platform: DevicePlatform.current,
+          onAction: (a) => _act(context, ref, a),
+          onTrust: s.canTrustReceiver ? send.trustReceiver : null,
+          onClose: () => _close(context),
+        );
       } else {
         body = ProgressView(
           view: view,
@@ -54,6 +69,15 @@ class TransferScreen extends ConsumerWidget {
       );
       if (session == null) {
         body = const Center(child: Text('This transfer is no longer here.'));
+      } else if (TransferView.fromIncoming(session) case final view
+          when view.stage.isFinished) {
+        body = ResultView(
+          view: view,
+          platform: DevicePlatform.current,
+          onOpen: (f) => _open(context, ref, f),
+          onAction: (a) => _act(context, ref, a),
+          onClose: () => _close(context),
+        );
       } else {
         body = ProgressView(
           view: TransferView.fromIncoming(session),
@@ -69,6 +93,49 @@ class TransferScreen extends ConsumerWidget {
       appBar: AppBar(title: const Text('Transfer')),
       body: body,
     );
+  }
+
+  static void _close(BuildContext context) =>
+      Navigator.of(context).popUntil((r) => r.isFirst);
+
+  static Future<void> _open(
+    BuildContext context,
+    WidgetRef ref,
+    TransferFileView file,
+  ) async {
+    final location = file.location;
+    if (location == null) return;
+    final messenger = ScaffoldMessenger.of(context);
+    if (await ref.read(fileOpenerProvider).open(location)) return;
+    final where = formatSavedTo(
+      file.savedTo ?? SaveCollection.files,
+      null,
+      platform: DevicePlatform.current,
+    );
+    messenger.showSnackBar(
+      SnackBar(content: Text('Could not open it here. $where.')),
+    );
+  }
+
+  /// The button under a failure: the next step from the failure table.
+  static void _act(BuildContext context, WidgetRef ref, NextAction action) {
+    final navigator = Navigator.of(context);
+    switch (action) {
+      case NextAction.resume:
+        ref.read(sendControllerProvider.notifier).resume();
+      case NextAction.sendAgain:
+      case NextAction.scanQr:
+      case NextAction.findHelp:
+        navigator.popUntil((r) => r.isFirst);
+        navigator.push(
+          MaterialPageRoute<void>(
+            settings: const RouteSettings(name: Routes.nearby),
+            builder: (_) => const NearbyScreen(),
+          ),
+        );
+      case NextAction.none:
+        break;
+    }
   }
 
   static Future<void> _confirmCancel(

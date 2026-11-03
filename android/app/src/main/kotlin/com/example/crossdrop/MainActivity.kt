@@ -1,9 +1,11 @@
 package com.example.crossdrop
 
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.os.StatFs
+import android.provider.MediaStore
 import android.provider.Settings
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -38,6 +40,13 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "crossdrop/open")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "open" -> result.success(openSaved(call.argument<String>("location")))
+                    else -> result.notImplemented()
+                }
+            }
         // Dart side: lib/platform/free_space.dart.
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "crossdrop/storage")
             .setMethodCallHandler { call, result ->
@@ -61,6 +70,25 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    // `crossdrop/open` (Dart side: lib/platform/open_file.dart, D-051).
+    // `open {location}` -> true if a viewer was started. Only MediaStore
+    // URIs, where received files are saved; anything else is refused.
+    private fun openSaved(location: String?): Boolean {
+        val uri = location?.let(Uri::parse) ?: return false
+        if (uri.scheme != "content" || uri.authority != MediaStore.AUTHORITY) return false
+        val intent = Intent(Intent.ACTION_VIEW)
+            .setDataAndType(uri, contentResolver.getType(uri))
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        return try {
+            startActivity(intent)
+            true
+        } catch (e: ActivityNotFoundException) {
+            false
+        } catch (e: SecurityException) {
+            false
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

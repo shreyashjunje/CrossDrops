@@ -19,6 +19,7 @@
 		48CD535BA106ACA66D07A673 /* ExportChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F5366DAAE40322A4872E6AED /* ExportChannel.swift */; };
 		3EA7B569F8AF1E9EB8071B28 /* PhotosSaveChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AB8A48DCBE66E4DE00ECCBF /* PhotosSaveChannel.swift */; };
 		5269E8A42946479B602492E9 /* ShareInboxChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3AEFD293D112D8AA7C169971 /* ShareInboxChannel.swift */; };
+		A1C0FE51D0E1A00000000001 /* OpenFileChannel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C0FE51D0E1A00000000002 /* OpenFileChannel.swift */; };
 		289BD1DC7EB0083C5905E005 /* ShareViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2B1BA4AE5F7516302BA6050 /* ShareViewController.swift */; };
 		5F614D4D412319FC80A7F596 /* ShareExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 61007405E15D4DCD4D5A36BC /* ShareExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
@@ -85,6 +86,7 @@
 		F5366DAAE40322A4872E6AED /* ExportChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExportChannel.swift; sourceTree = "<group>"; };
 		8AB8A48DCBE66E4DE00ECCBF /* PhotosSaveChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotosSaveChannel.swift; sourceTree = "<group>"; };
 		3AEFD293D112D8AA7C169971 /* ShareInboxChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareInboxChannel.swift; sourceTree = "<group>"; };
+		A1C0FE51D0E1A00000000002 /* OpenFileChannel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OpenFileChannel.swift; sourceTree = "<group>"; };
 		D2B1BA4AE5F7516302BA6050 /* ShareViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareViewController.swift; sourceTree = "<group>"; };
 		8E6C990D364A86CC84A15964 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		0790E24BF4DD1C7253FB38A9 /* ShareExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = ShareExtension.entitlements; sourceTree = "<group>"; };
@@ -164,6 +166,7 @@
 				1498D2331E8E89220040F4C2 /* GeneratedPluginRegistrant.m */,
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				3AEFD293D112D8AA7C169971 /* ShareInboxChannel.swift */,
+				A1C0FE51D0E1A00000000002 /* OpenFileChannel.swift */,
 				8AB8A48DCBE66E4DE00ECCBF /* PhotosSaveChannel.swift */,
 				F5366DAAE40322A4872E6AED /* ExportChannel.swift */,
 				7884E8672EC3CC0400C636F2 /* SceneDelegate.swift */,
@@ -367,6 +370,7 @@
 			files = (
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				5269E8A42946479B602492E9 /* ShareInboxChannel.swift in Sources */,
+				A1C0FE51D0E1A00000000001 /* OpenFileChannel.swift in Sources */,
 				3EA7B569F8AF1E9EB8071B28 /* PhotosSaveChannel.swift in Sources */,
 				48CD535BA106ACA66D07A673 /* ExportChannel.swift in Sources */,
 				1498D2341E8E89220040F4C2 /* GeneratedPluginRegistrant.m in Sources */,

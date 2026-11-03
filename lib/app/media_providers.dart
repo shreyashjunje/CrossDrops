@@ -11,6 +11,7 @@ import '../platform/android_store.dart';
 import '../platform/document_picker.dart';
 import '../platform/ios_export.dart';
 import '../platform/ios_photos.dart';
+import '../platform/open_file.dart';
 import '../platform/share_inbox.dart';
 import 'app_dirs.dart';
 
@@ -68,3 +69,6 @@ final iosShareInboxProvider = Provider<ShareInbox?>((ref) {
   if (dirs == null) return null;
   return IosShareInbox(stagingRoot: dirs.outgoingStaging);
 });
+
+/// Opens received files in the system viewer (D-051).
+final fileOpenerProvider = Provider<FileOpener>((ref) => ChannelFileOpener());
