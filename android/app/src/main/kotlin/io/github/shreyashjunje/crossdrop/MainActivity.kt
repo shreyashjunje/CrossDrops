@@ -18,6 +18,7 @@ class MainActivity : FlutterActivity() {
     private var share: ShareChannel? = null
     private var hotspot: HotspotChannel? = null
     private var network: NetworkChannel? = null
+    private var usbCamera: UsbCameraChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -26,6 +27,7 @@ class MainActivity : FlutterActivity() {
         share = ShareChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         hotspot = HotspotChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         network = NetworkChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
+        usbCamera = UsbCameraChannel(this, flutterEngine.dartExecutor.binaryMessenger, save!!)
         // Dart side: lib/platform/local_network.dart. Android has no Local
         // Network permission, so `probe` always answers "granted".
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "crossdrop/local_network")
@@ -99,12 +101,15 @@ class MainActivity : FlutterActivity() {
         super.onCreate(savedInstanceState) // runs configureFlutterEngine
         // A recreated activity (rotation, process restore) already had it.
         if (savedInstanceState == null) share?.handle(intent)
+        // Started by plugging in an iPhone (D-067).
+        usbCamera?.onIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         share?.handle(intent)
+        usbCamera?.onIntent(intent)
     }
 
     override fun onRequestPermissionsResult(
@@ -120,6 +125,7 @@ class MainActivity : FlutterActivity() {
         // The hotspot and the network binding belong to this engine.
         hotspot?.stop()
         network?.dispose()
+        usbCamera?.dispose()
         super.cleanUpFlutterEngine(flutterEngine)
     }
 

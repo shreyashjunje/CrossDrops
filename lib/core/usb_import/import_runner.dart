@@ -75,8 +75,9 @@ class ImportSummary {
 ///   more, then counted as failed; the others go on.
 /// - Unplugging, a full disk or a device that stops answering ends the
 ///   import. Files already copied stay in the gallery.
-/// - [cancel] stops after the current file: the device cannot be
-///   interrupted in the middle of one.
+/// - [cancel] stops before the next file. To stop the current one too,
+///   the caller also cancels it on the device, which then fails with
+///   `cancelled`.
 class ImportRunner {
   ImportRunner({
     required this._copy,
@@ -202,6 +203,7 @@ class ImportRunner {
       } on CopyFailure catch (e) {
         logEvent('usb', 'file ${f.object.handle}: ${e.code} (try $attempt)');
         final stop = switch (e.code) {
+          'cancelled' => ImportStop.cancelled,
           'disconnected' => ImportStop.disconnected,
           'no_space' => ImportStop.noSpace,
           'permission_denied' || 'busy' || 'locked' => ImportStop.deviceError,

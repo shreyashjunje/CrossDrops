@@ -58,6 +58,10 @@ abstract final class UsbCameraErrors {
   /// partial item was deleted.
   static const sizeMismatch = 'size_mismatch';
 
+  /// [UsbCamera.cancelCurrent] stopped the copy. The partial item was
+  /// deleted.
+  static const cancelled = 'cancelled';
+
   static const noSpace = 'no_space';
   static const io = 'io';
 }
@@ -129,6 +133,9 @@ abstract interface class UsbCamera {
     DateTime? taken,
   });
 
+  /// Stops the copy in progress within about one 1 MB part.
+  Future<void> cancelCurrent();
+
   /// Closes the device and deletes the thumbnail cache.
   Future<void> close();
 }
@@ -195,6 +202,9 @@ class ChannelUsbCamera implements UsbCamera {
       bytes: (m['bytes']! as num).toInt(),
     );
   }
+
+  @override
+  Future<void> cancelCurrent() => _channel.invokeMethod<void>('cancelCurrent');
 
   @override
   Future<void> close() => _channel.invokeMethod<void>('close');
@@ -271,6 +281,9 @@ class NoUsbCamera implements UsbCamera {
     required int? expectedSize,
     DateTime? taken,
   }) async => throw PlatformException(code: UsbCameraErrors.disconnected);
+
+  @override
+  Future<void> cancelCurrent() async {}
 
   @override
   Future<void> close() async {}

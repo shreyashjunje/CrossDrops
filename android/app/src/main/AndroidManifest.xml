@@ -45,6 +45,9 @@
     <!-- Without it Android strips the GPS location from photos we read, so
          the receiver would not get the original file (D-037). -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION"/>
+    <!-- Importing from an iPhone plugged in by cable (D-067). This phone is
+         the USB host; phones without host mode can still install the app. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false"/>
     <!-- Saving received files needs no permission on Android 10+: the app
          writes its own MediaStore items (D-040). -->
     <!-- No backup (D-030): the identity key must not move to another
@@ -92,6 +95,14 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="*/*"/>
             </intent-filter>
+            <!-- Plugging in an iPhone offers to open CrossDrop; "Always"
+                 also grants USB access to that iPhone (D-067). -->
+            <intent-filter>
+                <action android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.hardware.usb.action.USB_DEVICE_ATTACHED"
+                android:resource="@xml/usb_device_filter"/>
         </activity>
         <!-- Keeps the process alive during a transfer. stopWithTask: swiping
              the app away ends the service; the transfer resumes on the next

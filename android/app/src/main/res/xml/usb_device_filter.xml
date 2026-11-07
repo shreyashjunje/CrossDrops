@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Apple devices with a still-image (PTP) interface: iPhones and iPads.
+     1452 = 0x05AC, class 6 = still image (D-067). -->
+<resources>
+    <usb-device vendor-id="1452" class="6"/>
+</resources>

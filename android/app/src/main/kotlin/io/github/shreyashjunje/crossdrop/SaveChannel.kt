@@ -96,6 +96,22 @@ class SaveChannel(private val context: Context, messenger: BinaryMessenger) {
     } + "/CrossDrop"
 
     private fun create(name: String, mime: String, collection: String, takenMs: Long?): Map<String, Any> {
+        val uri = insertPending(name, mime, collection, takenMs)
+        try {
+            val pfd = resolver.openFileDescriptor(uri, "rw") ?: throw FileNotFoundException()
+            return mapOf("uri" to uri.toString(), "fd" to pfd.detachFd())
+        } catch (e: Exception) {
+            deleteItem(uri)
+            throw e
+        }
+    }
+
+    /**
+     * A new pending item. Also used by [UsbCameraChannel], which copies
+     * into it itself. Throws [ChannelError] `unsupported` when the
+     * collection refuses the MIME type, `io` when the insert fails.
+     */
+    internal fun insertPending(name: String, mime: String, collection: String, takenMs: Long?): Uri {
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
@@ -105,25 +121,22 @@ class SaveChannel(private val context: Context, messenger: BinaryMessenger) {
                 put(MediaStore.MediaColumns.DATE_TAKEN, takenMs)
             }
         }
-        val uri = try {
+        return try {
             resolver.insert(collectionUri(collection), values)
         } catch (e: IllegalArgumentException) {
             // "MIME type ... cannot be inserted into ..."
             throw ChannelError("unsupported")
         } ?: throw ChannelError("io")
+    }
+
+    internal fun deleteItem(uri: Uri) {
         try {
-            val pfd = resolver.openFileDescriptor(uri, "rw") ?: throw FileNotFoundException()
-            return mapOf("uri" to uri.toString(), "fd" to pfd.detachFd())
-        } catch (e: Exception) {
-            try {
-                resolver.delete(uri, null, null)
-            } catch (ignored: Exception) {
-            }
-            throw e
+            resolver.delete(uri, null, null)
+        } catch (ignored: Exception) {
         }
     }
 
-    private fun publish(uri: Uri): String? {
+    internal fun publish(uri: Uri): String? {
         val values = ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) }
         if (resolver.update(uri, values, null, null) == 0) throw FileNotFoundException()
         return try {
