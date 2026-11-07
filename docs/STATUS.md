@@ -6,6 +6,8 @@ All v1 features in CLAUDE.md are now in the code: transfer engine, discovery, QR
 
 **No phase is done yet.** Under the Definition of done, a phase also needs its checks run on one iPhone and one Android phone. Every Results table in [DEVICE_TESTS.md](DEVICE_TESTS.md) and [BENCHMARKS.md](BENCHMARKS.md) is still empty.
 
+**Added 2026-11-08:** import from an iPhone by cable on Android (D-067, [features/usb-import.md](features/usb-import.md)). Built and unit-tested; device checks U-1 to U-9 in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Cable import".
+
 ## What is left
 
 ### 1. Device testing (blocks everything else)

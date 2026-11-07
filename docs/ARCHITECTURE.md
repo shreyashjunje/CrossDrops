@@ -1,6 +1,6 @@
 # CrossDrop Architecture: iPhone ↔ Android File Sharing
 
-Nov 1, 2026 · updated Nov 3, 2026 (Phase 7) · @yash
+Nov 1, 2026 · updated Nov 8, 2026 (cable import) · @yash
 
 CrossDrop v1 is a Flutter app in which each phone runs a small encrypted HTTPS server. The phones find each other over the local network (or connect through a hotspot) and send files straight to each other, with no cloud server. This document covers only iPhone ↔ Android, in both directions.
 
@@ -12,6 +12,7 @@ CrossDrop v1 is a Flutter app in which each phone runs a small encrypted HTTPS s
 - Both phones nearby with the CrossDrop app open in the foreground.
 - Three connection modes: same Wi-Fi, an Android hotspot, or an iPhone Personal Hotspot.
 - Original quality, end-to-end encryption, resume after interruption.
+- Added after v1 (D-067): an Android phone imports photos and videos from an iPhone plugged in by cable. See "Cable import" below.
 
 **Out of scope for v1**
 
@@ -372,6 +373,21 @@ Most platform risk sits in four areas: how files are read, how they are saved, w
 | Creation dates | Photos: `creationDate`. Files: modification date only (D-042). | `DATE_TAKEN` and the file time; Downloads keep only the file time. Files without EXIF (PNG) may show the receive time. |
 | Network binding | Local subnet traffic goes over Wi-Fi even without internet. | `ConnectivityManager.bindProcessToNetwork` when Wi-Fi is connected, not validated and not the default; cleared otherwise and when the Wi-Fi is lost. Whole process, because `dart:io` makes its own sockets (D-056). |
 | Share from other apps | Share Extension target: clones the files into an App Group inbox (no file in memory), writes a manifest, opens `crossdrop://share`. The app checks the manifest, moves the files into staging and opens Send with them selected (D-045). | Intent filters for `SEND` and `SEND_MULTIPLE` on a `singleTask` activity; only content URIs of other apps; read in place (D-044). |
+
+## Cable import (iPhone → Android, D-067)
+
+An Android phone can import from an iPhone plugged in with a USB-C or Lightning-to-USB-C cable. This is not the HTTPS protocol: the Android phone is the USB host and reads the iPhone's camera interface (PTP) through `android.mtp.MtpDevice`, and the iPhone needs no app. Details: [features/usb-import.md](features/usb-import.md).
+
+| Step | How |
+| --- | --- |
+| Find | Apple vendor id with a still-image interface; an attach intent filter offers CrossDrop on plug-in; a home card while plugged in. |
+| Access | Android USB permission, then the iPhone's own "Allow access to photos and videos" prompt. No storage reported = locked or not allowed yet; tried again every 2 s. |
+| List | Folders walked newest first; pages of 500 to Dart; `buildCameraRoll` makes tiles (Live Photos and edited copies paired, AAE skipped) grouped by day. |
+| Preview | The iPhone's JPEG thumbnail into a cache file; loaded newest request first, two at a time. |
+| Copy | One file at a time into a pending MediaStore item (`Pictures/CrossDrop`, `Movies/CrossDrop`), 1 MB partial reads never past the declared size, fsync, publish. Whole-file copy with an after-check for devices without partial reads and files of 4 GB and more. Free space for the whole selection checked first. |
+| Integrity | Exact size against what the iPhone declared. PTP has no hash. |
+
+Not covered: Android → iPhone and files outside the camera roll (iOS gives a USB host only the camera roll). Use the network modes for those.
 
 ## Screens
 

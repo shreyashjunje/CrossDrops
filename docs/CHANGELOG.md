@@ -2,6 +2,11 @@
 
 All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Keep a Changelog](https://keepachangelog.com): group entries under Added, Changed, Fixed or Removed, under a heading of the date (`## YYYY-MM-DD`) or version once releases exist.
 
+## 2026-11-08
+
+### Added
+- **Import from iPhone by cable (Android, D-067):** plug an iPhone into the Android phone and CrossDrop shows its camera roll as one gallery, newest first, grouped by day, instead of the `DCIM/100APPLE` folders. Live Photos and edited photos are one tile; AAE files are hidden. Chosen items are copied byte for byte into Pictures/CrossDrop and Movies/CrossDrop, with a free-space check, progress, Stop and a summary. Needs device tests.
+
 ## 2026-11-03
 
 ### Fixed (code review 2026-11-03)

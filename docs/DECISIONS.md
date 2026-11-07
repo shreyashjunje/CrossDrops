@@ -551,3 +551,16 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - **Parallel streams:** D-059 stands; they come last.
 - Consequences: the next speed work is chosen from measurements on the two test phones, and each change gets a before and after row in BENCHMARKS.md.
 
+
+## D-067: Import from an iPhone by cable through its camera interface, on Android
+- Date: 2026-11-08
+- Status: Accepted
+- Context: The owner asked for USB-C cable transfers, with photos shown the way a gallery shows them. Plugging an iPhone into an Android phone already works in Android's file manager, but it shows `DCIM/100APPLE`-style folders of HEIC, AAE and Live Photo MOV files, often without thumbnails, so choosing is hard. The options were: (a) the iPhone's camera interface (PTP) with Android as USB host, through the public `android.mtp.MtpDevice` API; (b) Apple's private USB multiplexing protocol (usbmux) implemented in Kotlin, which would allow both directions and any file through our own protocol, but is undocumented, large and could break with an iOS update; (c) Android USB tethering seen by the iPhone as Ethernet, which depends on the brand and works only on USB-C iPhones; (d) the iPhone 15+ as host reading the Android as a camera, which only covers photos Android → iPhone; (e) Apple's External Accessory framework, which needs MFi hardware.
+- Decision:
+  - Build (a): iPhone → Android only, camera roll only, no iPhone app. It uses only public Android API, works with USB-C and Lightning iPhones, and solves the problem the owner reported. Out of v1 scope in CLAUDE.md; added at the owner's request (2026-11-08).
+  - Only Apple devices (vendor `0x05AC`) with a still-image interface are offered. Other cameras would work technically but are not tested.
+  - Copies go into pending MediaStore items like received files (D-040), in 1 MB partial reads that never ask for more than the declared size (hard rules 1 and 6). Devices that refuse partial reads, and files of 4 GB or more, are copied whole and size-checked afterwards; for those, more bytes than declared are only caught after the file (the free-space check of the whole selection plus 200 MB bounds the harm). There is no hash: PTP offers none; the size check and the USB link's own CRC are what we have.
+  - Grid: one roll, newest first, grouped by day; Live Photos and edited photos are one tile. By default only the still of a Live Photo and only the edited version of an edited photo are copied, as in Photos and with the Live Photo setting of D-039; both can be added from the menu.
+  - No new package, no network use, no TLS: the cable is a direct link, and access needs the user's Allow on the iPhone and USB permission on Android.
+  - (b) stays the route to Android → iPhone by cable if it is ever needed; it would carry the existing HTTPS protocol over a loopback port so the Dart core stays the same.
+- Consequences: the feature is Android-only, one direction. Albums and non-camera-roll files are not reachable. The iPhone's "Transfer to Mac or PC" setting decides whether files are converted, and the screen tells the user to pick "Keep Originals". Partial-read support and the busy case with the Files app must be checked on devices (DEVICE_TESTS.md, "Cable import").

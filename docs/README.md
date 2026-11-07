@@ -28,5 +28,6 @@
   - [iphone-join-hotspot.md](features/iphone-join-hotspot.md): Phase 7 iPhone joins the Android hotspot, in-app or through Settings.
   - [iphone-personal-hotspot-guide.md](features/iphone-personal-hotspot-guide.md): Phase 7 Personal Hotspot steps with a same-network check.
   - [android-network-binding.md](features/android-network-binding.md): Phase 7 keep traffic on a Wi-Fi without internet.
+  - [usb-import.md](features/usb-import.md): import photos from an iPhone plugged in by cable, shown as a gallery (Android, D-067).
   - [benchmark-mode.md](features/benchmark-mode.md): Phase 7 benchmark builds, metrics, CSV.
 - [TODAY-2026-11-02.md](TODAY-2026-11-02.md): short list of what was built, tested and left open on day one.

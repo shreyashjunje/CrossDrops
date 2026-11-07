@@ -1377,3 +1377,113 @@ Covered by tests on the PC: the commitment and its man-in-the-middle refusal, si
 | R-7 iPhone receiver after lock | | | | | | |
 | R-8 Wi-Fi lost while binding | | | | | | |
 | R-9 measure this phone | | | | | | |
+
+## Cable import (D-067)
+
+Android imports from an iPhone plugged in by cable ([features/usb-import.md](features/usb-import.md)). Everything below needs the two real phones; the logic is unit-tested on the PC. Only the Android phone needs the new build; the iPhone needs no app.
+
+### Preparation (once)
+
+1. Install the new APK on the Android phone (`adb install -r <apk>`).
+2. iPhone: Settings > Apps > Photos (older iOS: Settings > Photos) > **Transfer to Mac or PC** > **Keep Originals**.
+3. Cable: USB-C to USB-C for an iPhone 15 or newer, Lightning to USB-C for older iPhones. Note which one you use.
+4. Logs: `adb logcat -s flutter crossdrop.usb`. Lines to look for:
+   - `crossdrop.usb: open: 1 storage(s)`, `list: <n> files`
+   - `crossdrop.usb: partial reads refused; copying whole files` (tells us the iPhone does not support partial reads; important to report)
+   - `[crossdrop.usb] import: <n> copied, <n> failed, ...`
+
+### U-1: Plugging in
+
+1. Close CrossDrop. Plug the iPhone into the Android phone.
+2. Expected: Android asks "Open CrossDrop to handle iPhone?" (wording varies by brand). Tick **Always**, tap OK. CrossDrop opens.
+3. With CrossDrop on its home screen, unplug and plug in again. Expected: a card "iPhone connected by cable" appears within 2 s, and a plain "Import from iPhone with a cable" row when unplugged.
+4. If nothing happens: pull down the notifications, tap the USB notification, choose **USB controlled by: This device**, and note it in Results (needed for USB-C to USB-C).
+
+**Paste back:** a screenshot of the card; which cable; whether step 4 was needed.
+
+### U-2: Access and the iPhone's prompt
+
+1. Lock the iPhone. On Android tap **Import photos**.
+2. Expected: "Unlock your iPhone..." with a spinner.
+3. Unlock the iPhone. If it asks "Allow this device to access photos and videos?", tap **Allow**.
+4. Expected: within about 4 s the grid starts filling; logcat shows `open: 1 storage(s)`.
+5. Repeat with **Don't Allow** at step 3: CrossDrop keeps waiting; unplug and plug in to get the prompt again.
+
+**Paste back:** logcat from step 1 to 4.
+
+### U-3: The gallery
+
+1. Wait until "Reading the iPhone" disappears. Time how long it takes and the `list: <n> files` count.
+2. Expected:
+   - The newest day is at the top, with "Today", "Yesterday" or the date, and photos have thumbnails.
+   - A Live Photo is one tile with **LIVE**; an edited photo is one tile (the edited version); no `.AAE` files.
+   - The **Videos** and **Screenshots** filters show only those.
+   - Scrolling fast down and back up: thumbnails catch up; no freeze.
+3. Compare the number of tiles of one day with the same day in the iPhone's Photos app (Library > Days).
+
+**Paste back:** screenshots of the top of the grid and of one day next to the iPhone's Photos for that day; the listing time and file count.
+
+### U-4: Dates
+
+1. Pick 3 photos: one from today, one taken after 22:00 on some day, one older than a year.
+2. Expected: each sits under the same day as in the iPhone's Photos app.
+
+**Paste back:** any photo under the wrong day, with its time in Photos.
+
+### U-5: Copy exact originals
+
+1. Select: 2 normal photos, 1 Live Photo, 1 edited photo, 1 screenshot and 1 short video. Tap **Copy to this phone**.
+2. Expected: progress, then "Copied 6 files". The Android gallery shows them in the **CrossDrop** albums (Pictures and Movies) under their original dates.
+3. Sizes: in the Android file manager open the iPhone's `DCIM/1xxAPPLE` folder and the phone's `Pictures/CrossDrop`. The same file name has the same size in both (byte count in Details).
+4. Menu > **Also copy Live Photo videos**, copy the Live Photo again: its MOV arrives in Movies/CrossDrop.
+5. Back to photos: the copied tiles have a green tick.
+
+**Paste back:** screenshots of the summary and of two Details screens (same file, both places); whether `partial reads refused` appears in logcat.
+
+### U-6: Large video, speed and Stop
+
+1. Select one video of at least 1 GB. Copy and time it.
+2. Expected: the bar moves smoothly (not only at the end). Note MB/s = size / time.
+3. Copy another large video and tap **Stop** > **Stop** half-way.
+4. Expected: "You stopped the copy." within about a second; the half-copied video is **not** in the gallery or in Movies/CrossDrop.
+
+**Paste back:** size and time of step 1, the iPhone model and the cable; screenshots of step 4.
+
+### U-7: Unplugging while copying
+
+1. Select about 30 photos and copy. After about 10, unplug the cable.
+2. Expected: a summary saying the iPhone was unplugged, with the number copied. Those photos are in the gallery; no broken file.
+3. Plug in again, **Back to photos**: the copied ones have ticks; Menu > **Select all shown** selects only the rest; copying finishes them.
+
+**Paste back:** the summary screenshot and logcat.
+
+### U-8: Another app holds the iPhone
+
+1. Plug in the iPhone and open it in the Android **Files** app (browse into DCIM).
+2. Then open CrossDrop > Import photos.
+3. Expected: either the grid (Android let both use it) or "Another app is using the iPhone..." Following the text (close Files, replug, Try again) gets to the grid.
+
+**Paste back:** which one happened, and the brand of the Android phone.
+
+### U-9: Lightning iPhone (if one is at hand)
+
+1. Repeat U-1 to U-3 with an iPhone that has Lightning, through a Lightning to USB-C cable.
+
+### Not checked on devices
+
+Covered by tests on the PC: pairing of Live and edited files, AAE skipping, day groups, filters, the copy plan and name sanitizing, the free-space refusal, retry once, stop on unplug, full disk and Stop, per-item ticks, thumbnail ordering and cancelling, and the screen states (locked retry, busy, denied). Not covered anywhere yet: a phone running out of space during the copy, and files of 4 GB or more (whole-file path).
+
+### Results
+
+| Check | Date | iPhone, iOS, cable | Android, version | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| Preparation | | | | | | |
+| U-1 plugging in | | | | | | |
+| U-2 access and prompt | | | | | | |
+| U-3 gallery | | | | | | |
+| U-4 dates | | | | | | |
+| U-5 exact originals | | | | | | |
+| U-6 large video, speed, Stop | | | | | | |
+| U-7 unplug while copying | | | | | | |
+| U-8 another app holds the iPhone | | | | | | |
+| U-9 Lightning iPhone | | | | | | |
