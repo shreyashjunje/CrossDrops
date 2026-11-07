@@ -9,6 +9,8 @@ import '../send/send_screen.dart';
 import '../settings/settings_screen.dart';
 import '../transfer/transfer_screen.dart';
 import '../transfer/unfinished_transfers.dart';
+import '../usb_import/usb_import_card.dart';
+import '../usb_import/usb_import_screen.dart';
 import 'active_transfers.dart';
 import 'receive_status_card.dart';
 
@@ -86,6 +88,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                       context,
                       Routes.transfer,
                       TransferScreen(receiveSessionId: id),
+                    ),
+                  ),
+                  UsbImportCard(
+                    onOpen: () => pushScreen<void>(
+                      context,
+                      Routes.usbImport,
+                      const UsbImportScreen(),
                     ),
                   ),
                 ],
