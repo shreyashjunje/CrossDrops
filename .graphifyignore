@@ -1,0 +1,20 @@
+# Never feed secrets or machine-local files into the knowledge graph.
+# graph.json stores text extracted from scanned files.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+key.properties
+local.properties
+**/local.properties
+google-services.json
+GoogleService-Info.plist
+**/Flutter/ephemeral/
+build/
+.dart_tool/
+docs/exports/

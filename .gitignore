@@ -49,3 +49,6 @@ app.*.map.json
 
 # Generated doc exports
 docs/exports/
+
+# graphify knowledge graph (generated locally, may contain content from ignored files)
+graphify-out/
