@@ -89,6 +89,20 @@ class IosMedia implements MediaPlatform {
     }
   }
 
+  /// One `describe` call for all of them (PHAssetResource names, no
+  /// export).
+  @override
+  Future<Map<String, String>> originalNames(List<String> ids) async {
+    try {
+      return {
+        for (final a in await describe(ids))
+          if (a.originalName case final name? when name.isNotEmpty) a.id: name,
+      };
+    } on PlatformException {
+      return const {};
+    }
+  }
+
   /// iOS documents are already local copies (D-041).
   @override
   Future<int> copyIntoStaging(

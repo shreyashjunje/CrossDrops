@@ -25,9 +25,20 @@ final class PickedAsset extends PickedItem {
   const PickedAsset(this.asset);
   final LibraryAsset asset;
 
+  /// The library name; without one (not looked up yet, or the library
+  /// would not say), the kind and the day it was taken.
   @override
-  String get label =>
-      asset.originalName ?? (asset.kind == FileKind.video ? 'Video' : 'Photo');
+  String get label {
+    final name = asset.originalName;
+    if (name != null && name.isNotEmpty) return name;
+    final kind = asset.kind == FileKind.video ? 'Video' : 'Photo';
+    final created = asset.created;
+    if (created == null || created.year <= 1970) return kind;
+    final local = created.toLocal();
+    String two(int v) => v.toString().padLeft(2, '0');
+    return '$kind ${local.year}-${two(local.month)}-${two(local.day)} '
+        '${two(local.hour)}:${two(local.minute)}';
+  }
 }
 
 /// A document, a shared file, or an Android content URI.
@@ -183,6 +194,11 @@ abstract interface class MediaPlatform {
   /// Streams [ref] into the file [dest]; returns its size. Throws
   /// [MediaUnavailable].
   Future<int> copyIntoStaging(String ref, String dest, PrepareControl control);
+
+  /// The library's own file names (`IMG_1234.HEIC`) for asset [ids], so
+  /// the Send screen shows them before anything is exported. Ids it cannot
+  /// name are left out. Never throws.
+  Future<Map<String, String>> originalNames(List<String> ids);
 }
 
 class PrepareResult {

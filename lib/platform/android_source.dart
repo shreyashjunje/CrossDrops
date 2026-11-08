@@ -185,6 +185,10 @@ class AndroidMedia implements MediaPlatform {
     ];
   }
 
+  /// The picker already has MediaStore's display names on Android.
+  @override
+  Future<Map<String, String>> originalNames(List<String> ids) async => const {};
+
   @override
   Future<int> copyIntoStaging(
     String ref,

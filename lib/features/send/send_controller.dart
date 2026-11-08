@@ -143,6 +143,31 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
       for (final a in assets)
         if (have.add(a.id)) PickedAsset(a),
     ]);
+    unawaited(_nameAssets());
+  }
+
+  /// iOS: the picker knows only ids; fetch the library's file names for
+  /// the selection in one call, so the list shows `IMG_1234.HEIC` instead
+  /// of "Photo". Android names come with the picks.
+  Future<void> _nameAssets() async {
+    final unnamed = [
+      for (final p in state.picked)
+        if (p is PickedAsset && (p.asset.originalName ?? '').isEmpty)
+          p.asset.id,
+    ];
+    if (unnamed.isEmpty) return;
+    final names = await ref.read(mediaPlatformProvider).originalNames(unnamed);
+    // A send that started meanwhile names its files at export anyway.
+    if (!ref.mounted || names.isEmpty || state.isRunning) return;
+    state = state.copyWith(
+      picked: [
+        for (final p in state.picked)
+          if (p is PickedAsset && names.containsKey(p.asset.id))
+            PickedAsset(p.asset.withName(names[p.asset.id]))
+          else
+            p,
+      ],
+    );
   }
 
   /// Adds files from another app's share sheet or intent.

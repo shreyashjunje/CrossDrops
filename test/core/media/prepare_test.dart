@@ -319,6 +319,9 @@ class _FakeMedia implements MediaPlatform {
     File(dest).writeAsStringSync('zip');
     return 3;
   }
+
+  @override
+  Future<Map<String, String>> originalNames(List<String> ids) async => {};
 }
 
 class _ThrowingOpener implements SourceOpener {

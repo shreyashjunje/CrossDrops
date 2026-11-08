@@ -31,6 +31,7 @@ class LibraryAsset {
     this.originalName,
     this.mime,
     this.isLivePhoto = false,
+    this.created,
   });
 
   /// PhotoKit local identifier (iOS) or MediaStore id (Android).
@@ -43,6 +44,20 @@ class LibraryAsset {
   final String? originalName;
   final String? mime;
   final bool isLivePhoto;
+
+  /// When it was taken, for a label while the name is not known yet.
+  final DateTime? created;
+
+  LibraryAsset withName(String? name) => name == null || name.isEmpty
+      ? this
+      : LibraryAsset(
+          id: id,
+          kind: kind,
+          originalName: name,
+          mime: mime,
+          isLivePhoto: isLivePhoto,
+          created: created,
+        );
 
   bool get isHeic {
     final m = normalizeMime(mime) ?? mimeForName(originalName ?? '');

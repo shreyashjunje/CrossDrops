@@ -180,10 +180,14 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
         LibraryAsset(
           id: a.id,
           kind: a.type == AssetType.video ? FileKind.video : FileKind.photo,
-          // Android: the display name. iOS reads the real name at export.
-          originalName: Platform.isAndroid ? a.title : null,
+          // Android: the display name. iOS: looked up for the selection by
+          // the Send screen (SendController.addMedia), not per tile.
+          originalName: Platform.isAndroid && (a.title ?? '').isNotEmpty
+              ? a.title
+              : null,
           mime: a.mimeType,
           isLivePhoto: a.isLivePhoto,
+          created: a.createDateTime.year > 1970 ? a.createDateTime : null,
         ),
     ]);
   }
