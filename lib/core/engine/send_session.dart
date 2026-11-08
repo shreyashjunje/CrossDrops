@@ -527,10 +527,8 @@ class SendSession {
       throw const _Stop(SendPhase.failed, SendReasons.identityMismatch);
     }
     _peer = SenderInfo(id: info.id, name: info.name, platform: info.platform);
-    for (final f in _files) {
-      if (!await _sourceIntact(f)) {
-        throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
-      }
+    if (!await _allSourcesIntact()) {
+      throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
     }
     _checkStop();
     final SessionCreated created;
@@ -929,6 +927,23 @@ class SendSession {
   }
 
   // ------------------------------------------------------------- helpers
+
+  /// [_sourceIntact] for every file, a few at a time: on Android each is
+  /// a round trip to the content provider.
+  Future<bool> _allSourcesIntact() async {
+    var next = 0;
+    var ok = true;
+    Future<void> worker() async {
+      while (ok && next < _files.length) {
+        if (!await _sourceIntact(_files[next++])) ok = false;
+      }
+    }
+
+    await Future.wait([
+      for (var i = 0; i < 4 && i < _files.length; i++) worker(),
+    ]);
+    return ok;
+  }
 
   /// The source still exists and has the offered size. Opens and closes
   /// it, so checking 10,000 files never holds 10,000 descriptors.

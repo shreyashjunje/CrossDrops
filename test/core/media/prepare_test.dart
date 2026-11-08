@@ -23,12 +23,14 @@ void main() {
   Preparer preparer({
     FormatSettings settings = const FormatSettings(),
     SourceOpener opener = const FileSourceOpener(),
+    int parallel = Preparer.defaultParallel,
   }) => Preparer(
     platform: media,
     opener: opener,
     stagingRoot: staging,
     settings: settings,
     receiver: DevicePlatform.android,
+    parallel: parallel,
     newBatchId: () => 'batch1',
   );
 
@@ -106,9 +108,49 @@ void main() {
     expect(r.ranOutOfSpace, isFalse);
   });
 
+  test('several at once; the result keeps the pick order', () async {
+    var running = 0, most = 0;
+    media.onExport = (id) async {
+      running++;
+      most = running > most ? running : most;
+      // Later picks finish first.
+      await Future<void>.delayed(
+        Duration(milliseconds: 5 * (6 - int.parse(id))),
+      );
+      running--;
+    };
+    final r = await preparer().prepare([
+      for (var i = 1; i <= 5; i++) asset('$i', name: 'IMG_$i.HEIC'),
+    ]);
+    expect(r.items.map((i) => i.name), [
+      for (var i = 1; i <= 5; i++) 'IMG_$i.HEIC',
+    ]);
+    expect(most, Preparer.defaultParallel);
+  });
+
+  test('out of space while others run: those finish, the rest skip', () async {
+    media.failures['big'] = 'no_space';
+    media.onExport = (id) async {
+      if (id == 'slow') {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    };
+    final r = await preparer(parallel: 2).prepare([
+      asset('big', kind: FileKind.video, name: 'B.MOV'),
+      asset('slow', name: 'S.HEIC'),
+      asset('later', name: 'L.HEIC'),
+    ]);
+    expect(r.items.map((i) => i.name), ['S.HEIC']);
+    expect(r.skipped.map((s) => (s.label, s.reason)), [
+      ('B.MOV', SkipReason.noSpace),
+      ('L.HEIC', SkipReason.noSpace),
+    ]);
+    expect(media.exported, ['big', 'slow'], reason: 'never tried "later"');
+  });
+
   test('running out of space skips that item and everything after', () async {
     media.failures['big'] = 'no_space';
-    final r = await preparer().prepare([
+    final r = await preparer(parallel: 1).prepare([
       asset('ok', name: 'A.HEIC'),
       asset('big', kind: FileKind.video, name: 'B.MOV'),
       asset('later', name: 'C.HEIC'),
@@ -136,13 +178,17 @@ void main() {
 
     expect(r.cancelled, isTrue);
     expect(r.items, isEmpty);
-    expect(media.cancels, 1, reason: 'the running export was stopped');
+    expect(
+      media.cancels,
+      greaterThanOrEqualTo(1),
+      reason: 'the running exports were stopped',
+    );
     expect(Directory(p.join(staging, 'batch1')).existsSync(), isFalse);
   });
 
-  test('progress names the item and its download fraction', () async {
+  test('progress counts done items, with the download fraction', () async {
     final seen = <(int, int, double?)>[];
-    await preparer().prepare([
+    await preparer(parallel: 1).prepare([
       asset('a', name: 'A.HEIC'),
       asset('b', name: 'B.HEIC'),
     ], onProgress: (pr) => seen.add((pr.index, pr.count, pr.fraction)));

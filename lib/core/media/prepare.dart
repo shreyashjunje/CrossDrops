@@ -246,10 +246,17 @@ class Preparer {
     required this.stagingRoot,
     this.settings = const FormatSettings(),
     this.receiver,
+    this.parallel = defaultParallel,
     String Function()? newBatchId,
-  }) : _media = platform,
+  }) : assert(parallel >= 1),
+       _media = platform,
        _sources = opener,
        _newBatchId = newBatchId ?? _randomId;
+
+  /// Items prepared at once (D-068). Each is mostly waiting on the OS (a
+  /// MediaStore query, an export, an iCloud download), so a few at once
+  /// hide that wait without loading the disk much.
+  static const int defaultParallel = 3;
 
   final MediaPlatform _media;
   final SourceOpener _sources;
@@ -259,8 +266,13 @@ class Preparer {
   final String stagingRoot;
   final FormatSettings settings;
   final DevicePlatform? receiver;
+  final int parallel;
   final String Function() _newBatchId;
 
+  /// Prepares [parallel] items at a time; the result keeps the pick
+  /// order. Running out of space skips every item not started yet; items
+  /// already being prepared finish. Progress reports how many items are
+  /// done, and the iCloud download fraction of an item while one runs.
   Future<PrepareResult> prepare(
     List<PickedItem> picked, {
     PrepareControl? control,
@@ -268,36 +280,61 @@ class Preparer {
   }) async {
     final ctl = control ?? PrepareControl();
     final batch = p.join(stagingRoot, _newBatchId());
-    final items = <SendItem>[];
-    final skipped = <SkippedItem>[];
+    final count = picked.length;
+    final made = List<List<SendItem>?>.filled(count, null);
+    final skips = List<SkippedItem?>.filled(count, null);
+    var next = 0;
+    var done = 0;
     var noSpace = false;
-    for (final (i, item) in picked.indexed) {
-      if (ctl.isCancelled) break;
-      if (noSpace) {
-        skipped.add(SkippedItem(item.label, SkipReason.noSpace));
-        continue;
-      }
-      onProgress?.call(PrepareProgress(i, picked.length, null));
-      try {
-        items.addAll(switch (item) {
-          PickedAsset() => await _asset(item, i, batch, ctl, (f) {
-            onProgress?.call(PrepareProgress(i, picked.length, f));
-          }),
-          PickedFile() => [await _file(item, i, batch, ctl)],
-        });
-      } on MediaUnavailable catch (e) {
-        if (ctl.isCancelled || e.code == 'cancelled') break;
-        logEvent('prepare', 'item $i skipped (${e.code})');
-        skipped.add(SkippedItem(item.label, e.reason));
-        if (e.reason == SkipReason.noSpace) noSpace = true;
+    var stopped = false;
+
+    void report(double? fraction) => onProgress?.call(
+      PrepareProgress(min(done, max(count - 1, 0)), count, fraction),
+    );
+
+    Future<void> worker() async {
+      while (!stopped && !ctl.isCancelled && next < count) {
+        final i = next++;
+        final item = picked[i];
+        if (noSpace) {
+          skips[i] = SkippedItem(item.label, SkipReason.noSpace);
+          done++;
+          continue;
+        }
+        report(null);
+        try {
+          made[i] = switch (item) {
+            PickedAsset() => await _asset(item, i, batch, ctl, report),
+            PickedFile() => [await _file(item, i, batch, ctl)],
+          };
+        } on MediaUnavailable catch (e) {
+          if (ctl.isCancelled || e.code == 'cancelled') {
+            stopped = true;
+            return;
+          }
+          logEvent('prepare', 'item $i skipped (${e.code})');
+          skips[i] = SkippedItem(item.label, e.reason);
+          if (e.reason == SkipReason.noSpace) noSpace = true;
+        }
+        done++;
+        report(null);
       }
     }
+
+    await Future.wait([
+      for (var w = 0; w < min(parallel, count); w++) worker(),
+    ]);
+    final skipped = [for (final s in skips) ?s];
     final staged = await _keepIfUsed(batch);
     if (ctl.isCancelled) {
       if (staged != null) await deleteStaging(staged);
       return PrepareResult(items: const [], skipped: skipped, cancelled: true);
     }
-    return PrepareResult(items: items, skipped: skipped, stagingDir: staged);
+    return PrepareResult(
+      items: [for (final m in made) ...?m],
+      skipped: skipped,
+      stagingDir: staged,
+    );
   }
 
   Future<List<SendItem>> _asset(

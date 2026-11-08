@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 
 import '../../core/media/format_plan.dart';
+import '../../core/media/thumbnail_queue.dart';
 import '../../core/protocol/models.dart';
 import '../transfer/transfer_format.dart';
 
@@ -26,18 +27,28 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
     with WidgetsBindingObserver {
   static const _pageSize = 120;
 
+  /// The first page is smaller, so the grid shows sooner.
+  static const _firstPageSize = 60;
+
   _Access _access = _Access.checking;
   List<AssetPathEntity> _albums = const [];
   AssetPathEntity? _album;
   final List<AssetEntity> _assets = [];
   int _total = 0;
-  int _nextPage = 0;
   bool _loading = false;
   Object? _loadError;
 
   /// Selected ids, in the order tapped.
   final LinkedHashMap<String, AssetEntity> _selected = LinkedHashMap();
-  final _thumbs = _ThumbCache(400);
+
+  /// Grid previews: six at a time, the newest request first (the tiles on
+  /// screen), tiles scrolled past dropped before they start (D-068).
+  late final _thumbs = ThumbnailQueue<String, Uint8List>(
+    _thumbnail,
+    parallel: 6,
+    capacity: 600,
+  );
+  final Map<String, AssetEntity> _byId = {};
   final _scroll = ScrollController();
 
   @override
@@ -54,8 +65,18 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
     WidgetsBinding.instance.removeObserver(this);
     PhotoManager.removeChangeCallback(_onLibraryChanged);
     unawaited(PhotoManager.stopChangeNotify());
+    _thumbs.close();
     _scroll.dispose();
     super.dispose();
+  }
+
+  Future<Uint8List?> _thumbnail(String id) async {
+    final a = _byId[id];
+    if (a == null) return null;
+    return a.thumbnailDataWithSize(
+      const ThumbnailSize.square(200),
+      quality: 75,
+    );
   }
 
   @override
@@ -101,21 +122,39 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
     }
   }
 
+  static FilterOptionGroup get _filter => FilterOptionGroup(
+    orders: [const OrderOption(type: OrderOptionType.createDate)],
+  );
+
+  /// "All photos" first, so the grid fills at once; the other albums (one
+  /// count query each) load after it, for the album menu.
   Future<void> _reload() async {
     try {
+      if (_album == null || _album!.isAll) {
+        final all = await PhotoManager.getAssetPathList(
+          type: RequestType.common,
+          onlyAll: true,
+          filterOption: _filter,
+        );
+        if (!mounted) return;
+        setState(() {
+          _album = all.firstOrNull;
+          if (_albums.isEmpty) _albums = all;
+        });
+        await _loadFirstPage();
+      }
       final albums = await PhotoManager.getAssetPathList(
         type: RequestType.common,
-        filterOption: FilterOptionGroup(
-          orders: [const OrderOption(type: OrderOptionType.createDate)],
-        ),
+        filterOption: _filter,
       );
       if (!mounted) return;
       final keep = albums.where((a) => a.id == _album?.id).firstOrNull;
+      final changed = keep == null;
       setState(() {
         _albums = albums;
         _album = keep ?? albums.firstOrNull;
       });
-      await _loadFirstPage();
+      if (changed) await _loadFirstPage();
     } on PlatformException catch (e) {
       if (mounted) setState(() => _loadError = e.code);
     }
@@ -124,7 +163,6 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
   Future<void> _loadFirstPage() async {
     final album = _album;
     _assets.clear();
-    _nextPage = 0;
     _total = album == null ? 0 : await album.assetCountAsync;
     if (!mounted) return;
     setState(() {});
@@ -147,14 +185,19 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
     if (album == null || _loading || _assets.length >= _total) return;
     _loading = true;
     try {
-      final page = await album.getAssetListPaged(
-        page: _nextPage,
-        size: _pageSize,
+      // Ranges, not pages: the first one is smaller.
+      final start = _assets.length;
+      final size = start == 0 ? _firstPageSize : _pageSize;
+      final page = await album.getAssetListRange(
+        start: start,
+        end: (start + size).clamp(0, _total),
       );
-      if (!mounted || album != _album) return;
+      if (!mounted || album != _album || _assets.length != start) return;
       setState(() {
         _assets.addAll(page);
-        _nextPage++;
+        for (final a in page) {
+          _byId[a.id] = a;
+        }
         _loadError = null;
       });
     } on PlatformException catch (e) {
@@ -162,6 +205,9 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
     } finally {
       _loading = false;
     }
+    // The album changed while this page loaded: that request returned at
+    // once, so load the new album's first page now.
+    if (mounted && album != _album && _assets.isEmpty) unawaited(_loadMore());
   }
 
   void _onScroll() {
@@ -248,6 +294,7 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
   }
 
   Widget _grid() {
+    final order = {for (final (i, id) in _selected.keys.indexed) id: i + 1};
     if (_album == null || (_total == 0 && !_loading)) {
       return Center(
         child: Padding(
@@ -275,14 +322,11 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
         itemCount: _assets.length,
         itemBuilder: (context, i) {
           final a = _assets[i];
-          final order = _selected.containsKey(a.id)
-              ? _selected.keys.toList().indexOf(a.id) + 1
-              : null;
           return _Tile(
             key: ValueKey(a.id),
             asset: a,
             thumbs: _thumbs,
-            order: order,
+            order: order[a.id],
             onTap: () => _toggle(a),
           );
         },
@@ -291,7 +335,7 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
   }
 }
 
-class _Tile extends StatelessWidget {
+class _Tile extends StatefulWidget {
   const _Tile({
     super.key,
     required this.asset,
@@ -301,13 +345,48 @@ class _Tile extends StatelessWidget {
   });
 
   final AssetEntity asset;
-  final _ThumbCache thumbs;
+  final ThumbnailQueue<String, Uint8List> thumbs;
   final int? order;
   final VoidCallback onTap;
 
   @override
+  State<_Tile> createState() => _TileState();
+}
+
+class _TileState extends State<_Tile> {
+  Uint8List? _bytes;
+  bool _waiting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final q = widget.thumbs;
+    final id = widget.asset.id;
+    if (q.has(id)) {
+      _bytes = q.cached(id);
+      return;
+    }
+    _waiting = true;
+    q.load(id).then((b) {
+      _waiting = false;
+      if (mounted && b != null) setState(() => _bytes = b);
+    });
+  }
+
+  @override
+  void dispose() {
+    // Scrolled past before its turn: never asked.
+    if (_waiting) widget.thumbs.cancel(widget.asset.id);
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final asset = widget.asset;
+    final order = widget.order;
+    final onTap = widget.onTap;
+    final bytes = _bytes;
     final video = asset.type == AssetType.video;
     final created = asset.createDateTime;
     // "Video, 0:42, Live, 3 Nov 2026, selected 2".
@@ -329,16 +408,10 @@ class _Tile extends StatelessWidget {
         child: Stack(
           fit: StackFit.expand,
           children: [
-            FutureBuilder<Uint8List?>(
-              future: thumbs.get(asset),
-              builder: (context, snap) => snap.data == null
-                  ? ColoredBox(color: theme.colorScheme.surfaceContainerHighest)
-                  : Image.memory(
-                      snap.data!,
-                      fit: BoxFit.cover,
-                      gaplessPlayback: true,
-                    ),
-            ),
+            if (bytes == null)
+              ColoredBox(color: theme.colorScheme.surfaceContainerHighest)
+            else
+              Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
             if (video)
               Positioned(
                 right: 4,
@@ -475,22 +548,4 @@ class _DeniedView extends StatelessWidget {
       ),
     ),
   );
-}
-
-/// Recently shown thumbnails, so scrolling back does not ask again.
-class _ThumbCache {
-  _ThumbCache(this.capacity);
-  final int capacity;
-  final LinkedHashMap<String, Future<Uint8List?>> _map = LinkedHashMap();
-
-  Future<Uint8List?> get(AssetEntity a) {
-    final hit = _map.remove(a.id);
-    if (hit != null) return _map[a.id] = hit;
-    final f = a
-        .thumbnailDataWithSize(const ThumbnailSize.square(240), quality: 80)
-        .catchError((Object _) => null);
-    _map[a.id] = f;
-    if (_map.length > capacity) _map.remove(_map.keys.first);
-    return f;
-  }
 }
