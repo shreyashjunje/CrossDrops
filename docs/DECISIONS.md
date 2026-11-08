@@ -485,7 +485,7 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 
 ## D-059: One stream per transfer until the benchmark shows a clear gain
 - Date: 2026-11-03
-- Status: Accepted
+- Status: Superseded by D-068 (2026-11-08)
 - Context: Parallel streams can help on lossy or high-latency links, but cost complexity in resume, hashing and the receiver.
 - Decision: Keep one TLS connection and one file at a time. Consider parallel streams only if the Phase 7 benchmark shows a single stream clearly below the link's capacity while neither phone's CPU is the limit: CPU well under one core, and MB/s well under an iperf3 baseline on the same network. The measurements come first, then a proposal.
 - Consequences: Nothing changes now.
@@ -564,3 +564,27 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - No new package, no network use, no TLS: the cable is a direct link, and access needs the user's Allow on the iPhone and USB permission on Android.
   - (b) stays the route to Android → iPhone by cable if it is ever needed; it would carry the existing HTTPS protocol over a loopback port so the Dart core stays the same.
 - Consequences: the feature is Android-only, one direction. Albums and non-camera-roll files are not reachable. The iPhone's "Transfer to Mac or PC" setting decides whether files are converted, and the screen tells the user to pick "Keep Originals". Partial-read support and the busy case with the Files app must be checked on devices (DEVICE_TESTS.md, "Cable import").
+
+## D-068: Send screen fixes: real names, previews, faster picking, three files at once
+- Date: 2026-11-08
+- Status: Accepted
+- Context: The owner tested on phones and reported four problems: picked files showed generic names instead of their own; there were no previews, so picked photos could not be told apart; the photo picker and the "Preparing" step were slow; files went strictly one after another. They also worried that files lost quality, because the sizes they saw looked smaller. They asked for all of it to be fixed, with the decisions taken by Claude.
+- Decision:
+  - **Names:** the iOS picker returns only ids. The Send screen now looks up the library's file names for the whole selection in one call to the existing ExportChannel `describe` (PHAssetResource names, no export). A pick without a name shows its kind and the time it was taken, never a blank.
+  - **Previews:** a ThumbnailLoader interface (hard rule 9) with two sources. Library items use photo_manager thumbnails, which the OS caches. A receiving iPhone without read access to Photos shows the kind icon and is never asked for access just to draw a preview. Files and content URIs use a new crossdrop/thumbnail channel: Android ContentResolver.loadThumbnail, falling back to a sampled decode or a video frame; iOS QLThumbnailGenerator. Only the path of a small cached JPEG crosses the channel, never file bytes (hard rule 2). The cache is keyed by reference, size and date, kept under 48 MB on Android, and lives in Caches on iOS. References are never logged (hard rule 7).
+  - **One preview queue:** the cable-import thumbnail queue (D-067) became generic. Picker grid: six at a time. Rows: three at a time. The newest request goes first, and a tile that leaves the screen before its turn is dropped. Before this, every tile the user scrolled past still queued a native request ahead of the visible ones, which was the main reason the grid felt slow.
+  - **Picker loading:** "All photos" and a first page of 60 load before the other albums, which need one count query each.
+  - **Preparing:** three items at once, keeping the pick order. Running out of space still skips every item not started yet; items already running finish. The size check of every file before the offer runs four at a time.
+  - **Parallel files, superseding D-059:** the owner asked for this directly. D-059 was right that parallel streams cost complexity, but its premise was large files on one fast link. With many photos, most of the time goes to per-file round trips (status, upload, verify, hash wait), not to bandwidth. Running three files side by side hides that wait. The design:
+    - The receiver advertises `uploadSlots` in /v1/info (3, `ReceiveServer.maxParallelUploads`). A PUT beyond it gets 503 `busy`. A missing field means 1, so an older receiver gets exactly the old behavior, and no protocol version bump is needed.
+    - The sender runs min(3, uploadSlots) lanes, each on its own TLS connection pinned to the same fingerprint, reusing the session's token. Each lane takes the next file in offer order.
+    - The receiver keeps a running hash for every file being uploaded and drops only idle files' hashes. So review M2's bound still holds: at most one isolate per running upload.
+    - The first lane to reach a session outcome (a cancel, no space, the network giving up, the session lost, an unreadable source) stops the others with that outcome. Resume works as before: each file continues from its own receivedBytes.
+    - Pause waits for every running upload to stop. Resume restarts all lanes.
+    - Lanes that fail together look up the receiver's address and reopen the event socket only once.
+  - **Quality:** nothing changed in the bytes; originals were already sent unchanged and checked with SHA-256. The size the owner saw differ is most likely rounding: we show 10^6-byte MB, while some galleries use 1024-based units. The Done screen now says "Original quality" and shows each file's exact byte count. The HEIC to JPEG setting now opens with its quality cost.
+- Consequences:
+  - Memory per lane is about two 1 MB chunks on the sender and an 8 MB read-ahead queue on the receiver, so 3 lanes stay under about 30 MB.
+  - A large video sent next to photos shares the link with them; total throughput should be about the same.
+  - Benchmarks should compare `parallelUploads` 1 and 3, with many small photos and with one large video, on both phones (BENCHMARKS.md). The slot count is one constant on each side if the numbers say otherwise.
+  - Device checks N-1 to N-8 in DEVICE_TESTS.md, "Send screen fixes".

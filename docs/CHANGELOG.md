@@ -5,6 +5,17 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 ## 2026-11-08
 
 ### Added
+- **Previews (D-068):** picked, sent and received files show a small thumbnail (photos, videos and, on iPhone, documents QuickLook can draw), with a play mark on videos. Received files show theirs once saved.
+- **Several files at once (D-068):** up to three files of a transfer go at the same time, each on its own connection. A receiver from before this change gets one at a time, as before. Progress says "Sending 3 files at once · 4 of 10 done".
+
+### Changed
+- **Real names on iPhone (D-068):** photos and videos picked on an iPhone show their own names (`IMG_1234.HEIC`) on the Send screen instead of "Photo" or "Video".
+- **Faster picking and preparing (D-068):** the photo grid shows "All photos" first and loads previews for the tiles on screen first; tiles scrolled past no longer hold up the rest. Preparing runs three items at once.
+- **Quality, said plainly:** the Done screen says files arrived in original quality, checked with SHA-256, and shows each file's exact byte count. Progress says "of … sent". The HEIC to JPEG setting now says first that it lowers quality and removes HDR.
+
+### Fixed
+- Switching albums in the photo grid while a page was loading could leave the grid empty.
+
 - **Import from iPhone by cable (Android, D-067):** plug an iPhone into the Android phone and CrossDrop shows its camera roll as one gallery, newest first, grouped by day, instead of the `DCIM/100APPLE` folders. Live Photos and edited photos are one tile; AAE files are hidden. Chosen items are copied byte for byte into Pictures/CrossDrop and Movies/CrossDrop, with a free-space check, progress, Stop and a summary. Needs device tests.
 
 ## 2026-11-03

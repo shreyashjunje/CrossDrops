@@ -6,7 +6,7 @@
 
 ## Summary
 
-The transfer engine moves a set of files from one phone to the other: the sender offers a manifest, the receiver's user taps Accept, and the files go one after another over one HTTPS connection with live events on a WebSocket. Either side can cancel. Every file is checked with SHA-256 before it is saved. This replaces the Phase 1 proof of concept, which auto-accepted a single file.
+The transfer engine moves a set of files from one phone to the other: the sender offers a manifest, the receiver's user taps Accept, and the files go up to three at a time, each on its own HTTPS connection (D-068), with live events on a WebSocket. Either side can cancel. Every file is checked with SHA-256 before it is saved. This replaces the Phase 1 proof of concept, which auto-accepted a single file.
 
 ## Scope
 
@@ -14,7 +14,7 @@ The transfer engine moves a set of files from one phone to the other: the sender
 
 - The full v1 session flow: `GET /v1/info` with version negotiation, `POST /v1/sessions` with a manifest, the events WebSocket, `PUT` and `GET` per file, `complete`, `DELETE` to cancel.
 - The receiver's session state machine, stored in the database.
-- A send queue: several files, one after another, one connection.
+- A send queue: several files, up to min(3, the receiver's `uploadSlots`) at once, one connection each (D-068); one at a time to older receivers.
 - A simple Accept prompt on the receiver (60 s timeout).
 - Safety checks: sanitized names, free space before accepting, no more bytes than declared, one unfinished session per sender, at most 8 open sessions.
 - Per-file and total progress, speed (3 s moving average) and time left, on both sides.

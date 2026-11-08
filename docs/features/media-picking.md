@@ -2,7 +2,7 @@
 
 - Phase: 5
 - Status: Built, awaiting device tests
-- Last updated: 2026-11-03
+- Last updated: 2026-11-08
 
 ## Summary
 
@@ -49,6 +49,12 @@ ARCHITECTURE.md, "Platform modules": picking, iCloud originals, reading for send
   - At launch, staging batches that no unfinished send uses are deleted.
   - A new selection releases the previous send's leftovers.
 
+- **Names, previews and speed (D-068):**
+  - iOS picks get their library names for the whole selection in one `describe` call; until then a row shows the kind and the time taken.
+  - Rows show previews: library items through photo_manager, documents through `crossdrop/thumbnail` (Android `loadThumbnail`, iOS QuickLook).
+  - The grid loads "All photos" and 60 items first, then the albums. Its previews go through the shared `ThumbnailQueue` (six at a time, newest first, scrolled-past tiles dropped).
+  - Preparing runs three items at once in pick order.
+
 ## Code
 
 | Path | Purpose |
@@ -82,7 +88,7 @@ No protocol change. `SendItem.path` is a file path or a `content://` URI. `SendI
   - Documents read in place.
   - Copy of providers that cannot seek.
   - Staging cleanup.
-- `test/core/engine/send_session_test.dart`: content URIs through a `SourceOpener`, always closed, one at a time; a grant revoked mid-session.
+- `test/core/engine/send_session_test.dart`: content URIs through a `SourceOpener`, always closed, a bounded number open at once; a grant revoked mid-session.
 - `test/core/engine/fd_file_test.dart`: real descriptors, the worker and the hash isolate (Linux CI and macOS).
 - `test/platform/android_source_test.dart`: channel mapping.
 

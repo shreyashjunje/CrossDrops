@@ -6,6 +6,8 @@ All v1 features in CLAUDE.md are now in the code: transfer engine, discovery, QR
 
 **No phase is done yet.** Under the Definition of done, a phase also needs its checks run on one iPhone and one Android phone. Every Results table in [DEVICE_TESTS.md](DEVICE_TESTS.md) and [BENCHMARKS.md](BENCHMARKS.md) is still empty.
 
+**Added 2026-11-08 (D-068):** real file names on iPhone picks, previews of picked, sent and received files, a faster photo picker and preparation, three files at once, and "original quality" with exact byte counts on the Done screen. Unit-tested; device checks N-1 to N-8 in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Send screen fixes". The iOS Swift part (QuickLook previews) has not been compiled yet: the next CI build is its first.
+
 **Added 2026-11-08:** import from an iPhone by cable on Android (D-067, [features/usb-import.md](features/usb-import.md)). Built and unit-tested; device checks U-1 to U-9 in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Cable import".
 
 ## What is left
@@ -20,7 +22,7 @@ All v1 features in CLAUDE.md are now in the code: transfer engine, discovery, QR
 - These open decisions wait on the numbers:
   - the speed target (ARCHITECTURE.md, Open decisions);
   - the best buffer size;
-  - multiple streams per transfer (D-059: one stream until a benchmark shows a clear gain).
+  - how many files at once (D-068: 3; compare 1 and 3 with many photos and with one large video).
 
 ### 3. Open decisions
 - **LocalSend compatibility:** no for v1 (D-060). Look at it again after v1.

@@ -20,7 +20,7 @@ A hidden screen in benchmark builds that sends the same random test files throug
 
 **Out of scope**
 
-- Parallel streams. Not built: the plan is to add them only if the measurements show a clear gain (D-059).
+- Parallel streams within one file. Not built. Several files at once exist since D-068; the benchmark still sends one file, so it measures a single stream.
 - Automatic network switching between runs.
 - Shipping it: normal builds do not contain it.
 

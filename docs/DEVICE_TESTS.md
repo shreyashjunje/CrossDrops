@@ -1487,3 +1487,83 @@ Covered by tests on the PC: pairing of Live and edited files, AAE skipping, day 
 | U-7 unplug while copying | | | | | | |
 | U-8 another app holds the iPhone | | | | | | |
 | U-9 Lightning iPhone | | | | | | |
+
+## Send screen fixes (D-068)
+
+Names, previews, speed and several files at once. Run with the same build on both phones (both must have this change for N-6; N-7 needs one phone on an older build).
+
+### Preparation (once)
+
+- Both phones on the same Wi-Fi, CrossDrop open, Receiving on.
+- On each phone, a mix in the library: 20+ recent photos, 2 videos (one over 200 MB), 1 Live Photo, 1 edited photo. In Files or Downloads: a PDF and a ZIP.
+- Android: `adb logcat -s flutter` running. iPhone: none needed.
+
+### N-1: Real names on the Send screen
+
+1. iPhone: Send > Photos & videos, pick 5 photos and 1 video, tap Add.
+2. Expected: within a second each row shows its own name (`IMG_1234.HEIC`, `IMG_1240.MOV`), not "Photo" or "Video". For a moment a row may show "Photo 2026-11-08 14:05".
+3. Android: same steps. Expected: own names (for example `PXL_20261108_….jpg`) at once.
+4. Both: Files, pick the PDF. Expected: its file name.
+5. If any row says "New document" or similar, screenshot it and say which phone and which button (Photos & videos or Files) you used.
+
+### N-2: Previews on the Send screen
+
+1. With the selection from N-1, look at the list.
+2. Expected: each photo and video row has a small thumbnail; videos have a round play mark; the PDF shows a page preview on iPhone (an icon is fine on Android); the ZIP shows a file icon.
+3. Scroll the list quickly. Expected: thumbnails fill in for the rows on screen within about a second, and no row shows another photo's preview.
+
+### N-3: Photo picker speed
+
+1. Close and reopen CrossDrop. Send > Photos & videos.
+2. Expected: the grid shows the first photos in about a second, even with thousands of photos. The album menu may fill in a moment later.
+3. Fling to the bottom and back to the top. Expected: tiles on screen fill in first; no long wait for tiles you stopped on.
+4. Switch album and back. Expected: never an empty grid.
+5. Note roughly how long step 2 took on each phone.
+
+### N-4: Previews during and after a transfer
+
+1. Send the N-1 selection to the other phone; accept there.
+2. Sender, progress screen: each row shows its preview and size.
+3. Receiver, progress screen: icons while receiving; after Done, each saved photo and video shows its preview with a green check. iPhone receiver without full photo access: icons only, and no photo-access prompt appears.
+4. Done screen, both phones: "Original quality: … SHA-256 …", and under each file its size and exact bytes, for example "3.5 MB · 3,482,117 bytes".
+
+### N-5: Exact bytes match the gallery
+
+1. Pick one photo received in N-4. On the receiving phone, open its details in the gallery or file manager and note the size in bytes (Files on iPhone: Get Info; Android Files: Properties).
+2. Compare with the exact bytes on the Done screen, and with the original's details on the sending phone.
+3. Expected: all three byte counts equal. A rounded MB value may differ (MB vs MiB); the byte count must not.
+
+### N-6: Three files at once
+
+1. Send 30 photos from one phone to the other.
+2. Expected: the status line says "Sending 3 files at once · N of 30 done"; three rows move at the same time; all 30 arrive.
+3. Note the total time. In N-7, send the same 30 photos to a phone on the previous build and note that time too, for BENCHMARKS.md.
+4. Send one large video (200 MB+) together with 10 photos. Expected: everything arrives and verifies; the video does not stall.
+
+### N-7: Older receiver
+
+1. Receiver on a build from before this change (an earlier CI build), sender on this build.
+2. Send 5 photos. Expected: they go one at a time ("Sending 2 of 5"), all arrive. No errors.
+
+### N-8: Pause, Wi-Fi drop and cancel with several files moving
+
+1. Send 20 photos and 1 large video. While three rows move, tap Pause. Expected: within a second nothing moves; the receiver says paused. Tap Resume: all continue, all arrive.
+2. Start again; turn the receiver's Wi-Fi off for 10 s, then on. Expected: "Connection lost. Trying again…", then all continue from where they were and every file verifies.
+3. Start again; tap Cancel on the sender while three rows move. Expected: the sender says Cancelled; the receiver says the sender cancelled; no partial files remain in the gallery or Downloads.
+
+### Not checked on devices
+
+Everything in this section. The unit tests cover the protocol field, the receiver's slot limit and hashes, lanes, halting, pause, cancel, ordering of preparation, and the preview widgets, all on the PC.
+
+### Results
+
+| Check | Date | iPhone (model, iOS) | Android (model, version) | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| N-1 | | | | | | |
+| N-2 | | | | | | |
+| N-3 | | | | | | |
+| N-4 | | | | | | |
+| N-5 | | | | | | |
+| N-6 | | | | | | |
+| N-7 | | | | | | |
+| N-8 | | | | | | |

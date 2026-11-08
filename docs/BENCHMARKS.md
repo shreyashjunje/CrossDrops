@@ -263,4 +263,4 @@ Chosen buffer: … (filled in from the CSVs)
 
 ### Parallel streams
 
-Not built (D-059). After Step B I compare, per network: single-stream MB/s, both phones' CPU %, and, if you can run it, an iperf3 baseline (Android: an iperf3 app or Termux `iperf3 -s`; iPhone: an iperf3 client app; `-P 4` for four streams). I propose parallel streams only if CrossDrop is clearly below the iperf3 figure (more than about 25 %) while neither phone's CPU is near one core, and I show you those numbers first.
+Several files at once were built on the owner's request (D-068, 3 lanes); compare `parallelUploads` 1 and 3 with 30 photos and with one large video. Parallel streams within one file are not built. After Step B I compare, per network: single-stream MB/s, both phones' CPU %, and, if you can run it, an iperf3 baseline (Android: an iperf3 app or Termux `iperf3 -s`; iPhone: an iperf3 client app; `-P 4` for four streams). I propose parallel streams only if CrossDrop is clearly below the iperf3 figure (more than about 25 %) while neither phone's CPU is near one core, and I show you those numbers first.
