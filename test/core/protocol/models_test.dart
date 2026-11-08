@@ -4,6 +4,47 @@ import 'package:crossdrop/core/protocol/models.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  group('DeviceInfo uploadSlots (D-068)', () {
+    Map<String, Object?> info([Object? slots]) => {
+      'id': 'd',
+      'name': 'n',
+      'platform': 'android',
+      'versions': [2],
+      'uploadSlots': ?slots,
+    };
+
+    test('absent in older replies: one at a time', () {
+      expect(DeviceInfo.fromJson(info()).uploadSlots, 1);
+    });
+
+    test('read, and capped', () {
+      expect(DeviceInfo.fromJson(info(3)).uploadSlots, 3);
+      expect(
+        DeviceInfo.fromJson(info(1000)).uploadSlots,
+        DeviceInfo.maxUploadSlots,
+      );
+    });
+
+    test('nonsense is refused', () {
+      for (final bad in [0, -2, '3', 2.5, true]) {
+        expect(
+          () => DeviceInfo.fromJson(info(bad)),
+          throwsA(isA<FormatError>()),
+          reason: '$bad',
+        );
+      }
+    });
+
+    test('written only when not 1, round trip', () {
+      const one = DeviceInfo(id: 'd', name: 'n', platform: 'ios');
+      expect(one.toJson().containsKey('uploadSlots'), isFalse);
+      final three = one.withUploadSlots(3);
+      expect(three.toJson()['uploadSlots'], 3);
+      expect(DeviceInfo.fromJson(three.toJson()).uploadSlots, 3);
+      expect(three.versions, one.versions);
+    });
+  });
+
   group('SessionOffer', () {
     test('round-trips through JSON', () {
       const offer = SessionOffer(

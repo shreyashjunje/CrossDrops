@@ -67,6 +67,24 @@ Future<Taps> pump(
 }
 
 void main() {
+  test('several files moving together say so (D-068)', () {
+    TransferFileView f(FileTransferStatus s) =>
+        TransferFileView(name: 'x', size: 10, doneBytes: 5, status: s);
+    final v = TransferView(
+      direction: TransferDirection.send,
+      peerName: 'P',
+      stage: TransferStage.running,
+      files: [
+        f(FileTransferStatus.saved),
+        f(FileTransferStatus.receiving),
+        f(FileTransferStatus.verifying),
+        f(FileTransferStatus.receiving),
+        f(FileTransferStatus.pending),
+      ],
+    );
+    expect(ProgressView.stageText(v), 'Sending 3 files at once · 1 of 5 done');
+  });
+
   testWidgets('total and per-file progress, speed and time left', (
     tester,
   ) async {

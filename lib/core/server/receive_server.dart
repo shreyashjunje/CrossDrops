@@ -406,6 +406,10 @@ class ReceiveServer {
   /// Unfinished sessions at once, from all senders. More offers get 503.
   static const int maxOpenSessions = 8;
 
+  /// Files of one session received at the same time (D-068), advertised
+  /// as `uploadSlots` in `/v1/info`. A PUT beyond it gets 503 `busy`.
+  static const int maxParallelUploads = 3;
+
   /// Ended sessions kept in memory at most, however recent (review M1).
   static const int maxRetainedSessions = 32;
 
@@ -455,7 +459,7 @@ class ReceiveServer {
     DateTime Function()? clock,
   }) async {
     final server = ReceiveServer._(
-      info,
+      info.withUploadSlots(maxParallelUploads),
       authenticator ??
           SenderAuthenticator(ownFingerprint: credentials.fingerprint),
       trustLookup,
@@ -1284,6 +1288,9 @@ class ReceiveServer {
     if (f.busy) {
       return _error(409, ErrorCodes.busy, 'another upload is in progress');
     }
+    if (s.files.values.where((o) => o.busy).length >= maxParallelUploads) {
+      return _error(503, ErrorCodes.busy, 'too many uploads at once');
+    }
     f.lock();
     try {
       return await _receive(req, s, f, offset);
@@ -1330,12 +1337,12 @@ class ReceiveServer {
 
     f.digest = null;
     s.lastActivity = _clock();
-    // At most one running hash per session: senders send one file at a
-    // time, and one that hops between files must not leave an isolate
-    // behind for each (review M2). A file whose hash was dropped is hashed
-    // from disk at /complete.
+    // A hash runs only for files being uploaded right now (at most
+    // [maxParallelUploads], D-068): a sender that hops between files must
+    // not leave an isolate behind for each (review M2). A file whose hash
+    // was dropped is hashed from disk at /complete.
     for (final other in s.files.values) {
-      if (!identical(other, f)) other.dropHasher();
+      if (!identical(other, f) && !other.busy) other.dropHasher();
     }
     // Keep hashing where the last upload stopped. Without a hash that
     // matches the bytes on disk (after a restart) don't hash here: hashing

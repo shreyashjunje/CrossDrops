@@ -921,6 +921,104 @@ void main() {
     });
   });
 
+  group('several files at once (D-068)', () {
+    test('info advertises uploadSlots', () async {
+      final (_, body) = await send('GET', '/v1/info');
+      expect(body['uploadSlots'], ReceiveServer.maxParallelUploads);
+      expect(
+        DeviceInfo.fromJson(body).uploadSlots,
+        ReceiveServer.maxParallelUploads,
+      );
+    });
+
+    test(
+      'uploads run together and keep their hashes; one more gets 503',
+      () async {
+        const n = ReceiveServer.maxParallelUploads;
+        final data = [
+          for (var i = 0; i <= n; i++) randomBytes(256 * 1024 + 17 * i),
+        ];
+        final sid = await createSession(
+          '',
+          0,
+          files: [
+            for (var i = 0; i <= n; i++)
+              FileOffer(fileId: 'f$i', name: 'f$i.bin', size: data[i].length),
+          ],
+        );
+        final authHeader = await authLine();
+        // n uploads that stay open, each half sent.
+        final sockets = <SecureSocket>[];
+        for (var i = 0; i < n; i++) {
+          final socket = await SecureSocket.connect(
+            '127.0.0.1',
+            r.port,
+            onBadCertificate: (_) => true,
+          );
+          socket.write(
+            'PUT /v1/sessions/$sid/files/f$i?offset=0 HTTP/1.1\r\n'
+            'host: 127.0.0.1\r\n$authHeader'
+            'content-length: ${data[i].length}\r\n'
+            'content-type: application/octet-stream\r\n\r\n',
+          );
+          socket.add(data[i].sublist(0, data[i].length ~/ 2));
+          await socket.flush();
+          sockets.add(socket);
+        }
+        await waitFor(
+          () => r.server.liveHashes == n,
+          reason: 'one running hash per upload, none dropped',
+        );
+
+        final (busy, body) = await send(
+          'PUT',
+          '/v1/sessions/$sid/files/f$n?offset=0',
+          bytes: data[n],
+        );
+        expect(busy, 503);
+        expect(body['error'], ErrorCodes.busy);
+
+        final replies = [
+          for (final socket in sockets) utf8.decoder.bind(socket).join(),
+        ];
+        for (var i = 0; i < n; i++) {
+          sockets[i].add(data[i].sublist(data[i].length ~/ 2));
+          await sockets[i].flush();
+        }
+        for (var i = 0; i < n; i++) {
+          await waitFor(
+            () =>
+                r.server.sessions.single.files
+                    .firstWhere((f) => f.offer.fileId == 'f$i')
+                    .receivedBytes ==
+                data[i].length,
+          );
+          await sockets[i].close();
+        }
+        for (final reply in replies) {
+          expect(await reply, startsWith('HTTP/1.1 200'));
+        }
+        // The free slot takes the last file now.
+        final (late, _) = await send(
+          'PUT',
+          '/v1/sessions/$sid/files/f$n?offset=0',
+          bytes: data[n],
+        );
+        expect(late, 200);
+        for (var i = 0; i <= n; i++) {
+          final (code, b) = await send(
+            'POST',
+            '/v1/sessions/$sid/files/f$i/complete',
+            json: {'sha256': shaOf(data[i])},
+          );
+          expect(code, 200, reason: 'f$i: $b');
+        }
+        expect(await statusOf(sid), SessionStatus.done);
+        expect(r.saved, hasLength(n + 1));
+      },
+    );
+  });
+
   group('cancel', () {
     test('sender DELETE while offered withdraws the offer', () async {
       r.decider = (_) => Completer<bool>().future;

@@ -126,11 +126,7 @@ class ProgressView extends StatelessWidget {
     TransferStage.waiting when v.sending =>
       'Waiting for ${v.peerName} to accept…',
     TransferStage.waiting => 'Accepted. Waiting for the first bytes…',
-    TransferStage.running =>
-      v.current == null
-          ? 'Checking the files…'
-          : '${v.sending ? 'Sending' : 'Receiving'} '
-                '${v.files.indexOf(v.current!) + 1} of ${v.files.length}',
+    TransferStage.running => _runningText(v),
     TransferStage.retrying =>
       'Connection lost. Trying again in '
           '${(v.retryIn?.inMilliseconds ?? 0) ~/ 1000 + 1} s…',
@@ -143,6 +139,26 @@ class ProgressView extends StatelessWidget {
     TransferStage.cancelled => 'Cancelled',
     TransferStage.failed => 'Stopped',
   };
+
+  /// "Sending 2 of 5", or "Sending 3 files at once · 4 of 10 done" while
+  /// several move together (D-068).
+  static String _runningText(TransferView v) {
+    final verb = v.sending ? 'Sending' : 'Receiving';
+    final active = v.files
+        .where(
+          (f) =>
+              f.status == FileTransferStatus.receiving ||
+              f.status == FileTransferStatus.verifying,
+        )
+        .length;
+    if (active > 1) {
+      final done = v.files.where((f) => f.status.isTerminal).length;
+      return '$verb $active files at once · $done of ${v.files.length} done';
+    }
+    final current = v.current;
+    if (current == null) return 'Checking the files…';
+    return '$verb ${v.files.indexOf(current) + 1} of ${v.files.length}';
+  }
 }
 
 /// iPhone: the app must stay open with the screen on (ARCHITECTURE.md,

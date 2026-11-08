@@ -182,6 +182,7 @@ class DeviceInfo {
     required this.name,
     required this.platform,
     this.versions = const [protocolVersion],
+    this.uploadSlots = 1,
   });
 
   final String id;
@@ -191,11 +192,27 @@ class DeviceInfo {
   /// Protocol versions this device supports.
   final List<int> versions;
 
+  /// Files of one session the receiver takes at the same time (D-068).
+  /// Absent in replies from older versions, which take one at a time.
+  final int uploadSlots;
+
+  /// The most a receiver may ask for; a larger claim is cut to this.
+  static const int maxUploadSlots = 8;
+
+  DeviceInfo withUploadSlots(int slots) => DeviceInfo(
+    id: id,
+    name: name,
+    platform: platform,
+    versions: versions,
+    uploadSlots: slots,
+  );
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
     'platform': platform,
     'versions': versions,
+    if (uploadSlots != 1) 'uploadSlots': uploadSlots,
   };
 
   factory DeviceInfo.fromJson(Object? json) {
@@ -204,11 +221,14 @@ class DeviceInfo {
     final name = json['name'];
     final platform = json['platform'];
     final versions = json['versions'];
+    final slots = json['uploadSlots'] ?? 1;
     if (id is! String ||
         name is! String ||
         platform is! String ||
         versions is! List ||
-        versions.any((v) => v is! int)) {
+        versions.any((v) => v is! int) ||
+        slots is! int ||
+        slots < 1) {
       throw FormatError('invalid info');
     }
     return DeviceInfo(
@@ -216,6 +236,7 @@ class DeviceInfo {
       name: name,
       platform: platform,
       versions: versions.cast<int>(),
+      uploadSlots: slots > maxUploadSlots ? maxUploadSlots : slots,
     );
   }
 }

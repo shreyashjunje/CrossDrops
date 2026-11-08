@@ -156,6 +156,14 @@ class UploadClient {
   /// same one for offers made after it. Null before authenticating.
   String? get pairingCode => _pairingCode;
 
+  /// The receiver's bearer token for this sender, once authenticated.
+  String? get token => _token;
+
+  /// Starts with a token another client to the same receiver already has,
+  /// so parallel uploads (D-068) do not each authenticate. If the
+  /// receiver refuses it, this client authenticates on its own.
+  void adoptToken(String? token) => _token ??= token;
+
   HttpClient _newHttpClient() => pinnedHttpClient(
     fingerprint: fingerprint,
     connectTimeout: connectTimeout,

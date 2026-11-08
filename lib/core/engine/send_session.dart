@@ -216,6 +216,21 @@ class _Stop implements Exception {
   final int? neededBytes;
 }
 
+/// One upload lane (D-068): lane 0 uses the session's own client, the
+/// others their own connection to the same receiver.
+class _Lane {
+  _Lane(this.own);
+
+  /// Null for lane 0.
+  UploadClient? own;
+
+  /// Set while a PUT runs on this lane; completes when it stops.
+  Completer<void>? uploading;
+
+  /// Back from a pause: the time away doesn't count against the deadline.
+  bool resumed = false;
+}
+
 class _File {
   _File(this.fileId, this.item);
 
@@ -228,8 +243,9 @@ class _File {
   int confirmed = 0;
 }
 
-/// Sends files to one receiver, one after another over one connection
-/// (ARCHITECTURE.md, "Transfer rules" 4), resuming after drops.
+/// Sends files to one receiver, up to [SendSession.parallelUploads] at
+/// once, each on its own connection, as many as the receiver takes
+/// (ARCHITECTURE.md, "Transfer rules" 4, D-068), resuming after drops.
 class SendSession {
   SendSession({
     required String host,
@@ -246,8 +262,10 @@ class SendSession {
     SourceOpener? opener,
     this.acceptTimeout = const Duration(seconds: 75),
     this.pollInterval = const Duration(seconds: 2),
+    this.parallelUploads = defaultParallelUploads,
     int chunkSize = defaultChunkSize,
-  }) : _host = host,
+  }) : assert(parallelUploads >= 1),
+       _host = host,
        _port = port,
        _repo = repository,
        _locator = locate,
@@ -279,6 +297,7 @@ class SendSession {
     ClientFactory? clientFactory,
     Backoff Function()? backoff,
     SourceOpener? opener,
+    int parallelUploads = defaultParallelUploads,
   }) {
     final fingerprint = stored.peerFingerprint;
     if (fingerprint == null) {
@@ -308,6 +327,7 @@ class SendSession {
       clientFactory: clientFactory,
       backoff: backoff,
       opener: opener,
+      parallelUploads: parallelUploads,
     );
     s._sessionId = stored.sessionId;
     s._rowId = stored.rowId;
@@ -333,6 +353,14 @@ class SendSession {
   final String? expectedDeviceId;
   final Duration acceptTimeout;
   final Duration pollInterval;
+
+  /// Files sent at the same time, at most; cut to the receiver's
+  /// uploadSlots (1 for older receivers).
+  final int parallelUploads;
+
+  /// Small photos gain the most: each file costs a few round trips
+  /// (status, upload, verify) that run side by side (D-068).
+  static const int defaultParallelUploads = 3;
 
   String _host;
   int _port;
@@ -367,11 +395,16 @@ class SendSession {
   bool _localCancel = false;
   bool _remoteCancel = false;
   Completer<void>? _pauseGate;
-  bool _resumedFromPause = false;
   bool _running = false;
 
-  /// Set while a PUT runs; completes when it stops.
-  Completer<void>? _uploading;
+  /// Lanes the receiver allows, from its info; 1 until known.
+  int _slots = 1;
+  final List<_Lane> _lanes = [];
+
+  /// The first outcome a lane reached; the other lanes stop with it.
+  _Stop? _halt;
+  Future<void>? _eventsOpening;
+  Future<void>? _relocating;
 
   /// `POST /v1/sessions` is on its way; a cancel waits for it briefly.
   bool _offering = false;
@@ -418,10 +451,7 @@ class SendSession {
       }
       await _waitForAccept();
       await _setStored(SessionStatus.transferring);
-      for (final f in _files) {
-        if (f.status.isTerminal) continue;
-        await _sendFile(f);
-      }
+      await _sendAll();
       final anySaved = _files.any((f) => f.status == FileTransferStatus.saved);
       await _finish(
         anySaved ? SendPhase.done : SendPhase.failed,
@@ -444,6 +474,9 @@ class SendSession {
       }
       _opened.clear();
       _client.close();
+      for (final l in _lanes) {
+        l.own?.close();
+      }
     }
     return snapshot;
   }
@@ -466,6 +499,9 @@ class SendSession {
     } else {
       _client.cancel();
     }
+    for (final l in _lanes) {
+      l.own?.cancel();
+    }
     final sid = _sessionId;
     if (sid != null) {
       final c = _clientFactory(_host, _port);
@@ -487,10 +523,15 @@ class SendSession {
     if (_phase.isFinished) return Future<void>.value();
     if (_pauseGate == null) {
       _pauseGate = Completer<void>();
-      _client.requestPause();
+      for (final c in _clients) {
+        c.requestPause();
+      }
       _emit(SendPhase.paused, force: true);
     }
-    return _uploading?.future ?? Future<void>.value();
+    return Future.wait([
+      for (final l in _lanes)
+        if (l.uploading case final u?) u.future,
+    ]);
   }
 
   /// Back in the foreground: continue where the receiver stopped.
@@ -498,9 +539,13 @@ class SendSession {
     final gate = _pauseGate;
     if (gate == null) return;
     _pauseGate = null;
-    _resumedFromPause = true;
+    for (final l in _lanes) {
+      l.resumed = true;
+    }
     // A pause no upload saw would stop the next one for nothing.
-    _client.clearPause();
+    for (final c in _clients) {
+      c.clearPause();
+    }
     gate.complete();
   }
 
@@ -526,6 +571,7 @@ class SendSession {
     if (expected != null && info.id != expected) {
       throw const _Stop(SendPhase.failed, SendReasons.identityMismatch);
     }
+    _slots = _slotsFor(info);
     _peer = SenderInfo(id: info.id, name: info.name, platform: info.platform);
     if (!await _allSourcesIntact()) {
       throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
@@ -633,6 +679,7 @@ class SendSession {
             'another device at this address',
           );
         }
+        _slots = _slotsFor(info);
         return;
       } on UploadException catch (e) {
         if (!_isTransient(e) && e.code != SendReasons.identityMismatch) {
@@ -700,7 +747,81 @@ class SendSession {
     _ => const AcceptedEvent(),
   };
 
-  Future<void> _sendFile(_File f) async {
+  /// Sends every unfinished file, [_slots] at a time; each lane takes the
+  /// next file in offer order. The first lane to reach an outcome (a
+  /// cancel, the receiver gone, no space, ...) stops the others with it.
+  Future<void> _sendAll() async {
+    final queue = [
+      for (final f in _files)
+        if (!f.status.isTerminal) f,
+    ];
+    if (queue.isEmpty) return;
+    final count = _slots < queue.length ? _slots : queue.length;
+    _lanes
+      ..clear()
+      ..add(_Lane(null));
+    for (var i = 1; i < count; i++) {
+      _lanes.add(_Lane(_laneClient()));
+    }
+    if (_pauseGate != null) {
+      for (final l in _lanes) {
+        l.own?.requestPause();
+      }
+    }
+    if (count > 1) _log('sending $count files at once');
+    var next = 0;
+    Object? error;
+    StackTrace? trace;
+    Future<void> drive(_Lane lane) async {
+      while (_halt == null && error == null && next < queue.length) {
+        final f = queue[next++];
+        try {
+          await _sendFile(f, lane);
+        } on _Stop catch (stop) {
+          _haltLanes(stop, except: lane);
+          return;
+        } catch (e, st) {
+          error = e;
+          trace = st;
+          _haltLanes(const _Stop(SendPhase.failed, 'error'), except: lane);
+          return;
+        }
+      }
+    }
+
+    await Future.wait([for (final l in _lanes) drive(l)]);
+    if (error case final e?) Error.throwWithStackTrace(e, trace!);
+    if (_halt case final h?) throw h;
+  }
+
+  /// Ends the other lanes with [stop]: wakes the waiting ones and breaks
+  /// the uploads that run.
+  void _haltLanes(_Stop stop, {required _Lane except}) {
+    if (_halt != null) return;
+    _halt = stop;
+    _wake();
+    for (final l in _lanes) {
+      if (!identical(l, except)) _clientOf(l).cancel();
+    }
+  }
+
+  UploadClient _clientOf(_Lane lane) => lane.own ?? _client;
+
+  /// The session's client and every lane's.
+  List<UploadClient> get _clients => [_client, for (final l in _lanes) ?l.own];
+
+  /// A connection for another lane, reusing the session's token.
+  UploadClient _laneClient() =>
+      _clientFactory(_host, _port)..adoptToken(_client.token);
+
+  int _slotsFor(DeviceInfo info) {
+    final n = info.uploadSlots < parallelUploads
+        ? info.uploadSlots
+        : parallelUploads;
+    return n < 1 ? 1 : n;
+  }
+
+  Future<void> _sendFile(_File f, _Lane lane) async {
     final opened = await _openFor(f);
     if (opened == null) {
       await _cancelRemote();
@@ -720,13 +841,15 @@ class SendSession {
     while (true) {
       await _waitWhilePaused();
       _checkStop();
-      if (_resumedFromPause) {
+      if (lane.resumed) {
         // Time in the background doesn't count against the deadline.
-        _resumedFromPause = false;
+        lane.resumed = false;
         backoff.reset();
       }
+      // Fresh each round: a retry replaces the lane's client.
+      final client = _clientOf(lane);
       try {
-        final status = await _client.fileStatus(target);
+        final status = await client.fileStatus(target);
         if (status.status == FileTransferStatus.saved.name) {
           return await _fileEnded(f, FileTransferStatus.saved);
         }
@@ -744,9 +867,9 @@ class SendSession {
           if (_pauseGate != null) continue;
           f.status = FileTransferStatus.receiving;
           _emit(SendPhase.sending, force: true);
-          final uploading = _uploading = Completer<void>();
+          final uploading = lane.uploading = Completer<void>();
           try {
-            await _client.put(
+            await client.put(
               target,
               status.receivedBytes,
               onProgress: (p) {
@@ -758,7 +881,7 @@ class SendSession {
               },
             );
           } finally {
-            _uploading = null;
+            lane.uploading = null;
             uploading.complete();
           }
           await _confirm(f, f.item.size);
@@ -772,13 +895,15 @@ class SendSession {
           await _cancelRemote();
           throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
         }
-        await _client.complete(target, sha);
+        await client.complete(target, sha);
         return await _fileEnded(f, FileTransferStatus.saved);
       } on UploadException catch (e) {
         switch (e.code) {
           case 'paused':
             continue;
           case 'cancelled':
+            // Another lane's outcome, or a cancel from either side.
+            _checkStop();
             throw _Stop(
               SendPhase.cancelled,
               _remoteCancel ? 'receiver' : 'sender',
@@ -806,9 +931,9 @@ class SendSession {
         }
         if (!_isTransient(e)) throw _Stop(SendPhase.failed, e.code);
         _log('file ${f.fileId}: ${e.code}, will retry');
-        await _retryWait(backoff);
+        await _retryWait(backoff, lane: lane);
       } on FormatError {
-        await _retryWait(backoff);
+        await _retryWait(backoff, lane: lane);
       }
     }
   }
@@ -826,7 +951,11 @@ class SendSession {
   /// Waits before the next try, or gives up. After [relocateAfter] failed
   /// tries, asks discovery where the receiver is now (its IP or port may
   /// have changed).
-  Future<void> _retryWait(Backoff backoff, {int relocateAfter = 3}) async {
+  Future<void> _retryWait(
+    Backoff backoff, {
+    int relocateAfter = 3,
+    _Lane? lane,
+  }) async {
     final delay = backoff.next();
     if (delay == null) {
       throw const _Stop(SendPhase.failed, SendReasons.network);
@@ -836,12 +965,26 @@ class SendSession {
     await Future.any([Future<void>.delayed(delay), _stopSignal.future]);
     _retryIn = null;
     _checkStop();
-    if (backoff.attempts >= relocateAfter) await _relocate();
+    if (backoff.attempts >= relocateAfter) {
+      // Lanes that fail together ask discovery once.
+      await (_relocating ??= _relocate().whenComplete(
+        () => _relocating = null,
+      ));
+    }
     // A new client: the old one may hold a socket to a dead peer.
-    _client.close();
-    _client = _clientFactory(_host, _port);
+    final own = lane?.own;
+    if (lane == null || own == null) {
+      _client.close();
+      _client = _clientFactory(_host, _port);
+    } else {
+      own.close();
+      final fresh = lane.own = _laneClient();
+      if (_pauseGate != null) fresh.requestPause();
+    }
     if (_events == null && _decision?.isCompleted == true) {
-      await _openEvents();
+      await (_eventsOpening ??= _openEvents().whenComplete(
+        () => _eventsOpening = null,
+      ));
     }
   }
 
@@ -896,7 +1039,9 @@ class SendSession {
         _remoteCancel = true;
         if (decision != null && !decision.isCompleted) decision.complete(e);
         _wake();
-        _client.cancel();
+        for (final c in _clients) {
+          c.cancel();
+        }
       default:
         // progress, file_done and error are confirmed by HTTP replies too.
         break;
@@ -1058,6 +1203,7 @@ class SendSession {
   void _checkStop() {
     if (_localCancel) throw const _Stop(SendPhase.cancelled, 'sender');
     if (_remoteCancel) throw const _Stop(SendPhase.cancelled, 'receiver');
+    if (_halt case final h?) throw h;
   }
 
   void _wake() {

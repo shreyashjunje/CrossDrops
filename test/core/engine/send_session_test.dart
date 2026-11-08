@@ -9,6 +9,7 @@ import 'package:crossdrop/core/engine/send_session.dart';
 import 'package:crossdrop/core/engine/source_opener.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_credentials.dart';
+import 'package:crossdrop/core/server/receive_server.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
 import 'package:crossdrop/core/storage/trust_repository.dart';
@@ -77,6 +78,7 @@ void main() {
     PeerLocator? locate,
     ClientFactory? clientFactory,
     SourceOpener? opener,
+    int parallelUploads = SendSession.defaultParallelUploads,
   }) => SendSession(
     host: '127.0.0.1',
     port: port ?? proxy.port,
@@ -91,6 +93,7 @@ void main() {
     backoff: () => fastBackoff(giveUp: giveUp),
     pollInterval: const Duration(milliseconds: 50),
     opener: opener,
+    parallelUploads: parallelUploads,
   );
 
   Future<(SendItem, String)> makeFile(
@@ -421,7 +424,11 @@ void main() {
       expect(result.phase, SendPhase.done, reason: result.reason);
       await expectSavedMatches({'a.jpg': a.$2, 'b.mov': b.$2});
       expect(opener.openNow, 0, reason: 'every source closed');
-      expect(opener.maxOpen, 1, reason: 'one file at a time');
+      expect(
+        opener.maxOpen,
+        lessThanOrEqualTo(4),
+        reason: 'bounded: one per lane, four for the check before the offer',
+      );
     });
 
     test('a permission revoked mid-session stops the send', () async {
@@ -439,6 +446,131 @@ void main() {
       expect(result.phase, SendPhase.failed);
       expect(result.reason, SendReasons.sourceUnreadable);
       expect(opener.openNow, 0);
+    });
+  });
+
+  group('several files at once (D-068)', () {
+    /// The most files in `receiving` at the same moment.
+    Future<(SendSnapshot, int)> runCounting(SendSession s) async {
+      var most = 0;
+      final sub = s.updates.listen((u) {
+        final n = u.files
+            .where((f) => f.status == FileTransferStatus.receiving)
+            .length;
+        if (n > most) most = n;
+      });
+      final result = await s.run();
+      await sub.cancel();
+      return (result, most);
+    }
+
+    test('up to three at once; every file verified', () async {
+      final files = [
+        for (var i = 0; i < 6; i++)
+          await makeFile('f$i.jpg', 2 * mb + i, seed: 20 + i),
+      ];
+      final (result, most) = await runCounting(
+        session([for (final f in files) f.$1]),
+      );
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      expect(result.savedCount, 6);
+      await expectSavedMatches({for (final f in files) f.$1.name: f.$2});
+      expect(most, greaterThan(1));
+      expect(most, lessThanOrEqualTo(ReceiveServerLimits.slots));
+    });
+
+    test('an older receiver without uploadSlots gets one at a time', () async {
+      final files = [
+        for (var i = 0; i < 3; i++) await makeFile('o$i.bin', mb, seed: 30 + i),
+      ];
+      final (result, most) = await runCounting(
+        session(
+          [for (final f in files) f.$1],
+          clientFactory: (h, port) => _OldReceiverClient(
+            host: h,
+            port: port,
+            fingerprint: identity.fingerprint,
+            credentials: me,
+          ),
+        ),
+      );
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      expect(most, 1);
+    });
+
+    test('parallelUploads 1 sends one at a time', () async {
+      final files = [
+        for (var i = 0; i < 3; i++) await makeFile('s$i.bin', mb, seed: 40 + i),
+      ];
+      final (result, most) = await runCounting(
+        session([for (final f in files) f.$1], parallelUploads: 1),
+      );
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      expect(most, 1);
+    });
+
+    test('one lane giving up stops the others; resumable', () async {
+      final files = [
+        for (var i = 0; i < 4; i++) await makeFile('n$i.bin', mb, seed: 50 + i),
+      ];
+      final result = await session(
+        [for (final f in files) f.$1],
+        port: r.port,
+        giveUp: const Duration(milliseconds: 600),
+        clientFactory: (h, port) => _FailingPutClient(
+          host: h,
+          port: port,
+          fingerprint: identity.fingerprint,
+          credentials: me,
+        ),
+      ).run();
+      expect(result.phase, SendPhase.failed);
+      expect(result.reason, SendReasons.network);
+      expect(result.canResume, isTrue);
+      expect(result.savedCount, 0);
+    });
+
+    test('cancel stops every lane', () async {
+      final files = [
+        for (var i = 0; i < 4; i++)
+          await makeFile('c$i.bin', 6 * mb, seed: 60 + i),
+      ];
+      final s = session([for (final f in files) f.$1]);
+      Future<void>? cancelling;
+      final sub = s.updates.listen((u) {
+        if (u.sentBytes > 2 * mb) cancelling ??= s.cancel();
+      });
+      final result = await s.run();
+      await sub.cancel();
+      await cancelling;
+      expect(result.phase, SendPhase.cancelled);
+      expect(result.reason, 'sender');
+      expect(r.server.sessions.single.status, SessionStatus.cancelled);
+    });
+
+    test('pause waits for every running upload, then all resume', () async {
+      final files = [
+        for (var i = 0; i < 3; i++)
+          await makeFile('p$i.bin', 4 * mb, seed: 70 + i),
+      ];
+      final s = session([for (final f in files) f.$1]);
+      var paused = false;
+      final sub = s.updates.listen((u) async {
+        if (!paused && u.sentBytes > mb) {
+          paused = true;
+          await s.pause();
+          // Nothing moves while paused.
+          final at = s.snapshot.sentBytes;
+          await Future<void>.delayed(const Duration(milliseconds: 200));
+          expect(s.snapshot.sentBytes, at);
+          s.resume();
+        }
+      });
+      final result = await s.run();
+      await sub.cancel();
+      expect(paused, isTrue);
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      await expectSavedMatches({for (final f in files) f.$1.name: f.$2});
     });
   });
 
@@ -773,6 +905,28 @@ class _HookedClient extends UploadClient {
     onFileStatus();
     return s;
   }
+}
+
+/// A receiver from before D-068: its info has no uploadSlots.
+class _OldReceiverClient extends UploadClient {
+  _OldReceiverClient({
+    required super.host,
+    required super.port,
+    required super.fingerprint,
+    required super.credentials,
+  }) : super(
+         connectTimeout: const Duration(seconds: 2),
+         stallTimeout: const Duration(seconds: 2),
+       );
+
+  @override
+  Future<DeviceInfo> info() async =>
+      DeviceInfo.fromJson((await super.info()).withUploadSlots(1).toJson());
+}
+
+/// The receiver's advertised limit, for assertions.
+abstract final class ReceiveServerLimits {
+  static const int slots = ReceiveServer.maxParallelUploads;
 }
 
 /// Every PUT fails as a dropped connection, so the session retries and
