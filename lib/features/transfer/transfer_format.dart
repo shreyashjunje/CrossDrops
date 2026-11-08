@@ -10,6 +10,18 @@ String formatSize(int bytes) => bytes >= 1e9
     ? '${(bytes / 1e9).toStringAsFixed(2)} GB'
     : formatMegabytes(bytes);
 
+/// "3,482,117 bytes": the exact size, to compare with what a gallery or
+/// file manager shows (they round, some in units of 1024).
+String formatExactBytes(int bytes) {
+  final digits = bytes.abs().toString();
+  final out = StringBuffer(bytes < 0 ? '-' : '');
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) out.write(',');
+    out.write(digits[i]);
+  }
+  return '$out ${bytes == 1 ? 'byte' : 'bytes'}';
+}
+
 String formatSpeed(double bytesPerSecond) =>
     '${(bytesPerSecond / 1e6).toStringAsFixed(1)} MB/s';
 

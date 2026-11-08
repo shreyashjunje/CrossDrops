@@ -76,7 +76,7 @@ class ProgressView extends StatelessWidget {
                 children: [
                   Text(
                     '${formatSize(v.doneBytes)} of ${formatSize(v.totalBytes)}'
-                    ' · $percent%',
+                    ' ${v.sending ? 'sent' : 'received'} · $percent%',
                   ),
                   if (v.stage == TransferStage.running)
                     Text(
@@ -216,6 +216,10 @@ class FileProgressRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(file.name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  Text(
+                    formatSize(file.size),
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                   const SizedBox(height: 4),
                   ExcludeSemantics(
                     child: LinearProgressIndicator(value: file.fraction),

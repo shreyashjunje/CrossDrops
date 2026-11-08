@@ -133,6 +133,8 @@ void main() {
       );
       expect(find.text('1 file sent'), findsOneWidget);
       expect(find.textContaining('SHA-256'), findsOneWidget);
+      expect(find.textContaining('Original quality'), findsWidgets);
+      expect(find.textContaining('Original quality, verified'), findsOneWidget);
       expect(find.text('Open'), findsNothing);
       await tester.tap(find.text("Trust Yash's iPhone"));
       expect(calls.trust, 1);

@@ -74,17 +74,17 @@ void main() {
     await pump(tester, view());
     expect(find.text('Sending to Pixel 8'), findsOneWidget);
     expect(find.text('Sending 2 of 2'), findsOneWidget);
-    expect(find.text('297.0 MB of 412.0 MB · 72%'), findsOneWidget);
+    expect(find.text('297.0 MB of 412.0 MB sent · 72%'), findsOneWidget);
     expect(find.text('18.4 MB/s · 7 s left'), findsOneWidget);
     expect(find.text('IMG_4022.HEIC'), findsOneWidget);
     expect(find.text('IMG_4021.MOV'), findsOneWidget);
     expect(find.text('71%'), findsOneWidget);
     expect(
-      find.bySemanticsLabel(RegExp(r'^IMG_4022\.HEIC\s+done$')),
+      find.bySemanticsLabel(RegExp(r'^IMG_4022\.HEIC\s+[\d.]+ MB\s+done$')),
       findsOneWidget,
     );
     expect(
-      find.bySemanticsLabel(RegExp(r'^IMG_4021\.MOV\s+71%$')),
+      find.bySemanticsLabel(RegExp(r'^IMG_4021\.MOV\s+[\d.]+ MB\s+71%$')),
       findsOneWidget,
     );
     final total = tester.getSemantics(find.bySemanticsLabel('Total progress'));

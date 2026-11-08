@@ -5,6 +5,15 @@ import 'package:crossdrop/features/transfer/transfer_format.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('formatExactBytes groups digits', () {
+    expect(formatExactBytes(0), '0 bytes');
+    expect(formatExactBytes(1), '1 byte');
+    expect(formatExactBytes(999), '999 bytes');
+    expect(formatExactBytes(1000), '1,000 bytes');
+    expect(formatExactBytes(3482117), '3,482,117 bytes');
+    expect(formatExactBytes(4000000000), '4,000,000,000 bytes');
+  });
+
   test('formatSize switches to GB at 10^9 bytes', () {
     expect(formatSize(999999999), '1000.0 MB');
     expect(formatSize(2000000000), '2.00 GB');

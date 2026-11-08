@@ -204,9 +204,9 @@ class _FormatSettings extends ConsumerWidget {
         SwitchListTile(
           title: const Text('Convert HEIC to JPEG'),
           subtitle: const Text(
-            'For older Android galleries that cannot open HEIC. Takes a '
-            'moment per photo and loses a little quality and HDR. Off: '
-            'photos are sent as they are.',
+            'Lowers quality and removes HDR: each photo is re-encoded. Only '
+            'for older Android galleries that cannot open HEIC. Off '
+            '(recommended): photos are sent in original quality, unchanged.',
           ),
           value: settings?.convertHeicToJpeg ?? false,
           onChanged: settings == null ? null : repo.setConvertHeicToJpeg,

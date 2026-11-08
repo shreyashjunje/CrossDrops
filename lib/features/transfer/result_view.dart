@@ -143,10 +143,16 @@ class _Header extends StatelessWidget {
             textAlign: TextAlign.center,
             style: theme.textTheme.titleMedium,
           ),
-          if (failure == null && v.sending) ...[
+          if (n > 0) ...[
             const SizedBox(height: 4),
             Text(
-              'The other phone checked every file with SHA-256.',
+              v.sending
+                  ? 'Original quality: the other phone checked every file '
+                        'with SHA-256. Each one is identical to yours, byte '
+                        'for byte.'
+                  : 'Original quality: every file was checked with SHA-256. '
+                        'Each one is identical to the original, byte for '
+                        'byte.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyMedium,
             ),
@@ -285,11 +291,15 @@ class _ArrivedRow extends StatelessWidget {
       ),
       title: Text(file.name, maxLines: 2, overflow: TextOverflow.ellipsis),
       subtitle: fallback == null || file.savedTo == null
-          ? Text(formatSize(file.size))
+          ? Text(
+              '${formatSize(file.size)} · ${formatExactBytes(file.size)}\n'
+              'Original quality, verified',
+            )
           : Text(
               formatSavedTo(file.savedTo!, fallback, platform: platform),
               style: TextStyle(color: scheme.error),
             ),
+      isThreeLine: fallback == null || file.savedTo == null,
       trailing: canOpen
           ? TextButton(
               onPressed: () => onOpen!(file),
