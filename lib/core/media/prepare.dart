@@ -11,6 +11,7 @@ import '../protocol/models.dart';
 import '../security/device_identity.dart';
 import '../storage/file_name_sanitizer.dart';
 import 'format_plan.dart';
+import 'thumb_ref.dart';
 
 /// Something the user picked, before it is ready to send.
 sealed class PickedItem {
@@ -18,12 +19,18 @@ sealed class PickedItem {
 
   /// Shown in lists and skip messages. Never logged (hard rule 7).
   String get label;
+
+  /// Its preview on the Send screen.
+  ThumbRef get thumb;
 }
 
 /// A photo-library item (photo_manager asset).
 final class PickedAsset extends PickedItem {
   const PickedAsset(this.asset);
   final LibraryAsset asset;
+
+  @override
+  ThumbRef get thumb => LibraryThumb(asset.id, kind: asset.kind);
 
   /// The library name; without one (not looked up yet, or the library
   /// would not say), the kind and the day it was taken.
@@ -67,6 +74,13 @@ final class PickedFile extends PickedItem {
 
   @override
   String get label => name;
+
+  /// Photo, video or file, from what the OS said and the name.
+  String get kind =>
+      pickedKind(name: name, mime: mime, platformKind: platformKind);
+
+  @override
+  ThumbRef get thumb => FileThumb(ref, kind: kind);
 }
 
 /// Why a picked item is not sent.
@@ -337,6 +351,7 @@ class Preparer {
       kind: type.kind,
       created: f.created,
       livePhotoGroup: group,
+      thumb: LibraryThumb(asset.id, kind: type.kind),
     );
   }
 
@@ -376,6 +391,8 @@ class Preparer {
       mime: type.mime,
       kind: type.kind,
       created: picked.created,
+      // The original, also when a streaming provider's copy is sent.
+      thumb: FileThumb(picked.ref, kind: type.kind),
     );
   }
 

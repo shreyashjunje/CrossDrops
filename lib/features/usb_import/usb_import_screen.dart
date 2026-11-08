@@ -6,7 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/usb_import/camera_roll.dart';
 import '../../core/usb_import/import_runner.dart';
-import '../../core/usb_import/thumbnail_queue.dart';
+import '../../core/media/thumbnail_queue.dart';
 import '../transfer/transfer_format.dart';
 import 'usb_import_controller.dart';
 
@@ -448,7 +448,7 @@ class _Tile extends StatefulWidget {
   });
 
   final RollItem item;
-  final ThumbnailQueue? thumbs;
+  final ThumbnailQueue<int, String>? thumbs;
   final bool selected;
   final bool imported;
   final VoidCallback onTap;

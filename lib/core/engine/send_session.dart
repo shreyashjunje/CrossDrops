@@ -2,6 +2,7 @@ import 'dart:async';
 
 import '../client/upload_client.dart';
 import '../log.dart';
+import '../media/thumb_ref.dart';
 import '../protocol/events.dart';
 import '../protocol/models.dart';
 import '../security/device_credentials.dart';
@@ -112,6 +113,7 @@ class SendItem {
     this.kind = FileKind.file,
     this.created,
     this.livePhotoGroup,
+    this.thumb,
   });
 
   /// A file path, or a `content://` URI on Android, opened by the
@@ -126,6 +128,10 @@ class SendItem {
   /// Same value on a Live Photo's still and video (ARCHITECTURE.md,
   /// "Offer manifest").
   final String? livePhotoGroup;
+
+  /// Where the screens get its preview: the library item it came from, or
+  /// the file itself. Never sent, never stored.
+  final ThumbRef? thumb;
 }
 
 class SendFileProgress {

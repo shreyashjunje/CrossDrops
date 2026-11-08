@@ -1,33 +1,36 @@
 import 'dart:async';
 import 'dart:collection';
 
-/// Loads previews from a device that answers one request at a time.
+/// Loads previews (keyed by [K], for example a camera handle or a file
+/// reference) from a source that answers a few requests at a time: a USB
+/// camera, the photo library, the OS thumbnailer.
 ///
 /// The newest request goes first, so the tiles on screen load before the
 /// ones scrolled past; [cancel] drops a request that has not started (a
 /// tile that left the screen). Finished results are kept, up to
-/// [capacity], the oldest dropped first.
-class ThumbnailQueue {
+/// [capacity], the oldest dropped first. A null result ("no preview") is
+/// kept too, so it is not asked again.
+class ThumbnailQueue<K, T extends Object> {
   ThumbnailQueue(this._fetch, {this.parallel = 2, this.capacity = 2000});
 
-  final Future<String?> Function(int handle) _fetch;
+  final Future<T?> Function(K key) _fetch;
   final int parallel;
   final int capacity;
 
-  final LinkedHashMap<int, String?> _done = LinkedHashMap();
-  final Map<int, Completer<String?>> _waiting = {};
-  final List<int> _stack = [];
-  final Map<int, Future<String?>> _running = {};
+  final LinkedHashMap<K, T?> _done = LinkedHashMap();
+  final Map<K, Completer<T?>> _waiting = {};
+  final List<K> _stack = [];
+  final Map<K, Future<T?>> _running = {};
   bool _closed = false;
   bool _scheduled = false;
 
   /// The cached result, if [handle] finished; null otherwise or when the
-  /// device has no preview (use [has] to tell).
-  String? cached(int handle) => _done[handle];
+  /// source has no preview (use [has] to tell).
+  T? cached(K handle) => _done[handle];
 
-  bool has(int handle) => _done.containsKey(handle);
+  bool has(K handle) => _done.containsKey(handle);
 
-  Future<String?> load(int handle) {
+  Future<T?> load(K handle) {
     if (_done.containsKey(handle)) return Future.value(_done[handle]);
     final running = _running[handle];
     if (running != null) return running;
@@ -38,7 +41,7 @@ class ThumbnailQueue {
       _stack.add(handle);
       return waiting.future;
     }
-    final c = Completer<String?>();
+    final c = Completer<T?>();
     _waiting[handle] = c;
     _stack.add(handle);
     _schedule();
@@ -46,7 +49,7 @@ class ThumbnailQueue {
   }
 
   /// Drops a request that has not started; its future completes with null.
-  void cancel(int handle) {
+  void cancel(K handle) {
     final c = _waiting.remove(handle);
     if (c == null) return;
     _stack.remove(handle);
@@ -84,8 +87,8 @@ class ThumbnailQueue {
     }
   }
 
-  Future<String?> _run(int handle) async {
-    String? path;
+  Future<T?> _run(K handle) async {
+    T? path;
     try {
       path = await _fetch(handle);
     } on Object {

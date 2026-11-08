@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
+import 'file_thumbnail.dart';
 import 'transfer_format.dart';
 import 'transfer_view.dart';
 import 'widgets.dart';
@@ -177,7 +178,8 @@ class KeepOpenNote extends StatelessWidget {
   };
 }
 
-/// One file: name, a small bar, and the percentage or a status icon.
+/// One file: its preview, name, a small bar, and the percentage or a
+/// status icon.
 class FileProgressRow extends StatelessWidget {
   const FileProgressRow({super.key, required this.file});
 
@@ -207,6 +209,8 @@ class FileProgressRow extends StatelessWidget {
         padding: const EdgeInsets.symmetric(vertical: 6),
         child: Row(
           children: [
+            FileThumbnail(thumb: file.thumb, kind: file.kind, size: 44),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,

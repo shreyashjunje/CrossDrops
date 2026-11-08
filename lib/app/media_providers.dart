@@ -15,6 +15,7 @@ import '../platform/ios_export.dart';
 import '../platform/ios_photos.dart';
 import '../platform/open_file.dart';
 import '../platform/share_inbox.dart';
+import '../platform/thumbnails.dart';
 import 'app_dirs.dart';
 
 /// App folders, resolved once.
@@ -83,3 +84,8 @@ final iosShareInboxProvider = Provider<ShareInbox?>((ref) {
 
 /// Opens received files in the system viewer (D-051).
 final fileOpenerProvider = Provider<FileOpener>((ref) => ChannelFileOpener());
+
+/// Small previews of picked, sent and received files (D-068).
+final thumbnailServiceProvider = Provider<ThumbnailService>(
+  (ref) => ThumbnailService(PlatformThumbnailLoader()),
+);

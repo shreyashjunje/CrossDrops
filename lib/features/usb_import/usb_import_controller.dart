@@ -10,7 +10,7 @@ import '../../app/providers.dart';
 import '../../core/log.dart';
 import '../../core/usb_import/camera_roll.dart';
 import '../../core/usb_import/import_runner.dart';
-import '../../core/usb_import/thumbnail_queue.dart';
+import '../../core/media/thumbnail_queue.dart';
 import '../../platform/usb_camera.dart';
 
 /// The cable connection to an iPhone (Android, D-067).
@@ -200,13 +200,13 @@ class UsbImportController extends Notifier<UsbImportState> {
   StreamSubscription<UsbCameraEvent>? _events;
   Timer? _retry;
   ImportRunner? _runner;
-  ThumbnailQueue? _thumbs;
+  ThumbnailQueue<int, String>? _thumbs;
 
   /// Bumped on each connect; a stale listing stops.
   int _generation = 0;
   final List<CameraObject> _objects = [];
 
-  ThumbnailQueue? get thumbnails => _thumbs;
+  ThumbnailQueue<int, String>? get thumbnails => _thumbs;
 
   @override
   UsbImportState build() {

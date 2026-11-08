@@ -35,6 +35,7 @@ class TransferScreen extends ConsumerWidget {
         peerName: s.receiverName ?? 'the other phone',
         peerPlatform: s.receiver?.platform,
         pausedByUser: s.pausedByUser,
+        items: s.items,
       );
       final send = ref.read(sendControllerProvider.notifier);
       if (s.preparing case final prep?) {

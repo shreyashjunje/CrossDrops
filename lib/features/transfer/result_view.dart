@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
 import 'failure_messages.dart';
+import 'file_thumbnail.dart';
 import 'transfer_format.dart';
 import 'transfer_view.dart';
 
@@ -260,7 +261,28 @@ class _ArrivedRow extends StatelessWidget {
     final canOpen = onOpen != null && location != null;
     return ListTile(
       contentPadding: EdgeInsets.zero,
-      leading: Icon(Icons.check_circle, color: scheme.primary),
+      leading: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          FileThumbnail(thumb: file.thumb, kind: file.kind, size: 48),
+          Positioned(
+            right: -4,
+            bottom: -4,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surface,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.check_circle,
+                size: 18,
+                color: scheme.primary,
+                semanticLabel: 'saved',
+              ),
+            ),
+          ),
+        ],
+      ),
       title: Text(file.name, maxLines: 2, overflow: TextOverflow.ellipsis),
       subtitle: fallback == null || file.savedTo == null
           ? Text(formatSize(file.size))
@@ -299,7 +321,28 @@ class _FailedList extends StatelessWidget {
         for (final f in files.take(ResultView.maxListed))
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.error, color: scheme.error),
+            leading: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                FileThumbnail(thumb: f.thumb, kind: f.kind, size: 48),
+                Positioned(
+                  right: -4,
+                  bottom: -4,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.surface,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.error,
+                      size: 18,
+                      color: scheme.error,
+                      semanticLabel: 'not saved',
+                    ),
+                  ),
+                ),
+              ],
+            ),
             title: Text(f.name, maxLines: 2, overflow: TextOverflow.ellipsis),
             subtitle: Text(describeFileError(f.error)),
           ),

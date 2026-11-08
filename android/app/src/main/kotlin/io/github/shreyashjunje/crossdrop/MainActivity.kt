@@ -19,6 +19,7 @@ class MainActivity : FlutterActivity() {
     private var hotspot: HotspotChannel? = null
     private var network: NetworkChannel? = null
     private var usbCamera: UsbCameraChannel? = null
+    private var thumbnails: ThumbnailChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -28,6 +29,7 @@ class MainActivity : FlutterActivity() {
         hotspot = HotspotChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         network = NetworkChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         usbCamera = UsbCameraChannel(this, flutterEngine.dartExecutor.binaryMessenger, save!!)
+        thumbnails = ThumbnailChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         // Dart side: lib/platform/local_network.dart. Android has no Local
         // Network permission, so `probe` always answers "granted".
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "crossdrop/local_network")
@@ -126,6 +128,7 @@ class MainActivity : FlutterActivity() {
         hotspot?.stop()
         network?.dispose()
         usbCamera?.dispose()
+        thumbnails?.dispose()
         super.cleanUpFlutterEngine(flutterEngine)
     }
 

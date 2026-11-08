@@ -1,5 +1,7 @@
+import CryptoKit
 import Flutter
 import QuickLook
+import QuickLookThumbnailing
 import UIKit
 
 /// Platform channel `crossdrop/open` (Dart side: lib/platform/open_file.dart).
@@ -80,5 +82,79 @@ final class OpenFileChannel: NSObject, QLPreviewControllerDataSource {
     -> QLPreviewItem
   {
     (previewURL ?? URL(fileURLWithPath: "/")) as NSURL
+  }
+}
+
+/// Platform channel `crossdrop/thumbnail` (Dart side:
+/// lib/platform/thumbnails.dart).
+///
+/// - `thumbnail {ref, px, kind}` -> path of a small JPEG in Caches, or nil
+///   when QuickLook cannot preview the file. `ref` is a file path (an
+///   exported photo, a picked document, a received file). Only the path of
+///   the preview crosses the channel, never file bytes (CLAUDE.md hard
+///   rule 2). Photo-library items are previewed on the Dart side.
+///
+/// Previews are keyed by the path, size and date of the file. iOS empties
+/// Caches when it needs space. References are never logged (hard rule 7).
+final class ThumbnailChannel {
+  private let channel: FlutterMethodChannel
+  private let dir: URL? = FileManager.default
+    .urls(for: .cachesDirectory, in: .userDomainMask).first?
+    .appendingPathComponent("crossdrop_thumbs", isDirectory: true)
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "crossdrop/thumbnail", binaryMessenger: messenger)
+    channel.setMethodCallHandler { [weak self] call, result in
+      self?.handle(call, result: result)
+    }
+  }
+
+  private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    guard call.method == "thumbnail" else {
+      result(FlutterMethodNotImplemented)
+      return
+    }
+    let args = call.arguments as? [String: Any] ?? [:]
+    guard let ref = args["ref"] as? String else {
+      result(FlutterError(code: "bad_args", message: nil, details: nil))
+      return
+    }
+    let px = min(max((args["px"] as? NSNumber)?.intValue ?? 192, 32), 1024)
+    let url = URL(fileURLWithPath: ref)
+    guard let dir,
+      let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+      (attrs[.type] as? FileAttributeType) == .typeRegular
+    else {
+      result(nil)
+      return
+    }
+    let size = (attrs[.size] as? NSNumber)?.int64Value ?? 0
+    let modified = (attrs[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+    let key = Self.sha256("\(ref)|\(px)|\(size)|\(modified)")
+    let out = dir.appendingPathComponent("\(key).jpg")
+    if FileManager.default.fileExists(atPath: out.path) {
+      result(out.path)
+      return
+    }
+    let request = QLThumbnailGenerator.Request(
+      fileAt: url, size: CGSize(width: px, height: px), scale: 1,
+      representationTypes: .thumbnail)
+    QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { rep, _ in
+      var path: String?
+      if let data = rep?.uiImage.jpegData(compressionQuality: 0.8) {
+        do {
+          try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+          try data.write(to: out, options: .atomic)
+          path = out.path
+        } catch {
+          path = nil
+        }
+      }
+      DispatchQueue.main.async { result(path) }
+    }
+  }
+
+  private static func sha256(_ text: String) -> String {
+    SHA256.hash(data: Data(text.utf8)).map { String(format: "%02x", $0) }.joined()
   }
 }

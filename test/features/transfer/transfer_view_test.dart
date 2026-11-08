@@ -1,5 +1,6 @@
 import 'package:crossdrop/core/engine/send_session.dart';
 import 'package:crossdrop/core/media/save_target.dart';
+import 'package:crossdrop/core/media/thumb_ref.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_identity.dart';
 import 'package:crossdrop/core/storage/transfer_repository.dart';
@@ -30,6 +31,81 @@ SendSnapshot snap(
 );
 
 void main() {
+  group('previews', () {
+    test('sent files preview their source, by offer order', () {
+      final v = TransferView.fromSend(
+        snap(
+          SendPhase.sending,
+          files: const [
+            FileTransferStatus.receiving,
+            FileTransferStatus.pending,
+          ],
+        ),
+        peerName: 'P',
+        items: const [
+          SendItem(
+            path: '/staged/0/still.heic',
+            name: 'IMG_1.HEIC',
+            size: 100,
+            kind: FileKind.photo,
+            thumb: LibraryThumb('lib-1', kind: FileKind.photo),
+          ),
+          SendItem(
+            path: 'content://media/external/video/media/4',
+            name: 'clip.mp4',
+            size: 100,
+            kind: FileKind.video,
+          ),
+        ],
+      )!;
+      expect(
+        v.files[0].thumb,
+        const LibraryThumb('lib-1', kind: FileKind.photo),
+      );
+      expect(v.files[0].kind, FileKind.photo);
+      expect(
+        v.files[1].thumb,
+        const FileThumb(
+          'content://media/external/video/media/4',
+          kind: FileKind.video,
+        ),
+      );
+    });
+
+    test('without items: no preview, file icon', () {
+      final v = TransferView.fromSend(snap(SendPhase.sending), peerName: 'P')!;
+      expect(v.files.single.thumb, isNull);
+      expect(v.files.single.kind, FileKind.file);
+    });
+
+    test('received files preview only once saved', () {
+      const s = IncomingSession(
+        sessionId: 's',
+        sender: SenderInfo(id: 'i', name: 'n', platform: 'ios'),
+        status: SessionStatus.transferring,
+        files: {
+          'f0': IncomingFile(
+            name: 'a.jpg',
+            size: 1,
+            kind: FileKind.photo,
+            status: FileTransferStatus.saved,
+            savedPath: 'photos:XYZ',
+          ),
+          'f1': IncomingFile(
+            name: 'b.mov',
+            size: 1,
+            kind: FileKind.video,
+            status: FileTransferStatus.receiving,
+          ),
+        },
+      );
+      final v = TransferView.fromIncoming(s);
+      expect(v.files[0].thumb, const LibraryThumb('XYZ', kind: FileKind.photo));
+      expect(v.files[1].thumb, isNull);
+      expect(v.files[1].kind, FileKind.video);
+    });
+  });
+
   group('fromSend', () {
     test('null before a send starts', () {
       expect(TransferView.fromSend(null, peerName: 'x'), isNull);

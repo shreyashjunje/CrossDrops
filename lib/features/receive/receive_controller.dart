@@ -27,6 +27,7 @@ class IncomingFile {
   const IncomingFile({
     required this.name,
     required this.size,
+    this.kind = FileKind.file,
     this.receivedBytes = 0,
     this.status = FileTransferStatus.pending,
     this.savedPath,
@@ -37,6 +38,9 @@ class IncomingFile {
 
   final String name;
   final int size;
+
+  /// The offer's [FileKind], for the icon and the preview.
+  final String kind;
   final int receivedBytes;
   final FileTransferStatus status;
   final String? savedPath;
@@ -58,6 +62,7 @@ class IncomingFile {
   }) => IncomingFile(
     name: name,
     size: size,
+    kind: kind,
     receivedBytes: receivedBytes ?? this.receivedBytes,
     status: status ?? this.status,
     savedPath: savedPath ?? this.savedPath,
@@ -622,6 +627,7 @@ class ReceiveController extends Notifier<ReceiveState> {
             f.offer.fileId: IncomingFile(
               name: f.offer.name,
               size: f.offer.size,
+              kind: f.offer.kind,
               receivedBytes: f.receivedBytes,
               status: f.status,
               savedPath: f.savedPath,
@@ -697,7 +703,11 @@ class ReceiveController extends Notifier<ReceiveState> {
               status: SessionStatus.offered,
               files: {
                 for (final f in files)
-                  f.fileId: IncomingFile(name: f.name, size: f.size),
+                  f.fileId: IncomingFile(
+                    name: f.name,
+                    size: f.size,
+                    kind: f.kind,
+                  ),
               },
             ),
           },

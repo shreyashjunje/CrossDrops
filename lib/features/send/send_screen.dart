@@ -10,8 +10,8 @@ import '../../core/media/prepare.dart';
 import '../../core/protocol/models.dart';
 import '../nearby/nearby_screen.dart';
 import '../transfer/transfer_format.dart';
+import '../transfer/file_thumbnail.dart';
 import '../transfer/transfer_screen.dart';
-import '../transfer/widgets.dart';
 import 'gallery_picker_screen.dart';
 import 'send_controller.dart';
 
@@ -158,17 +158,22 @@ class _PickedList extends StatelessWidget {
     itemCount: picked.length,
     itemBuilder: (context, i) {
       final item = picked[i];
-      final (kind, size) = switch (item) {
-        PickedAsset(:final asset) => (asset.kind, null),
-        PickedFile(:final platformKind, :final size) => (
-          platformKind ?? FileKind.file,
-          size,
-        ),
+      final (kind, size, live) = switch (item) {
+        PickedAsset(:final asset) => (asset.kind, null, asset.isLivePhoto),
+        PickedFile(:final kind, :final size) => (kind, size, false),
       };
+      final details = [
+        switch (kind) {
+          FileKind.photo => live ? 'Live Photo' : 'Photo',
+          FileKind.video => 'Video',
+          _ => 'File',
+        },
+        if (size != null) formatSize(size),
+      ].join(' · ');
       return ListTile(
-        leading: Icon(fileKindIcon(kind)),
+        leading: FileThumbnail(thumb: item.thumb, kind: kind, size: 52),
         title: Text(item.label, maxLines: 1, overflow: TextOverflow.ellipsis),
-        subtitle: size == null ? null : Text(formatSize(size)),
+        subtitle: Text(details),
         trailing: onRemove == null
             ? null
             : IconButton(

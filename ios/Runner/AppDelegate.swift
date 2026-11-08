@@ -11,6 +11,7 @@ import UIKit
   private var photos: PhotosSaveChannel?
   private var share: ShareInboxChannel?
   private var open: OpenFileChannel?
+  private var thumbnails: ThumbnailChannel?
   private var hotspotJoin: HotspotJoinChannel?
   private var networkInfo: NetworkInfoChannel?
 
@@ -43,6 +44,9 @@ import UIKit
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "OpenFileChannel") {
       open = OpenFileChannel(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "ThumbnailChannel") {
+      thumbnails = ThumbnailChannel(messenger: registrar.messenger())
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "HotspotJoinChannel") {
       hotspotJoin = HotspotJoinChannel(messenger: registrar.messenger())

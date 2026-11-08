@@ -1,5 +1,6 @@
 import '../../core/engine/send_session.dart';
 import '../../core/media/save_target.dart';
+import '../../core/media/thumb_ref.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/storage/transfer_repository.dart';
@@ -36,6 +37,8 @@ class TransferFileView {
     required this.size,
     required this.doneBytes,
     required this.status,
+    this.kind = FileKind.file,
+    this.thumb,
     this.savedTo,
     this.saveFallback,
     this.location,
@@ -46,6 +49,12 @@ class TransferFileView {
   final int size;
   final int doneBytes;
   final FileTransferStatus status;
+
+  /// [FileKind] for the icon.
+  final String kind;
+
+  /// Its preview: the sent file, or the received one once saved.
+  final ThumbRef? thumb;
 
   /// Received files: where the user finds it.
   final SaveCollection? savedTo;
@@ -82,11 +91,15 @@ class TransferView {
   });
 
   /// From the Send flow's state; null before a send starts.
+  ///
+  /// [items] are the files being sent, in offer order, for their kinds and
+  /// previews.
   static TransferView? fromSend(
     SendSnapshot? s, {
     required String peerName,
     String? peerPlatform,
     bool pausedByUser = false,
+    List<SendItem> items = const [],
   }) {
     if (s == null) return null;
     final stage = switch (s.phase) {
@@ -107,13 +120,15 @@ class TransferView {
       peerPlatform: DevicePlatform.tryParse(peerPlatform ?? ''),
       stage: stage,
       files: [
-        for (final f in s.files)
+        for (final (i, f) in s.files.indexed)
           TransferFileView(
             name: f.name,
             size: f.size,
             doneBytes: f.sentBytes,
             status: f.status,
             error: f.error,
+            kind: i < items.length ? items[i].kind : FileKind.file,
+            thumb: i < items.length ? _sendThumb(items[i]) : null,
           ),
       ],
       doneBytes: s.sentBytes,
@@ -142,6 +157,10 @@ class TransferView {
           size: f.size,
           doneBytes: f.receivedBytes,
           status: f.status,
+          kind: f.kind,
+          thumb: f.status == FileTransferStatus.saved
+              ? thumbForLocation(f.savedPath, kind: f.kind)
+              : null,
           savedTo: f.savedTo,
           saveFallback: f.saveFallback,
           location: f.savedPath,
@@ -170,6 +189,12 @@ class TransferView {
             size: f.size,
             doneBytes: f.transferredBytes,
             status: f.status,
+            kind: f.kind,
+            thumb: receive
+                ? (f.status == FileTransferStatus.saved
+                      ? thumbForLocation(f.finalLocation, kind: f.kind)
+                      : null)
+                : thumbForLocation(f.sourcePath, kind: f.kind),
             savedTo: receive && f.status == FileTransferStatus.saved
                 ? collectionOfLocation(f.finalLocation, platform)
                 : null,
@@ -234,6 +259,9 @@ class TransferView {
     }
     return null;
   }
+
+  static ThumbRef? _sendThumb(SendItem i) =>
+      i.thumb ?? thumbForLocation(i.path, kind: i.kind);
 
   static TransferStage _stageOf(SessionStatus s) => switch (s) {
     SessionStatus.offered || SessionStatus.accepted => TransferStage.waiting,

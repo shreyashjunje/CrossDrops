@@ -1,13 +1,13 @@
 import 'dart:async';
 
-import 'package:crossdrop/core/usb_import/thumbnail_queue.dart';
+import 'package:crossdrop/core/media/thumbnail_queue.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('newest request first, at most [parallel] at once', () async {
     final started = <int>[];
     final gates = <int, Completer<String?>>{};
-    final q = ThumbnailQueue((h) {
+    final q = ThumbnailQueue<int, String>((int h) {
       started.add(h);
       return (gates[h] = Completer<String?>()).future;
     }, parallel: 1);
@@ -31,7 +31,7 @@ void main() {
   test('a cancelled request never reaches the device', () async {
     final started = <int>[];
     final gates = <int, Completer<String?>>{};
-    final q = ThumbnailQueue((h) {
+    final q = ThumbnailQueue<int, String>((int h) {
       started.add(h);
       return (gates[h] = Completer<String?>()).future;
     }, parallel: 1);
@@ -51,7 +51,7 @@ void main() {
 
   test('results are cached, including "no preview"', () async {
     var calls = 0;
-    final q = ThumbnailQueue((h) async {
+    final q = ThumbnailQueue<int, String>((int h) async {
       calls++;
       return h == 1 ? '/t/1.jpg' : null;
     });
@@ -64,12 +64,17 @@ void main() {
   });
 
   test('a failing device call counts as no preview', () async {
-    final q = ThumbnailQueue((h) async => throw StateError('gone'));
+    final q = ThumbnailQueue<int, String>(
+      (int h) async => throw StateError('gone'),
+    );
     expect(await q.load(1), isNull);
   });
 
   test('the cache keeps the newest [capacity] results', () async {
-    final q = ThumbnailQueue((h) async => '/t/$h.jpg', capacity: 2);
+    final q = ThumbnailQueue<int, String>(
+      (int h) async => '/t/$h.jpg',
+      capacity: 2,
+    );
     for (final h in [1, 2, 3]) {
       await q.load(h);
     }
@@ -79,7 +84,10 @@ void main() {
   });
 
   test('close completes waiting requests with null', () async {
-    final q = ThumbnailQueue((h) => Completer<String?>().future, parallel: 1);
+    final q = ThumbnailQueue<int, String>(
+      (int h) => Completer<String?>().future,
+      parallel: 1,
+    );
     unawaited(q.load(1));
     final f2 = q.load(2);
     q.close();
