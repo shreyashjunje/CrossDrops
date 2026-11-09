@@ -4,9 +4,12 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/tokens.dart';
+import '../../app/ui/ui.dart';
 import '../../core/usb_import/camera_roll.dart';
 import '../../core/usb_import/import_runner.dart';
 import '../../core/media/thumbnail_queue.dart';
+import '../hotspot/numbered_steps.dart';
 import '../transfer/transfer_format.dart';
 import 'usb_import_controller.dart';
 
@@ -147,60 +150,53 @@ class _HowToConnect extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    Widget step(int n, String text) => Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          CircleAvatar(radius: 13, child: Text('$n')),
-          const SizedBox(width: 12),
-          Expanded(child: Text(text, style: theme.textTheme.bodyLarge)),
-        ],
-      ),
-    );
+    final c = context.cd;
     return ListView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(CdSpace.gutter, 8, CdSpace.gutter, 24),
       children: [
-        Icon(Icons.cable, size: 56, color: theme.colorScheme.primary),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: c.accentSoft,
+              borderRadius: BorderRadius.circular(CdRadius.card),
+            ),
+            child: Icon(Icons.cable_rounded, size: 34, color: c.accentInk),
+          ),
+        ),
         const SizedBox(height: 16),
         Text(
           'Connect the iPhone with a cable',
-          style: theme.textTheme.titleLarge,
-          textAlign: TextAlign.center,
+          style: CdType.h2.copyWith(color: c.text),
         ),
-        const SizedBox(height: 24),
-        step(
-          1,
-          'Use a USB-C to USB-C cable, or Lightning to USB-C for older '
-          'iPhones.',
+        const SizedBox(height: 16),
+        const NumberedSteps(
+          steps: [
+            'Use a USB-C to USB-C cable, or Lightning to USB-C for older '
+                'iPhones.',
+            'Unlock the iPhone.',
+            'If the iPhone asks to allow access to photos, tap Allow.',
+            'Nothing happens? Pull down the notifications on this phone, tap '
+                'the USB notification and choose "USB controlled by: This '
+                'device".',
+          ],
         ),
-        step(2, 'Unlock the iPhone.'),
-        step(3, 'If the iPhone asks to allow access to photos, tap Allow.'),
-        step(
-          4,
-          'Nothing happens? Pull down the notifications on this phone, tap '
-          'the USB notification and choose "USB controlled by: This '
-          'device".',
-        ),
-        const SizedBox(height: 8),
-        Card(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Text(
+        const SizedBox(height: 12),
+        const NoticeCard(
+          icon: Icons.high_quality_outlined,
+          text:
               'To get the exact original files, on the iPhone open '
               'Settings > Apps > Photos > Transfer to Mac or PC and choose '
               '"Keep Originals". "Automatic" converts HEIC photos to JPEG, '
               'which changes the files.',
-              style: theme.textTheme.bodyMedium,
-            ),
-          ),
         ),
         const SizedBox(height: 16),
         Text(
           'Photos go to Pictures/CrossDrop and videos to Movies/CrossDrop, '
           'so your gallery shows them.',
-          style: theme.textTheme.bodySmall,
+          style: CdType.small.copyWith(color: c.text3),
           textAlign: TextAlign.center,
         ),
       ],
@@ -215,13 +211,23 @@ class _Waiting extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Center(
     child: Padding(
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.all(CdSpace.xl),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const CircularProgressIndicator(),
+          const SizedBox.square(
+            dimension: 48,
+            child: CircularProgressIndicator(strokeWidth: 4),
+          ),
           const SizedBox(height: 24),
-          Text(text, textAlign: TextAlign.center),
+          Semantics(
+            liveRegion: true,
+            child: NoticeCard(
+              tone: NoticeTone.warning,
+              icon: Icons.phone_iphone_rounded,
+              text: text,
+            ),
+          ),
         ],
       ),
     ),
@@ -234,28 +240,40 @@ class _Problem extends StatelessWidget {
   final Future<void> Function() onRetry;
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(32),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.error_outline,
-            size: 48,
-            color: Theme.of(context).colorScheme.error,
-          ),
-          const SizedBox(height: 16),
-          Text(text, textAlign: TextAlign.center),
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: () => unawaited(onRetry()),
-            child: const Text('Try again'),
-          ),
-        ],
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        CdSpace.gutter,
+        32,
+        CdSpace.gutter,
+        24,
       ),
-    ),
-  );
+      children: [
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: c.dangerSoft,
+              borderRadius: BorderRadius.circular(CdRadius.card),
+              border: Border.all(color: c.dangerLine),
+            ),
+            child: Icon(Icons.error_outline_rounded, size: 34, color: c.danger),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Text(text, style: CdType.bodyL.copyWith(color: c.text)),
+        const SizedBox(height: 24),
+        FilledButton(
+          style: CdButtonStyles.wide,
+          onPressed: () => unawaited(onRetry()),
+          child: const Text('Try again'),
+        ),
+      ],
+    );
+  }
 }
 
 class _Gallery extends StatelessWidget {
@@ -266,7 +284,7 @@ class _Gallery extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.cd;
     final visible = state.visible;
     final days = groupByDay(visible);
     final plan = state.plan;
@@ -276,7 +294,10 @@ class _Gallery extends StatelessWidget {
       children: [
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: CdSpace.gutter,
+            vertical: 8,
+          ),
           child: Row(
             children: [
               for (final f in RollFilter.values)
@@ -285,6 +306,15 @@ class _Gallery extends StatelessWidget {
                   child: ChoiceChip(
                     label: Text(_filterName(f)),
                     selected: state.filter == f,
+                    showCheckmark: false,
+                    selectedColor: c.text,
+                    backgroundColor: c.bg,
+                    labelStyle: CdType.titleS.copyWith(
+                      color: state.filter == f ? c.bg : c.text,
+                    ),
+                    side: BorderSide(
+                      color: state.filter == f ? c.text : c.lineStrong,
+                    ),
                     onSelected: (_) => controller.setFilter(f),
                   ),
                 ),
@@ -298,23 +328,28 @@ class _Gallery extends StatelessWidget {
             child: Text(
               'Reading the iPhone: ${state.seen} files so far. You can '
               'start choosing.',
-              style: theme.textTheme.bodySmall,
+              style: CdType.small.copyWith(color: c.text2),
             ),
           ),
         ],
         if (state.space case final space?)
-          MaterialBanner(
-            content: Text(
-              'Not enough space on this phone: this needs '
-              '${formatSize(space.needed)}, ${formatSize(space.free)} is '
-              'free. Choose fewer items.',
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: CdSpace.gutter,
+              vertical: 8,
             ),
-            actions: [
-              TextButton(
+            child: NoticeCard(
+              tone: NoticeTone.warning,
+              icon: Icons.sd_storage_outlined,
+              text:
+                  'Not enough space on this phone: this needs '
+                  '${formatSize(space.needed)}, ${formatSize(space.free)} is '
+                  'free. Choose fewer items.',
+              action: TextButton(
                 onPressed: controller.clearSelection,
                 child: const Text('Clear'),
               ),
-            ],
+            ),
           ),
         Expanded(
           child: visible.isEmpty
@@ -368,10 +403,18 @@ class _Gallery extends StatelessWidget {
                   ],
                 ),
         ),
-        Material(
-          elevation: 3,
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: c.surface1,
+            border: Border(top: BorderSide(color: c.line)),
+          ),
           child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+            padding: const EdgeInsets.fromLTRB(
+              CdSpace.gutter,
+              12,
+              CdSpace.gutter,
+              12,
+            ),
             child: Row(
               children: [
                 Expanded(
@@ -385,7 +428,7 @@ class _Gallery extends StatelessWidget {
                   onPressed: n == 0
                       ? null
                       : () => unawaited(controller.startImport()),
-                  icon: const Icon(Icons.download),
+                  icon: const Icon(Icons.download_rounded),
                   label: const Text('Copy to this phone'),
                 ),
               ],
@@ -419,13 +462,13 @@ class _DayHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 12, 4, 4),
+    padding: const EdgeInsets.fromLTRB(CdSpace.gutter, 16, 12, 4),
     child: Row(
       children: [
         Expanded(
           child: Text(
             '$title · $count',
-            style: Theme.of(context).textTheme.titleSmall,
+            style: CdType.titleS.copyWith(color: context.cd.text),
           ),
         ),
         TextButton(
@@ -501,7 +544,7 @@ class _TileState extends State<_Tile> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.cd;
     final item = widget.item;
     final t = item.taken;
     final label = [
@@ -527,12 +570,12 @@ class _TileState extends State<_Tile> {
           children: [
             if (path == null)
               ColoredBox(
-                color: theme.colorScheme.surfaceContainerHighest,
+                color: c.surface3,
                 child: Icon(
                   item.kind == RollKind.video
                       ? Icons.videocam_outlined
                       : Icons.image_outlined,
-                  color: theme.colorScheme.outline,
+                  color: c.text3,
                 ),
               )
             else
@@ -541,33 +584,65 @@ class _TileState extends State<_Tile> {
                 fit: BoxFit.cover,
                 cacheWidth: 256,
                 gaplessPlayback: true,
-                errorBuilder: (_, _, _) => ColoredBox(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                ),
+                errorBuilder: (_, _, _) => ColoredBox(color: c.surface3),
               ),
             if (item.kind == RollKind.video)
-              const Positioned(
-                right: 4,
-                bottom: 4,
-                child: Icon(Icons.videocam, color: Colors.white, size: 18),
+              Positioned(
+                right: 5,
+                bottom: 5,
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: CdColors.dark.bg,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Icon(
+                      Icons.videocam,
+                      color: CdColors.dark.text,
+                      size: 16,
+                    ),
+                  ),
+                ),
               ),
             if (item.isLive)
-              const Positioned(left: 4, bottom: 4, child: _Badge('LIVE')),
+              const Positioned(left: 5, bottom: 5, child: _Badge('Live')),
             if (widget.imported)
-              const Positioned(
-                left: 4,
-                top: 4,
-                child: Icon(Icons.check_circle, color: Colors.green, size: 20),
+              Positioned(
+                left: 5,
+                top: 5,
+                child: Container(
+                  width: 22,
+                  height: 22,
+                  decoration: BoxDecoration(
+                    color: CdColors.dark.bg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    Icons.download_done_rounded,
+                    color: CdColors.dark.text,
+                    size: 14,
+                  ),
+                ),
               ),
             if (widget.selected) ...[
-              ColoredBox(color: Colors.black.withValues(alpha: 0.25)),
+              const ColoredBox(color: Color(0x400E1116)),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: c.accent, width: 3),
+                ),
+              ),
               Positioned(
-                right: 4,
-                top: 4,
-                child: Icon(
-                  Icons.check_circle,
-                  color: theme.colorScheme.primary,
-                  size: 24,
+                right: 6,
+                top: 6,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: c.accent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.check_rounded, color: c.onAccent, size: 16),
                 ),
               ),
             ],
@@ -585,14 +660,19 @@ class _Badge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
-      color: Colors.black54,
-      borderRadius: BorderRadius.circular(4),
+      color: CdColors.dark.bg,
+      borderRadius: BorderRadius.circular(6),
     ),
     child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       child: Text(
         text,
-        style: const TextStyle(color: Colors.white, fontSize: 11),
+        textScaler: TextScaler.noScaling,
+        style: CdType.small.copyWith(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: CdColors.dark.text,
+        ),
       ),
     ),
   );
@@ -606,39 +686,58 @@ class _Copying extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.cd;
     final p = progress;
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            p == null
-                ? 'Starting...'
-                : 'Copying ${p.filesDone + (p.filesDone < p.filesTotal ? 1 : 0)} '
-                      'of ${p.filesTotal}',
-            style: theme.textTheme.titleLarge,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          LinearProgressIndicator(value: p?.fraction),
-          const SizedBox(height: 12),
-          if (p != null)
-            Text(
-              '${formatSize(p.bytesDone)} of ${formatSize(p.bytesTotal)}',
-              textAlign: TextAlign.center,
+    final percent = p == null ? 0 : (p.fraction * 100).floor();
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(CdSpace.gutter),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Spacer(),
+            ExcludeSemantics(
+              child: Text(
+                '$percent%',
+                style: CdType.displayXL.copyWith(color: c.text),
+              ),
             ),
-          const SizedBox(height: 24),
-          Text(
-            'Keep the cable plugged in and the iPhone unlocked.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium,
-          ),
-          const SizedBox(height: 24),
-          OutlinedButton(onPressed: onStop, child: const Text('Stop')),
-        ],
+            const SizedBox(height: 6),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                p == null
+                    ? 'Starting...'
+                    : 'Copying ${p.filesDone + (p.filesDone < p.filesTotal ? 1 : 0)} '
+                          'of ${p.filesTotal}',
+                style: CdType.titleM.copyWith(fontSize: 17, color: c.text),
+              ),
+            ),
+            const SizedBox(height: 18),
+            if (p == null)
+              const LinearProgressIndicator(minHeight: 10)
+            else
+              CdProgressBar(value: p.fraction, semanticLabel: 'Copy progress'),
+            const SizedBox(height: 8),
+            if (p != null)
+              Text(
+                '${formatSize(p.bytesDone)} of ${formatSize(p.bytesTotal)}',
+                style: CdType.small.copyWith(color: c.text2),
+              ),
+            const SizedBox(height: 24),
+            const NoticeCard(
+              tone: NoticeTone.accent,
+              icon: Icons.cable_rounded,
+              text: 'Keep the cable plugged in and the iPhone unlocked.',
+            ),
+            const Spacer(),
+            OutlinedButton(
+              style: CdButtonStyles.danger(context).merge(CdButtonStyles.wide),
+              onPressed: onStop,
+              child: const Text('Stop'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -657,7 +756,7 @@ class _Summary extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.cd;
     final s = summary;
     final ok = s.stop == null && s.failedFiles == 0;
     final why = switch (s.stop) {
@@ -669,51 +768,75 @@ class _Summary extends StatelessWidget {
       ImportStop.deviceError => 'The iPhone stopped answering.',
       null => null,
     };
-    return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Icon(
-            ok ? Icons.check_circle : Icons.info_outline,
-            size: 56,
-            color: ok ? Colors.green : theme.colorScheme.primary,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Copied ${s.copiedFiles} '
-            '${s.copiedFiles == 1 ? 'file' : 'files'} '
-            '(${formatSize(s.bytes)})',
-            style: theme.textTheme.titleLarge,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Photos are in Pictures/CrossDrop and videos in Movies/CrossDrop.',
-            textAlign: TextAlign.center,
-          ),
-          if (s.failedFiles > 0) ...[
-            const SizedBox(height: 8),
-            Text(
-              '${s.failedFiles} could not be copied. They stay selected; '
-              'try again.',
-              textAlign: TextAlign.center,
-            ),
-          ],
-          if (why != null) ...[
-            const SizedBox(height: 8),
-            Text(why, textAlign: TextAlign.center),
-          ],
-          const SizedBox(height: 24),
-          FilledButton(
-            onPressed: () => unawaited(onBack()),
-            child: const Text('Back to photos'),
-          ),
-          const SizedBox(height: 8),
-          TextButton(onPressed: onDone, child: const Text('Done')),
-        ],
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        CdSpace.gutter,
+        40,
+        CdSpace.gutter,
+        24,
       ),
+      children: [
+        Center(
+          child: ExcludeSemantics(
+            child: Container(
+              width: 88,
+              height: 88,
+              decoration: BoxDecoration(
+                color: ok ? c.accent : c.warningSoft,
+                shape: BoxShape.circle,
+                border: ok ? null : Border.all(color: c.warningLine),
+              ),
+              child: Icon(
+                ok ? Icons.check_rounded : Icons.info_outline_rounded,
+                size: 44,
+                color: ok ? c.onAccent : c.warningInk,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'Copied ${s.copiedFiles} '
+          '${s.copiedFiles == 1 ? 'file' : 'files'} '
+          '(${formatSize(s.bytes)})',
+          style: CdType.h1.copyWith(color: c.text),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Photos are in Pictures/CrossDrop and videos in Movies/CrossDrop.',
+          textAlign: TextAlign.center,
+          style: CdType.bodyM.copyWith(color: c.text2),
+        ),
+        if (s.failedFiles > 0) ...[
+          const SizedBox(height: 12),
+          NoticeCard(
+            tone: NoticeTone.warning,
+            icon: Icons.warning_amber_rounded,
+            text:
+                '${s.failedFiles} could not be copied. They stay selected; '
+                'try again.',
+          ),
+        ],
+        if (why != null) ...[
+          const SizedBox(height: 12),
+          NoticeCard(
+            tone: s.stop == ImportStop.cancelled
+                ? NoticeTone.neutral
+                : NoticeTone.danger,
+            icon: Icons.info_outline_rounded,
+            text: why,
+          ),
+        ],
+        const SizedBox(height: 28),
+        FilledButton(
+          style: CdButtonStyles.wide,
+          onPressed: () => unawaited(onBack()),
+          child: const Text('Back to photos'),
+        ),
+        const SizedBox(height: 8),
+        TextButton(onPressed: onDone, child: const Text('Done')),
+      ],
     );
   }
 }
