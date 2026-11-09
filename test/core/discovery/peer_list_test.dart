@@ -11,7 +11,8 @@ Map<String, String> _txt(
   String name = 'Phone',
   String platform = 'android',
   String v = '2',
-}) => {'v': v, 'id': id, 'n': name, 'p': platform, 'fp': '0123456789abcdef'};
+  String fp = '0123456789abcdef',
+}) => {'v': v, 'id': id, 'n': name, 'p': platform, 'fp': fp};
 
 void main() {
   late PeerList list;
@@ -26,11 +27,12 @@ void main() {
     String name = 'Phone',
     String platform = 'android',
     String v = '2',
+    String fp = '0123456789abcdef',
   }) => list.resolved(
     service,
     hostAddresses: hosts,
     port: port,
-    attributes: _txt(id, name: name, platform: platform, v: v),
+    attributes: _txt(id, name: name, platform: platform, v: v, fp: fp),
   );
 
   test('a new device is added', () {
@@ -193,5 +195,40 @@ void main() {
     expect(changes, everyElement(isA<PeerRemoved>()));
     expect(list.peers, isEmpty);
     expect(list.sawSelf, isFalse);
+  });
+
+  group('spoofed advertisement (audit S2)', () {
+    test('another service with the same id and another hint is ignored', () {
+      resolve('svcA', _a);
+      final changes = resolve(
+        'evil',
+        _a,
+        hosts: const ['192.168.1.66'],
+        fp: 'ffffffffffffffff',
+      );
+      expect(changes, isEmpty);
+      expect(list.peers[_a]!.host, '192.168.1.10');
+    });
+
+    test('the first one gone, the next advert is taken', () {
+      resolve('svcA', _a);
+      resolve('evil', _a, fp: 'ffffffffffffffff');
+      expect(list.lost('svcA'), [isA<PeerRemoved>()]);
+      expect(list.lost('evil'), isEmpty);
+      final changes = resolve('svcB', _a, fp: 'ffffffffffffffff');
+      expect(changes, [isA<PeerAdded>()]);
+    });
+
+    test('the same service may change its hint', () {
+      resolve('svcA', _a);
+      final changes = resolve('svcA', _a, fp: 'ffffffffffffffff');
+      expect(changes, [isA<PeerUpdated>()]);
+    });
+
+    test('a new service with the same hint still updates the device', () {
+      resolve('svcA', _a);
+      final changes = resolve('svcB', _a, port: 4001);
+      expect(changes, [isA<PeerUpdated>()]);
+    });
   });
 }

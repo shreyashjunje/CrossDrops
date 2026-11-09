@@ -119,6 +119,18 @@ class PeerList {
     final host = _pickHost(hostAddresses);
     if (host == null || port < 1 || port > 65535) return _detach(serviceName);
 
+    // Another service claiming a listed device with a different fingerprint
+    // hint is a spoof or a reset phone; never let it take over the entry
+    // (audit S2). First seen wins until it is lost or unreachable.
+    // shortcut: the newcomer is dropped, not shown with a warning; it shows
+    // up on its next resolve once the first one is gone.
+    final listed = _peers[txt.deviceId];
+    if (listed != null &&
+        listed.fingerprintHint != txt.fingerprintHint &&
+        _idByService[serviceName] != txt.deviceId) {
+      return _detach(serviceName);
+    }
+
     final changes = <PeerChange>[];
     final previousId = _idByService[serviceName];
     if (previousId != null && previousId != txt.deviceId) {
