@@ -125,4 +125,23 @@ void main() {
       }
     });
   });
+
+  group('isLocalPeer', () {
+    const wifi = InterfaceAddress('wlan0', '192.168.1.10', 24);
+    const cell = InterfaceAddress('rmnet0', '10.20.30.40', 32);
+
+    test("a peer on one of this phone's subnets passes", () {
+      expect(isLocalPeer([cell, wifi], '192.168.1.77'), isTrue);
+    });
+
+    test('a peer on no local subnet is refused', () {
+      expect(isLocalPeer([cell, wifi], '8.8.8.8'), isFalse);
+      expect(isLocalPeer([cell, wifi], '10.20.30.41'), isFalse);
+    });
+
+    test('no usable address listed: passes rather than block all', () {
+      expect(isLocalPeer(const [], '8.8.8.8'), isTrue);
+      expect(isLocalPeer([cell], '8.8.8.8'), isTrue);
+    });
+  });
 }

@@ -53,6 +53,15 @@ InterfaceAddress? addressSharingSubnet(
   return null;
 }
 
+/// Whether the receive server should take a request from [peerIp]: it
+/// shares a subnet with one of [mine] (audit S8). When the platform lists
+/// no usable address, it passes: blocking every transfer on a platform
+/// gap would be worse than the risk this check removes.
+bool isLocalPeer(List<InterfaceAddress> mine, String peerIp) {
+  if (!mine.any((a) => a.prefix >= 1 && a.prefix <= 30)) return true;
+  return addressSharingSubnet(mine, peerIp) != null;
+}
+
 /// iPhone Personal Hotspot's network: iOS uses 172.20.10.0/28, with the
 /// iPhone at .1. Observed behaviour, not documented by Apple, so it only
 /// drives a hint in the guide, never a decision.

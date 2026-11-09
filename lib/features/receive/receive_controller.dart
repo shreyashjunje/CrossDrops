@@ -10,6 +10,7 @@ import '../../app/media_providers.dart';
 import '../../app/providers.dart';
 import '../../core/discovery/discovery_service.dart';
 import '../../core/discovery/network_monitor.dart';
+import '../../core/discovery/subnet.dart';
 import '../../core/discovery/txt_record.dart';
 import '../../core/engine/progress_tracker.dart';
 import '../../core/log.dart';
@@ -427,6 +428,20 @@ class ReceiveController extends Notifier<ReceiveState> {
 
   /// The pairing code and trust are checked by the server; this answers
   /// what the TrustLookup asks, and notes that a trusted device was seen.
+  List<InterfaceAddress>? _interfaces;
+
+  /// The server's local-network check (audit S8). A cached match passes;
+  /// otherwise the interfaces are read again before refusing, since the
+  /// peer may be on a network that just came up (a hotspot).
+  Future<bool> _isLocalPeer(String ip) async {
+    final cached = _interfaces;
+    if (cached != null && isLocalPeer(cached, ip)) return true;
+    final mine = _interfaces = await ref
+        .read(networkPlatformProvider)
+        .interfaces();
+    return isLocalPeer(mine, ip);
+  }
+
   Future<PeerTrust> _lookupTrust(String fingerprint, SenderInfo claimed) async {
     final repo = ref.read(trustRepositoryProvider);
     final trust = await repo.check(
@@ -482,6 +497,7 @@ class ReceiveController extends Notifier<ReceiveState> {
         trustLookup: _lookupTrust,
         acceptsUntrusted: () => _receivingOn,
         freeSpace: freeSpace.freeBytes,
+        allowPeer: _isLocalPeer,
       );
       if (!ref.mounted) {
         await server.close();

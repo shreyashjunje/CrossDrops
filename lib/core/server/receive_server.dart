@@ -336,6 +336,9 @@ class _Session {
 ///
 /// Senders authenticate first (`/v1/auth`, D-027); every session belongs
 /// to the fingerprint that offered it.
+/// Whether a request from IPv4 address `ip` may reach the server.
+typedef PeerAddressFilter = FutureOr<bool> Function(String ip);
+
 class ReceiveServer {
   ReceiveServer._(
     this._info,
@@ -448,6 +451,7 @@ class ReceiveServer {
     ServerLimits limits = const ServerLimits(),
     SenderAuthenticator? authenticator,
     FreeSpaceProbe? freeSpace,
+    PeerAddressFilter? allowPeer,
     Object? address,
     int port = 0,
     Duration bodyIdleTimeout = const Duration(seconds: 15),
@@ -479,6 +483,7 @@ class ReceiveServer {
       endedRetention,
       clock ?? DateTime.now,
     );
+    server._allowPeer = allowPeer ?? (_) => true;
     await Directory(tempDir).create(recursive: true);
     if (store == null) await Directory(saveDir).create(recursive: true);
     await server._restore();
@@ -682,6 +687,7 @@ class ReceiveServer {
   }
 
   Handler _handler() => const Pipeline()
+      .addMiddleware(_localOnly)
       .addMiddleware(_limitHeaders)
       .addMiddleware(_requireAuth)
       .addHandler(_router().call);
@@ -719,6 +725,22 @@ class ReceiveServer {
     }
     return s;
   }
+
+  late final PeerAddressFilter _allowPeer;
+
+  /// Refuses requests from outside this phone's local networks (audit S8).
+  /// Loopback always passes: tests and the benchmark run on it.
+  Handler _localOnly(Handler inner) => (req) async {
+    final info = req.context['shelf.io.connection_info'];
+    if (info is HttpConnectionInfo) {
+      final from = info.remoteAddress;
+      if (!from.isLoopback && !await _allowPeer(from.address)) {
+        _log('refused a request from outside the local network');
+        return _error(403, ErrorCodes.notLocal, 'not on this network');
+      }
+    }
+    return inner(req);
+  };
 
   Handler _limitHeaders(Handler inner) => (req) {
     var total = 0;

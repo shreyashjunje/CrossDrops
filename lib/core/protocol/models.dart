@@ -536,6 +536,9 @@ abstract final class ErrorCodes {
   /// 403: receiving is turned off and the sender is not trusted.
   static const receivingOff = 'receiving_off';
 
+  /// 403: the request came from outside this phone's local networks.
+  static const notLocal = 'not_local';
+
   /// 431: request headers over the limit.
   static const headersTooLarge = 'headers_too_large';
 
