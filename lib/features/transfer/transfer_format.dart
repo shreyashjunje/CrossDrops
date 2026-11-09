@@ -1,4 +1,5 @@
 import '../../core/media/save_target.dart';
+import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/server/file_store.dart';
 
@@ -98,3 +99,25 @@ String formatDay(DateTime t, DateTime now) {
 String formatTime(DateTime t) =>
     '${t.hour.toString().padLeft(2, '0')}:'
     '${t.minute.toString().padLeft(2, '0')}';
+
+/// "12 photos, 1 video", "3 files": counts of [kinds] (FileKind values),
+/// photos first. Empty for none.
+String countKinds(Iterable<String> kinds) {
+  var photos = 0, videos = 0, files = 0;
+  for (final k in kinds) {
+    switch (k) {
+      case FileKind.photo:
+        photos++;
+      case FileKind.video:
+        videos++;
+      default:
+        files++;
+    }
+  }
+  String n(int c, String one, String many) => '$c ${c == 1 ? one : many}';
+  return [
+    if (photos > 0) n(photos, 'photo', 'photos'),
+    if (videos > 0) n(videos, 'video', 'videos'),
+    if (files > 0) n(files, 'file', 'files'),
+  ].join(', ');
+}

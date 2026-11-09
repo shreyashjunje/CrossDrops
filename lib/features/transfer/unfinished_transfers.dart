@@ -19,6 +19,7 @@ import '../receive/receive_controller.dart';
 import '../receive/receive_host.dart';
 import '../send/send_controller.dart';
 import '../../app/navigation.dart';
+import '../../app/tokens.dart';
 import 'transfer_format.dart';
 import 'transfer_screen.dart';
 
@@ -100,80 +101,48 @@ Future<void> discardTransfer(WidgetRef ref, StoredSession s) async {
   logEvent('transfer', 'session ${s.sessionId}: discarded');
 }
 
-/// "Resume unfinished transfer?" shown at launch.
-class UnfinishedTransfersDialog extends ConsumerWidget {
-  const UnfinishedTransfersDialog({super.key, required this.sessions});
-
-  final List<StoredSession> sessions;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final navigator = Navigator.of(context);
-    void close() => navigator.pop();
-
-    return AlertDialog(
-      title: const Text('Unfinished transfers'),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (final s in sessions) ...[
-              _Entry(
-                session: s,
-                onResume: () {
-                  close();
-                  if (s.direction == TransferDirection.send) {
-                    unawaited(
-                      ref.read(sendControllerProvider.notifier).resumeStored(s),
-                    );
-                    navigator.push(
-                      MaterialPageRoute<void>(
-                        settings: const RouteSettings(name: Routes.transfer),
-                        builder: (_) => const TransferScreen(),
-                      ),
-                    );
-                  } else {
-                    // This phone is receiving already; the sender resumes
-                    // when it reconnects.
-                    scaffoldMessengerKey.currentState?.showSnackBar(
-                      SnackBar(
-                        content: Text(
-                          'Ready. ${s.peer.name} continues the transfer when '
-                          'it reconnects. Keep CrossDrop open.',
-                        ),
-                      ),
-                    );
-                  }
-                },
-                onDiscard: () async {
-                  close();
-                  await discardOrCancel(ref, s);
-                },
-              ),
-              const Divider(),
-            ],
-          ],
+/// Picks an unfinished transfer back up. A send resumes and opens the
+/// transfer screen; a receive waits for the sender to reconnect.
+void resumeUnfinished(BuildContext context, WidgetRef ref, StoredSession s) {
+  if (s.direction == TransferDirection.send) {
+    unawaited(ref.read(sendControllerProvider.notifier).resumeStored(s));
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        settings: const RouteSettings(name: Routes.transfer),
+        builder: (_) => const TransferScreen(),
+      ),
+    );
+  } else {
+    // This phone is receiving already; the sender resumes when it
+    // reconnects.
+    scaffoldMessengerKey.currentState?.showSnackBar(
+      SnackBar(
+        content: Text(
+          'Ready. ${s.peer.name} continues the transfer when it reconnects. '
+          'Keep CrossDrop open.',
         ),
       ),
-      actions: [TextButton(onPressed: close, child: const Text('Later'))],
     );
   }
 }
 
-class _Entry extends StatelessWidget {
-  const _Entry({
+/// One transfer an earlier run left unfinished, on Home (D-069): what,
+/// how far, and Resume or Discard.
+class UnfinishedCard extends ConsumerWidget {
+  const UnfinishedCard({
+    super.key,
     required this.session,
-    required this.onResume,
-    required this.onDiscard,
+    required this.onDone,
   });
 
   final StoredSession session;
-  final VoidCallback onResume;
-  final VoidCallback onDiscard;
+
+  /// Called after Resume or Discard, so the card can be hidden.
+  final VoidCallback onDone;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final c = context.cd;
     final s = session;
     final count = s.files.length;
     final files = '$count ${count == 1 ? 'file' : 'files'}';
@@ -181,26 +150,79 @@ class _Entry extends StatelessWidget {
         ? 0
         : (s.transferredBytes * 100 / s.totalBytes).floor();
     final sending = s.direction == TransferDirection.send;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          sending
-              ? 'Sending $files to ${s.peer.name}'
-              : 'Receiving $files from ${s.peer.name}',
-          style: Theme.of(context).textTheme.titleSmall,
-        ),
-        Text('$percent% of ${formatSize(s.totalBytes)} done'),
-        if (!sending)
-          const Text('The other phone continues when it reconnects.'),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            TextButton(onPressed: onDiscard, child: const Text('Discard')),
-            FilledButton(onPressed: onResume, child: const Text('Resume')),
-          ],
-        ),
-      ],
+    final busy = ref.watch(sendControllerProvider.select((x) => x.isRunning));
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+      decoration: BoxDecoration(
+        color: c.warningSoft,
+        borderRadius: BorderRadius.circular(CdRadius.button),
+        border: Border.all(color: c.warningLine),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.replay_rounded, color: c.warningInk),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      sending
+                          ? 'Unfinished: $files to ${s.peer.name}'
+                          : 'Unfinished: $files from ${s.peer.name}',
+                      style: CdType.titleS.copyWith(
+                        fontSize: 15,
+                        color: c.text,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      sending
+                          ? 'Stopped at $percent% of ${formatSize(s.totalBytes)}'
+                          : '$percent% of ${formatSize(s.totalBytes)}. '
+                                '${s.peer.name} continues when it reconnects.',
+                      style: CdType.small.copyWith(color: c.text2),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              if (sending) ...[
+                Expanded(
+                  child: FilledButton(
+                    // One send at a time.
+                    onPressed: busy
+                        ? null
+                        : () {
+                            resumeUnfinished(context, ref, s);
+                            onDone();
+                          },
+                    child: const Text('Resume'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () async {
+                    await discardOrCancel(ref, s);
+                    onDone();
+                  },
+                  child: const Text('Discard'),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/tokens.dart';
+import '../../app/ui/ui.dart';
 import '../receive/receive_host.dart';
 import '../send/send_controller.dart';
 import '../transfer/transfer_view.dart';
@@ -30,11 +32,18 @@ class ActiveTransfers extends ConsumerWidget {
       return const SizedBox.shrink();
     }
     return Padding(
-      padding: const EdgeInsets.only(top: 16),
+      padding: const EdgeInsets.only(top: 20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('In progress', style: Theme.of(context).textTheme.titleMedium),
+          Semantics(
+            header: true,
+            child: Text(
+              'IN PROGRESS',
+              style: CdType.overline.copyWith(color: context.cd.text2),
+            ),
+          ),
+          const SizedBox(height: 8),
           if (send.isPreparing && sending == null)
             _Tile(
               title: 'Preparing files to send',
@@ -68,20 +77,64 @@ class _Tile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final c = context.cd;
     final percent = fraction == null ? null : (fraction! * 100).floor();
-    return Card(
-      child: ListTile(
-        title: Text(title, maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: LinearProgressIndicator(
-            value: fraction,
-            semanticsLabel: title,
-            semanticsValue: percent == null ? null : '$percent%',
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: c.surface1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CdRadius.button),
+          side: BorderSide(color: c.line),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: Text(
+                        title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: CdType.titleS.copyWith(
+                          fontSize: 15,
+                          color: c.text,
+                        ),
+                      ),
+                    ),
+                    if (percent != null)
+                      ExcludeSemantics(
+                        child: Text(
+                          '$percent%',
+                          style: CdType.titleS.copyWith(
+                            fontSize: 15,
+                            color: c.text,
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                fraction == null
+                    ? LinearProgressIndicator(semanticsLabel: title)
+                    : CdProgressBar(value: fraction!, semanticLabel: title),
+                const SizedBox(height: 8),
+                Text(
+                  'Tap to see it',
+                  style: CdType.small.copyWith(color: c.text2),
+                ),
+              ],
+            ),
           ),
         ),
-        trailing: percent == null ? null : Text('$percent%'),
-        onTap: onTap,
       ),
     );
   }
