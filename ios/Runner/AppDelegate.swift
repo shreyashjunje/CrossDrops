@@ -14,6 +14,7 @@ import UIKit
   private var thumbnails: ThumbnailChannel?
   private var hotspotJoin: HotspotJoinChannel?
   private var networkInfo: NetworkInfoChannel?
+  private var haptics: HapticsChannel?
 
   override func application(
     _ application: UIApplication,
@@ -53,6 +54,9 @@ import UIKit
     }
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NetworkInfoChannel") {
       networkInfo = NetworkInfoChannel(messenger: registrar.messenger())
+    }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "HapticsChannel") {
+      haptics = HapticsChannel(messenger: registrar.messenger())
     }
   }
 }
@@ -271,5 +275,28 @@ final class LocalNetworkProbe {
     browser = nil
     listener = nil
     DispatchQueue.main.async { self.completion(status) }
+  }
+}
+
+/// Platform channel `crossdrop/haptics` (Dart side: lib/platform/haptics.dart,
+/// D-069).
+///
+/// - `notify {kind}`: `success` or `error` notification feedback. Flutter's
+///   own HapticFeedback covers selection and impact.
+final class HapticsChannel {
+  private let channel: FlutterMethodChannel
+
+  init(messenger: FlutterBinaryMessenger) {
+    channel = FlutterMethodChannel(name: "crossdrop/haptics", binaryMessenger: messenger)
+    channel.setMethodCallHandler { call, result in
+      guard call.method == "notify" else {
+        result(FlutterMethodNotImplemented)
+        return
+      }
+      let kind = (call.arguments as? [String: Any])?["kind"] as? String
+      let generator = UINotificationFeedbackGenerator()
+      generator.notificationOccurred(kind == "error" ? .error : .success)
+      result(nil)
+    }
   }
 }

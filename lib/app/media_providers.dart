@@ -11,6 +11,7 @@ import '../core/server/file_store.dart';
 import '../platform/android_source.dart';
 import '../platform/android_store.dart';
 import '../platform/document_picker.dart';
+import '../platform/haptics.dart';
 import '../platform/ios_export.dart';
 import '../platform/ios_photos.dart';
 import '../platform/open_file.dart';
@@ -84,6 +85,10 @@ final iosShareInboxProvider = Provider<ShareInbox?>((ref) {
 
 /// Opens received files in the system viewer (D-051).
 final fileOpenerProvider = Provider<FileOpener>((ref) => ChannelFileOpener());
+
+/// Haptics for the key moments: device found, lock-on, accepted, done,
+/// failed (D-069).
+final hapticsProvider = Provider<Haptics>((ref) => PlatformHaptics());
 
 /// Small previews of picked, sent and received files (D-068).
 final thumbnailServiceProvider = Provider<ThumbnailService>(

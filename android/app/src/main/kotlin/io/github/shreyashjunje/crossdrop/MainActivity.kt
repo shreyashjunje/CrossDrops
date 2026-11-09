@@ -3,10 +3,12 @@ package io.github.shreyashjunje.crossdrop
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.os.StatFs
 import android.provider.MediaStore
 import android.provider.Settings
+import android.view.HapticFeedbackConstants
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -52,6 +54,25 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "open" -> result.success(openSaved(call.argument<String>("location")))
+                    else -> result.notImplemented()
+                }
+            }
+        // Dart side: lib/platform/haptics.dart (D-069). `notify {kind}`:
+        // success or error feedback. Flutter covers selection and impact.
+        // performHapticFeedback respects the user's touch-feedback setting.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "crossdrop/haptics")
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "notify" -> {
+                        val error = call.argument<String>("kind") == "error"
+                        val constant = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            if (error) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.CONFIRM
+                        } else {
+                            if (error) HapticFeedbackConstants.LONG_PRESS else HapticFeedbackConstants.CONTEXT_CLICK
+                        }
+                        window?.decorView?.performHapticFeedback(constant)
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
