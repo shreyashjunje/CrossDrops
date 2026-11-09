@@ -588,3 +588,17 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - A large video sent next to photos shares the link with them; total throughput should be about the same.
   - Benchmarks should compare `parallelUploads` 1 and 3, with many small photos and with one large video, on both phones (BENCHMARKS.md). The slot count is one constant on each side if the numbers say otherwise.
   - Device checks N-1 to N-8 in DEVICE_TESTS.md, "Send screen fixes".
+
+## D-069: Redesign on the Night Signal system
+- Date: 2026-11-09
+- Status: Accepted
+- Context: The owner asked for a full redesign: professional, a few memorable moments, easy for non-technical people, one design system. The app used a teal Material seed theme with default widgets. The design was done as a canvas (brief, design system, every screen and state, flow map, UX decisions): https://claude.ai/artifact/XFq5LdCYi7ZoctsNEPLia6. The owner approved direction A, "Night Signal", and the build plan.
+- Decision:
+  - **Tokens:** one `CdColors` theme extension (dark and light), plus spacing, radius, motion and type tokens in `lib/app/tokens.dart`. Dark is the reference: ground #0E1116, one accent #C8F25A, always with dark text on it. Flat surfaces, 1 px borders, depth through surface tone, no shadows or gradients.
+  - **Accent in light mode:** lime stays the fill (primary buttons, switch track, navigation indicator, `primaryContainer`) with dark text. Lime on a light background is too faint for text, icons or thin indicators, so in light mode `ColorScheme.primary` is the dark "accent ink" #4A6600 and progress indicators use it too. In dark mode both are lime.
+  - **Status colours differ in lightness**, not just hue (dark: accent 0.77, warning 0.55, danger 0.37 relative luminance), and always come with an icon and a word.
+  - **Fonts bundled as assets:** Space Grotesk (variable, weight set through `FontVariation`) for headings and big numbers, Inter (static 400, 500, 600) for the rest, both OFL, licences registered with `LicenseRegistry`. Not the `google_fonts` package: it downloads fonts at runtime, which hard rule 8 forbids. All numbers use tabular figures; both fonts have them.
+  - **Haptics** for device found, lock-on, accepted, done and failed, behind a Dart interface. Success and error need a small native call (Flutter only ships impact and selection feedback).
+  - **Flow changes (owner approved):** tapping a phone on the radar sends (no extra Send button); the code check lives inside Incoming and the sender's waiting sheet instead of a separate screen; sharing from another app opens straight on the radar; "Trust this device" is off by default; History gets All, Sent, Received and Unfinished filters.
+  - **Motion** is 150 to 300 ms, and every loop stops under the system "reduce motion" setting (`MediaQuery.disableAnimations`). The radar falls back to a plain list at large text sizes and with a screen reader.
+- Consequences: Every screen is rebuilt in small steps, one commit each, with the existing widget and accessibility tests kept passing. The benchmark screen keeps plain styling. Fonts add about 1.4 MB to the app. The contrast of every token pair is checked by a unit test; how the design feels, haptics and reduce motion can only be confirmed on phones (DEVICE_TESTS.md, "Redesign").
