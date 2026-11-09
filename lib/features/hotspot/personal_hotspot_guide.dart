@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/navigation.dart';
 import '../../app/providers.dart';
+import '../../app/tokens.dart';
+import '../../app/ui/ui.dart';
 import '../../core/discovery/network_monitor.dart';
 import '../../core/discovery/peer_list.dart';
 import '../../core/discovery/subnet.dart';
@@ -114,16 +116,40 @@ class _PersonalHotspotGuideState extends ConsumerState<PersonalHotspotGuide> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.cd;
     final link = personalHotspotLink(_me, _mine);
     return Scaffold(
       appBar: AppBar(title: const Text('iPhone Personal Hotspot')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(
+          CdSpace.gutter,
+          8,
+          CdSpace.gutter,
+          CdSpace.l,
+        ),
         children: [
+          ExcludeSemantics(
+            child: Row(
+              children: [
+                for (var i = 0; i < 3; i++) ...[
+                  if (i > 0) const SizedBox(width: 6),
+                  Expanded(
+                    child: Container(
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: i <= _page ? c.accent : c.surface3,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
           Text(
             'Step ${_page + 1} of 3: ${_titles[_page]}',
-            style: theme.textTheme.titleLarge,
+            style: CdType.h2.copyWith(color: c.text),
           ),
           const SizedBox(height: 8),
           _LinkStatus(me: _me, link: link),
@@ -161,9 +187,10 @@ class _PersonalHotspotGuideState extends ConsumerState<PersonalHotspotGuide> {
                 ),
               const Spacer(),
               if (_page < 2)
-                FilledButton(
+                FilledButton.icon(
                   onPressed: () => setState(() => _page++),
-                  child: const Text('Next'),
+                  icon: const Icon(Icons.arrow_forward_rounded),
+                  label: const Text('Next'),
                 ),
             ],
           ),
@@ -203,12 +230,28 @@ class _LinkStatus extends StatelessWidget {
       ),
       _ => (false, "This phone is not on an iPhone's hotspot yet."),
     };
+    final c = context.cd;
     return Semantics(
       liveRegion: true,
-      child: ListTile(
-        contentPadding: EdgeInsets.zero,
-        leading: Icon(ok ? Icons.check_circle : Icons.hourglass_empty),
-        title: Text(text),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: ok ? c.accentSoft : c.surface1,
+          borderRadius: BorderRadius.circular(CdRadius.button),
+          border: Border.all(color: ok ? c.accent : c.line),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              ok ? Icons.check_circle_rounded : Icons.hourglass_empty_rounded,
+              color: ok ? c.accentInk : c.text3,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(text, style: CdType.bodyM.copyWith(color: c.text)),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -251,14 +294,16 @@ class _CheckPage extends ConsumerWidget {
             ),
         const SizedBox(height: 8),
         FilledButton.icon(
-          icon: const Icon(Icons.send),
+          style: CdButtonStyles.wide,
+          icon: const Icon(Icons.north_east_rounded),
           label: const Text('Send files'),
           onPressed: () =>
               pushScreen<void>(context, Routes.send, const SendScreen()),
         ),
         const SizedBox(height: 8),
         OutlinedButton.icon(
-          icon: const Icon(Icons.qr_code),
+          style: CdButtonStyles.wide,
+          icon: const Icon(Icons.qr_code_2_rounded),
           label: const Text('Show my QR code to receive'),
           onPressed: () =>
               pushScreen<void>(context, Routes.myQr, const MyQrScreen()),

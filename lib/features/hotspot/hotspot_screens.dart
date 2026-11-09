@@ -3,10 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../app/navigation.dart';
 import '../../app/providers.dart';
+import '../../app/tokens.dart';
+import '../../app/ui/ui.dart';
 import '../../core/bench/bench.dart';
 import '../../core/protocol/connect_payload.dart';
 import '../../core/security/device_identity.dart';
@@ -38,26 +39,32 @@ class HotspotModeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final me = platform ?? DevicePlatform.current;
-    final theme = Theme.of(context);
+    final c = context.cd;
     void open(Widget screen) =>
         pushScreen<void>(context, Routes.hotspot, screen);
     return Scaffold(
       appBar: AppBar(title: const Text('Hotspot mode')),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(
+          CdSpace.gutter,
+          8,
+          CdSpace.gutter,
+          CdSpace.l,
+        ),
         children: [
           Text(
             'No shared Wi-Fi, or a Wi-Fi that hides phones from each other? '
             'One phone makes its own Wi-Fi network and the other joins it. '
             'Files go straight between the phones and use no mobile data.',
-            style: theme.textTheme.bodyLarge,
+            style: CdType.bodyL.copyWith(color: c.text2),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 20),
           if (me == DevicePlatform.android) ...[
             _Choice(
               icon: Icons.wifi_tethering,
               title: 'This phone makes the network',
               subtitle: 'Recommended. The iPhone joins it.',
+              recommended: true,
               onTap: () => open(const AndroidHotspotScreen()),
             ),
             _Choice(
@@ -71,6 +78,7 @@ class HotspotModeScreen extends StatelessWidget {
               icon: Icons.phone_android,
               title: "Join the Android phone's network",
               subtitle: 'Recommended. Start it in CrossDrop on the Android.',
+              recommended: true,
               onTap: () => open(const JoinAndroidHotspotScreen()),
             ),
             _Choice(
@@ -80,6 +88,13 @@ class HotspotModeScreen extends StatelessWidget {
               onTap: () => open(PersonalHotspotGuide(platform: me)),
             ),
           ],
+          const SizedBox(height: 8),
+          const NoticeCard(
+            icon: Icons.info_outline_rounded,
+            text:
+                'Cafés, hotels and airports often hide phones from each '
+                'other. Hotspot mode gets around that.',
+          ),
         ],
       ),
     );
@@ -103,34 +118,37 @@ class HotspotSuggestion extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              "The phones can't reach each other on this Wi-Fi",
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Guest and public Wi-Fi (cafés, hotels, airports, many '
-              'offices) often keeps phones apart, so they cannot see or '
-              'reach each other. Hotspot mode makes a small network between '
-              'the two phones. It needs no internet and the transfer uses no '
-              'mobile data.',
-            ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              icon: const Icon(Icons.wifi_tethering),
-              label: const Text('Use hotspot mode'),
-              onPressed: onOpen,
-            ),
-          ],
-        ),
+    final c = context.cd;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: c.warningSoft,
+        borderRadius: BorderRadius.circular(CdRadius.card),
+        border: Border.all(color: c.warningLine),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            "The phones can't reach each other on this Wi-Fi",
+            style: CdType.titleM.copyWith(color: c.text),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Guest and public Wi-Fi (cafés, hotels, airports, many '
+            'offices) often keeps phones apart, so they cannot see or '
+            'reach each other. Hotspot mode makes a small network between '
+            'the two phones. It needs no internet and the transfer uses no '
+            'mobile data.',
+            style: CdType.bodyM.copyWith(color: c.text2),
+          ),
+          const SizedBox(height: 12),
+          FilledButton.icon(
+            icon: const Icon(Icons.wifi_tethering_rounded),
+            label: const Text('Use hotspot mode'),
+            onPressed: onOpen,
+          ),
+        ],
       ),
     );
   }
@@ -142,23 +160,67 @@ class _Choice extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.recommended = false,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
   final VoidCallback onTap;
+  final bool recommended;
 
   @override
-  Widget build(BuildContext context) => Card(
-    child: ListTile(
-      leading: Icon(icon, size: 32),
-      title: Text(title),
-      subtitle: Text(subtitle),
-      trailing: const Icon(Icons.chevron_right),
-      onTap: onTap,
-    ),
-  );
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Material(
+        color: c.surface1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CdRadius.card),
+          side: BorderSide(
+            color: recommended ? c.accent : c.line,
+            width: recommended ? 1.5 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              children: [
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: recommended ? c.accent : c.surface3,
+                    borderRadius: BorderRadius.circular(CdRadius.tile),
+                  ),
+                  child: Icon(icon, color: recommended ? c.onAccent : c.text),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: CdType.titleM.copyWith(color: c.text)),
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: CdType.small.copyWith(color: c.text2),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: c.text3),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// Words for a hotspot that did not start, or stopped.
@@ -204,11 +266,13 @@ class AndroidHotspotScreen extends ConsumerWidget {
           'network and pauses the transfer.',
         ),
         actions: [
-          TextButton(
+          FilledButton(
+            style: CdButtonStyles.secondary(context),
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Stay'),
           ),
-          TextButton(
+          OutlinedButton(
+            style: CdButtonStyles.danger(context),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Stop and leave'),
           ),
@@ -235,7 +299,12 @@ class AndroidHotspotScreen extends ConsumerWidget {
       child: Scaffold(
         appBar: AppBar(title: const Text('Make a network')),
         body: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(
+            CdSpace.gutter,
+            8,
+            CdSpace.gutter,
+            CdSpace.l,
+          ),
           children: [
             switch (state.phase) {
               HotspotPhase.running => _HotspotRunning(state: state),
@@ -290,12 +359,18 @@ class _HotspotIdle extends StatelessWidget {
       ),
       const SizedBox(height: 16),
       FilledButton(
+        style: CdButtonStyles.wide,
         onPressed: onStart,
         child: Text(error == null ? 'Start' : 'Try again'),
       ),
       if (error != null) ...[
         const SizedBox(height: 16),
-        WarningBox(icon: Icons.error_outline, text: hotspotErrorMessage(error)),
+        NoticeCard(
+          tone: NoticeTone.danger,
+          icon: Icons.error_outline_rounded,
+          title: "Couldn't start the network",
+          text: hotspotErrorMessage(error),
+        ),
         if (error == HotspotErrors.permission)
           TextButton(
             onPressed: onOpenSettings,
@@ -322,7 +397,7 @@ class _HotspotRunningState extends ConsumerState<_HotspotRunning> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.cd;
     final wifi = widget.state.wifi!;
     final ip = widget.state.address!.ip;
     // Rebuild when the server starts, stops or moves to a new port.
@@ -355,20 +430,16 @@ class _HotspotRunningState extends ConsumerState<_HotspotRunning> {
                     'then tap Join. Then scan the CrossDrop code from CrossDrop.'
               : 'On the iPhone: CrossDrop > Send > Scan QR code.',
           textAlign: TextAlign.center,
-          style: theme.textTheme.titleMedium,
+          style: CdType.bodyL.copyWith(color: c.text),
         ),
         const SizedBox(height: 16),
         Center(
-          child: Container(
-            color: Colors.white,
-            padding: const EdgeInsets.all(16),
-            child: QrImageView(
-              data: showCamera ? wifiJoinQr(wifi) : payload,
-              size: 240,
-              semanticsLabel: showCamera
-                  ? "Wi-Fi QR code for the iPhone's Camera app"
-                  : "QR code to join this phone's network and connect",
-            ),
+          child: QrCard(
+            data: showCamera ? wifiJoinQr(wifi) : payload,
+            size: 220,
+            semanticLabel: showCamera
+                ? "Wi-Fi QR code for the iPhone's Camera app"
+                : "QR code to join this phone's network and connect",
           ),
         ),
         if (payload != null)
@@ -388,14 +459,23 @@ class _HotspotRunningState extends ConsumerState<_HotspotRunning> {
                 'Receiving on Home to receive from the iPhone.',
           ),
         const SizedBox(height: 8),
-        SelectableText(
-          'Network: ${wifi.ssid}\nPassword: ${wifi.password}',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.titleMedium,
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: c.surface1,
+            borderRadius: BorderRadius.circular(CdRadius.button),
+            border: Border.all(color: c.line),
+          ),
+          child: SelectableText(
+            'Network: ${wifi.ssid}\nPassword: ${wifi.password}',
+            textAlign: TextAlign.center,
+            style: CdType.titleS.copyWith(fontSize: 15, color: c.text),
+          ),
         ),
         const SizedBox(height: 16),
         OutlinedButton.icon(
-          icon: const Icon(Icons.send),
+          style: CdButtonStyles.wide,
+          icon: const Icon(Icons.north_east_rounded),
           label: const Text('Send files to the iPhone'),
           onPressed: () =>
               pushScreen<void>(context, Routes.send, const SendScreen()),
@@ -409,10 +489,11 @@ class _HotspotRunningState extends ConsumerState<_HotspotRunning> {
             child: const Text('Benchmark (test build)'),
           ),
         const SizedBox(height: 8),
-        const Text(
+        Text(
           'Keep this screen open until you are done: the network stops when '
           'you leave it, and a minute after the last transfer.',
           textAlign: TextAlign.center,
+          style: CdType.small.copyWith(color: c.text3),
         ),
       ],
     );
@@ -444,15 +525,33 @@ class _StopCountdownState extends State<_StopCountdown> {
   @override
   Widget build(BuildContext context) {
     final left = widget.at.difference(DateTime.now()).inSeconds.clamp(0, 999);
+    final c = context.cd;
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
-      child: Card(
-        child: ListTile(
-          leading: const Icon(Icons.timer_outlined),
-          title: Text('Transfer done. The network stops in $left s.'),
-          trailing: TextButton(
-            onPressed: widget.onKeepOn,
-            child: const Text('Keep on'),
+      child: Semantics(
+        liveRegion: left <= 10,
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+          decoration: BoxDecoration(
+            color: c.text,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.timer_outlined, color: c.bg),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Transfer done. The network stops in $left s.',
+                  style: CdType.bodyM.copyWith(color: c.bg),
+                ),
+              ),
+              TextButton(
+                style: TextButton.styleFrom(foregroundColor: c.bg),
+                onPressed: widget.onKeepOn,
+                child: const Text('Keep on'),
+              ),
+            ],
           ),
         ),
       ),
@@ -534,7 +633,8 @@ class JoinAndroidHotspotScreen extends StatelessWidget {
         ),
         const SizedBox(height: 16),
         FilledButton.icon(
-          icon: const Icon(Icons.qr_code_scanner),
+          style: CdButtonStyles.wide,
+          icon: const Icon(Icons.qr_code_scanner_rounded),
           label: const Text('Scan QR code'),
           onPressed: () => _scan(context),
         ),
@@ -660,16 +760,16 @@ class _JoinHotspotScreenState extends ConsumerState<JoinHotspotScreen> {
               ),
             ],
             JoinStep.connected => [
-              ListTile(
-                leading: const Icon(Icons.check_circle, size: 32),
-                title: Text("Connected to $name's network"),
-                subtitle: const Text(
-                  'Keep CrossDrop open on both phones until you are done.',
-                ),
+              NoticeCard(
+                tone: NoticeTone.accent,
+                icon: Icons.check_circle_rounded,
+                title: "Connected to $name's network",
+                text: 'Keep CrossDrop open on both phones until you are done.',
               ),
               const SizedBox(height: 16),
               FilledButton.icon(
-                icon: const Icon(Icons.send),
+                style: CdButtonStyles.wide,
+                icon: const Icon(Icons.north_east_rounded),
                 label: Text('Send files to $name'),
                 onPressed: () => Navigator.of(context).pushReplacement(
                   MaterialPageRoute<void>(
@@ -699,12 +799,22 @@ class _Busy extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(24),
+    padding: const EdgeInsets.symmetric(vertical: 32),
     child: Column(
       children: [
-        const CircularProgressIndicator(),
-        const SizedBox(height: 16),
-        Text(text, textAlign: TextAlign.center),
+        const SizedBox.square(
+          dimension: 48,
+          child: CircularProgressIndicator(strokeWidth: 4),
+        ),
+        const SizedBox(height: 20),
+        Semantics(
+          liveRegion: true,
+          child: Text(
+            text,
+            textAlign: TextAlign.center,
+            style: CdType.bodyL.copyWith(color: context.cd.text),
+          ),
+        ),
       ],
     ),
   );
@@ -719,7 +829,7 @@ class _ManualJoin extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.cd;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -732,15 +842,24 @@ class _ManualJoin extends StatelessWidget {
             'Come back to CrossDrop. It goes on by itself.',
           ],
         ),
-        const SizedBox(height: 8),
-        SelectableText(
-          'Network: ${wifi.ssid}\nPassword: ${wifi.password}',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.titleMedium,
+        const SizedBox(height: 12),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: c.surface1,
+            borderRadius: BorderRadius.circular(CdRadius.button),
+            border: Border.all(color: c.line),
+          ),
+          child: SelectableText(
+            'Network: ${wifi.ssid}\nPassword: ${wifi.password}',
+            textAlign: TextAlign.center,
+            style: CdType.titleS.copyWith(fontSize: 15, color: c.text),
+          ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 12),
         FilledButton.icon(
-          icon: const Icon(Icons.copy),
+          style: CdButtonStyles.wide,
+          icon: const Icon(Icons.copy_rounded),
           label: const Text('Copy password'),
           onPressed: () async {
             await Clipboard.setData(ClipboardData(text: wifi.password));
