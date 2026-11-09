@@ -49,8 +49,8 @@ flowchart TD
   Inc -- Accept --> Transfer
   Inc -- Decline --> Any
 
-  Home -- History --> Hist["History"] --> Detail["Done / Failed<br/>or Resume / Discard"]
-  Home -- Settings --> Set["Settings"]
+  Home -- "History tab" --> Hist["History<br/>filters"] --> Detail["Done / Failed<br/>or Resume / Discard"]
+  Home -- "Settings tab" --> Set["Settings"]
   Set --> Trusted["Trusted devices"]
   Set --> About["About"]
   Set --> Help
@@ -61,6 +61,8 @@ flowchart TD
 
 - **Home is the receive screen (D-046).** `ReceiveHost`, above the navigator, keeps the receive controller alive from the end of onboarding on. The server stops 30 s after the app is hidden with nothing in flight, and starts again on a new port when the app is shown. It no longer keeps the screen on by itself; transfers and the My QR code screen do.
 - **Navigation is `Navigator` with named routes (D-047)** (`lib/app/navigation.dart`). `topRouteObserver` lets the share listener and the offer prompt avoid duplicates.
+- **Home, History and Settings are tabs (D-069)** in `RootShell` (`lib/app/root_shell.dart`). A tab is built when shown, so History re-reads on open; Back on another tab returns to Home. Every other screen is still a pushed route.
+- **Night Signal (D-069).** Every screen uses the tokens in `lib/app/tokens.dart` and the building blocks in `lib/app/ui/`. Design canvas: https://claude.ai/artifact/XFq5LdCYi7ZoctsNEPLia6.
 - **One view model for both directions (D-048).** `TransferView` is built from the sender's `SendSnapshot`, the receiver's `IncomingSession` or a stored session. `ProgressView` and `ResultView` are plain widgets that take it, so they are tested without the engine.
 - **One failure table (D-049).** `failure_messages.dart` maps every reason code to a title, a plain reason, a next step and a button (`NextAction`), following [ARCHITECTURE.md, "Failure handling"](../ARCHITECTURE.md#failure-handling).
 - **Open is our own channel (D-051).**
@@ -71,17 +73,17 @@ flowchart TD
 
 | Screen | What it shows | Notes |
 | --- | --- | --- |
-| Home | "Ready to receive" (or Starting, Not on Wi-Fi, Receiving is off, Cannot receive) with this phone's name, the Receiving switch, Show my QR code, transfers in progress, a large Send button | The status is a live region, so screen readers announce changes |
+| Home | "Ready to receive" (or Starting, Not on Wi-Fi, Receiving is off, Cannot receive) with this phone's name and a pulsing dot, the Receiving switch, a large lime Send tile, Show my QR code, transfers in progress, unfinished transfers with Resume / Discard, the cable-import card (Android), the three latest transfers or an empty state | The status is a live region, so screen readers announce changes |
 | My QR code | The QR code (white background in dark mode), the device name, the IP and port under "No camera?" | Keeps the screen on while open |
-| Send | Photos & videos, Files, the selected items with remove, count and size, Send | Shares from other apps open here with the files selected |
-| Nearby | Each phone's name, platform and connection hint ("same Wi-Fi", "via iPhone hotspot"); Scan QR code, Enter IP, "Can't find the other phone?" | Pops with the checked target. Errors come from the failure table |
+| Send | Two sources when empty; then a summary, a grid of previews with remove and an Add tile, "Send N items" | Shares from other apps go straight on to Nearby; Back shows this screen with the files selected |
+| Nearby | A radar: up to six phones as avatars around a pulsing centre, name, platform and connection hint; tapping one locks on while it is checked. A list at 1.6x text and with screen readers. Scan QR, "Can't find the other phone?", "Type the address instead" | Pops with the checked target. Errors come from the failure table |
 | Find help | 1. Check both phones (iPhone: Local Network, with a Settings link) 2. QR code 3. Hotspot mode | Order of the connection flow |
 | Incoming request | Name, platform, Trusted or Not trusted; first-time or lookalike warning; count, size, first five names; 6-digit code and "Trust this device" (untrusted); 60 s countdown; Decline and Accept | Full screen on top of any screen; Back declines |
-| Transfer: Progress | Who, stage in words, total bar with %, bytes, speed, time left, the code while waiting for Accept, per-file rows, Pause or Resume (sender) and Cancel | iPhone: "Keep CrossDrop open and the screen on". Android: the notification keeps it going |
+| Transfer: Progress | Who, the file-flow track, stage in words, the % in large figures with speed and time left, total bar, bytes, the code while waiting for Accept, per-file rings, Pause or Resume (sender) and Cancel | iPhone: "Keep CrossDrop open and the screen on". Android: the notification keeps it going |
 | Transfer: Done | Count, size, where files were saved (with the reason for a fallback), Open per file; sender: "checked with SHA-256" and Trust | |
 | Transfer: Failed | Title, "What happened", "What to do", one button (Resume, Send again, Other ways to connect), files not saved with why | Also for partly successful transfers |
 | Hotspot mode | Choices depend on the phone: Android makes a network or joins Personal Hotspot; iPhone joins the Android or turns on Personal Hotspot | UI only (Phase 7) |
-| History | Last 200 transfers by day: direction, device, platform, count, size, status, time | Detail: Done/Failed view, or View, Resume, Discard for unfinished ones |
+| History | Last 200 transfers by day: "N photos to/from X", size, platform, time, status tag; All / Sent / Received / Unfinished filters | Detail: Done/Failed view, or View, Resume, Discard for unfinished ones |
 
 ### Accessibility
 

@@ -2,6 +2,22 @@
 
 All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Keep a Changelog](https://keepachangelog.com): group entries under Added, Changed, Fixed or Removed, under a heading of the date (`## YYYY-MM-DD`) or version once releases exist.
 
+## 2026-11-09
+
+### Changed
+- **Redesign, Night Signal (D-069):** every screen rebuilt on one design system: a near-black ground, one lime accent with dark text on it, flat surfaces with hairline borders, Space Grotesk for headings and big numbers, Inter for the rest, and a matching light mode. Fonts are bundled, not downloaded. Design canvas: https://claude.ai/artifact/XFq5LdCYi7ZoctsNEPLia6.
+- **Home, History and Settings are tabs.** Home shows the receive status with a pulsing dot, a large Send tile, transfers in progress, unfinished transfers (no more launch dialog) and the latest transfers.
+- **Nearby is a radar.** Phones appear around you; tapping one locks on. Large text and screen readers get a list.
+- **Transfer shows the files flowing** from one phone to the other, with the percentage, speed and time left in large figures. Done draws a check and shows the arrived files as thumbnails. Failed says what happened and what to do, with one button.
+- **Incoming request** shows the sender as a person, the files, the code check and the answer countdown on one screen.
+- **Sharing from another app** opens straight on the radar with the files selected.
+- **Onboarding** has a picture on each page.
+
+### Added
+- **History filters:** All, Sent, Received, Unfinished.
+- **Haptics** when a phone is found, on lock-on, when the other phone accepts, when a transfer is done and when it fails.
+- **Reduced motion:** every animation stops or becomes instant under the system setting.
+
 ## 2026-11-08
 
 ### Added

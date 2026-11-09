@@ -1567,3 +1567,108 @@ Everything in this section. The unit tests cover the protocol field, the receive
 | N-6 | | | | | | |
 | N-7 | | | | | | |
 | N-8 | | | | | | |
+
+## Redesign (D-069)
+
+The Night Signal redesign: every screen, light and dark, haptics and reduced motion. Same build on both phones. Compare with the design canvas: https://claude.ai/artifact/XFq5LdCYi7ZoctsNEPLia6.
+
+### Preparation (once)
+
+- Both phones on the same Wi-Fi, CrossDrop open, Receiving on. One phone not yet trusted by the other (Settings > Trusted devices > Forget, if needed).
+- A few photos, one video and one PDF on each phone.
+
+### R-1: Look and fonts
+
+1. Open CrossDrop on both phones with the system in dark mode.
+2. Expected: near-black background; the Send tile and main buttons lime with dark text; screen titles in a semi-bold geometric font (not thin); numbers do not jump while they change.
+3. Switch the system to light mode. Expected: light grey background, lime buttons still with dark text, links and progress bars dark green. No text hard to read.
+4. Screenshot Home in both modes on both phones.
+
+### R-2: Tabs
+
+1. Tap History, then Settings, then Home at the bottom.
+2. Android: on History, press Back. Expected: Home, not out of the app.
+3. Expected: History reloads each time it opens (a transfer just finished shows up).
+
+### R-3: Radar and lock-on
+
+1. iPhone: Send > Photos & videos > pick 3 > Add > Send 3 items.
+2. Expected: "Tap the other phone", the Android as an avatar around a pulsing centre with its name and "Same Wi-Fi"; a light tick when it appears.
+3. Tap it. Expected: it turns lime with a ring and a dashed line to the centre, others dim, a light haptic, then the transfer screen.
+4. Set the system text size to the largest. Expected: a plain list of phones instead of the radar, nothing cut off.
+
+### R-4: Code and Incoming
+
+1. Continue R-3 to a phone that does not trust the iPhone.
+2. Expected on the Android: the iPhone's avatar and name, "First time from this phone", the files card, the 6-digit code as six boxes, "Trust this device" off, "Answer within 60 s" counting down.
+3. Expected on the iPhone: the same code, same size. Hold the phones side by side and compare.
+4. Tap "Codes match, accept". Expected: a medium haptic on the iPhone.
+
+### R-5: Transfer
+
+1. During the send, watch the iPhone.
+2. Expected: small tiles moving from "You" to the Android, "Sending … in original quality" in a lime chip, the percentage large, speed and time left, a ring per file, "Keep CrossDrop open and the screen on".
+3. Tap Pause. Expected: the tiles stop, the bar turns grey, Resume appears. Tap Resume.
+4. Android: the receiving side has no Pause, and says the transfer continues in a notification.
+
+### R-6: Done
+
+1. Let it finish.
+2. Expected on the Android: a lime disc whose check draws itself, one ring fading out, a success haptic, "N files received", "Original quality", where to find them, the photos rising in as thumbnails, Open on each file.
+3. Expected on the iPhone: "N files sent" and, for a first-time phone, the Trust card.
+
+### R-7: Failed
+
+1. Start a large send, then turn Wi-Fi off on the Android for over two minutes.
+2. Expected on the iPhone: "Connection lost", "What happened", "What to do", a lime Resume, an error haptic.
+3. Decline a send on the other phone. Expected: "Declined" with a neutral mark, Send again.
+
+### R-8: Help, QR and address
+
+1. On Nearby with no phone found, wait 5 s. Expected: "No phones found yet" and the "Open CrossDrop on the other phone" card.
+2. Tap Scan QR. Expected: lime corner frame over the camera; "Type the address instead" opens the address dialog.
+3. Scan a QR code that is not CrossDrop. Expected: the frame turns red and a red notice explains.
+4. On the other phone: Home > Show my QR code. Expected: the code on white in a card; "No camera? Type the address" shows the numbers large.
+
+### R-9: Hotspot and Personal Hotspot
+
+1. Android: Can't find the other phone? > Hotspot mode. Expected: two choice cards, the recommended one lime-bordered.
+2. This phone makes the network > Start. Expected: the QR in a white card, network and password in a card.
+3. iPhone: This iPhone makes the network. Expected: a three-step bar and the live status as a card.
+
+### R-10: Share, History and Settings
+
+1. In Photos (iPhone) or Gallery (Android), share 2 photos to CrossDrop. Expected: CrossDrop opens straight on the radar; Back shows the Send screen with both photos.
+2. History: tap Sent, Received, Unfinished, All. Expected: the list filters; an empty filter says "Nothing here yet."
+3. Settings: sections as cards. Trusted devices: Forget shows a red Forget and a grey Cancel.
+
+### R-11: Cable import (Android)
+
+1. Plug in an iPhone. Expected: a lime-bordered card on Home.
+2. Import photos, pick a few, Copy to this phone. Expected: the large percentage while copying, then a lime check and where the files went.
+
+### R-12: Reduced motion
+
+1. iPhone: Settings > Accessibility > Motion > Reduce Motion on. Android: Settings > Accessibility > Remove animations on.
+2. Repeat R-3, R-5 and R-6. Expected: no pulse on the radar or Home, still tiles on the transfer track, the Done check shown at once. Haptics still happen.
+
+### Not checked on devices
+
+Everything in this section. On the PC: the contrast of every colour pair in both themes, accessibility guidelines and 2x text on the main screens and every building block, the radar's list fallback and slot limit, the flow track and Done under reduced motion, haptics mapping and throttling.
+
+### Results
+
+| Check | Date | iPhone (model, iOS) | Android (model, version) | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| R-1 | | | | | | |
+| R-2 | | | | | | |
+| R-3 | | | | | | |
+| R-4 | | | | | | |
+| R-5 | | | | | | |
+| R-6 | | | | | | |
+| R-7 | | | | | | |
+| R-8 | | | | | | |
+| R-9 | | | | | | |
+| R-10 | | | | | | |
+| R-11 | | | | | | |
+| R-12 | | | | | | |
