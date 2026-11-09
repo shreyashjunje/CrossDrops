@@ -3,24 +3,31 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/media_providers.dart';
 import '../../app/navigation.dart';
 import '../../app/providers.dart';
+import '../../app/tokens.dart';
+import '../../app/ui/ui.dart';
 import '../../core/client/peer_check.dart';
 import '../../core/client/upload_client.dart';
 import '../../core/discovery/peer_list.dart';
 import '../../core/protocol/connect_payload.dart';
+import '../../platform/haptics.dart';
 import '../hotspot/hotspot_screens.dart';
+import '../send/send_controller.dart';
+import '../send/send_screen.dart';
 import '../transfer/failure_messages.dart';
-import '../transfer/widgets.dart';
 import 'find_help_screen.dart';
 import 'local_network_denied_view.dart';
 import 'lookalike_dialog.dart';
 import 'manual_address_dialog.dart';
 import 'nearby_controller.dart';
 import 'qr_scan_screen.dart';
+import 'radar.dart';
 
-/// Pick who to send to: nearby devices, a QR code, or a typed address.
-/// Pops with the checked [ConnectTarget].
+/// Pick who to send to: nearby devices on a radar, a QR code, or a typed
+/// address (D-069). Tapping a phone locks on to it while it is checked,
+/// then pops with the checked [ConnectTarget].
 class NearbyScreen extends ConsumerStatefulWidget {
   const NearbyScreen({super.key});
 
@@ -30,6 +37,9 @@ class NearbyScreen extends ConsumerStatefulWidget {
 
 class _NearbyScreenState extends ConsumerState<NearbyScreen> {
   bool _connecting = false;
+
+  /// The phone being checked, shown locked on the radar.
+  String? _lockedId;
 
   /// A QR code or typed address did not answer (network error).
   bool _addressUnreachable = false;
@@ -41,9 +51,14 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
   Future<void> _connect(
     Future<ConnectTarget> Function() check, {
     required bool fromQr,
+    String? lockId,
   }) async {
     if (_connecting) return;
-    setState(() => _connecting = true);
+    setState(() {
+      _connecting = true;
+      _lockedId = lockId;
+    });
+    if (lockId != null) ref.read(hapticsProvider).play(HapticMoment.lockOn);
     try {
       final target = await check();
       if (!mounted) return;
@@ -54,9 +69,15 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       if (e.code == 'network' && !_addressUnreachable) {
         setState(() => _addressUnreachable = true);
       }
+      ref.read(hapticsProvider).play(HapticMoment.failed);
       _showError(describeConnectError(e.code, fromQr: fromQr));
     } finally {
-      if (mounted) setState(() => _connecting = false);
+      if (mounted) {
+        setState(() {
+          _connecting = false;
+          _lockedId = null;
+        });
+      }
     }
   }
 
@@ -116,10 +137,27 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     );
   }
 
+  void _tapPeer(Peer p) => _connect(
+    () => _controller.connectToPeer(p),
+    fromQr: false,
+    lockId: p.deviceId,
+  );
+
   @override
   Widget build(BuildContext context) {
+    final c = context.cd;
     final state = ref.watch(nearbyControllerProvider);
     final peers = state.sortedPeers;
+    // A new phone on the radar: a light tick (throttled in Haptics).
+    ref.listen(nearbyControllerProvider.select((s) => s.peers.length), (
+      was,
+      now,
+    ) {
+      if (now > (was ?? 0)) {
+        ref.read(hapticsProvider).play(HapticMoment.deviceFound);
+      }
+    });
+    final picked = ref.watch(sendControllerProvider.select((s) => s.picked));
 
     final Widget body;
     if (state.permissionDenied) {
@@ -129,25 +167,119 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
         onScanQr: _scanQr,
       );
     } else {
+      final noneYet = peers.isEmpty;
+      final asList = useRadarList(context);
+      final radarPeers = [
+        for (final p in peers)
+          RadarPeer(
+            id: p.deviceId,
+            name: p.name,
+            platform: p.platform,
+            hint: p.isSupported
+                ? _capitalised(connectionHint(p.host))
+                : 'Needs an update',
+            enabled: p.isSupported && !_connecting,
+          ),
+      ];
       body = RefreshIndicator(
         onRefresh: _controller.refresh,
         child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: 8),
+          padding: const EdgeInsets.fromLTRB(
+            CdSpace.gutter,
+            4,
+            CdSpace.gutter,
+            CdSpace.l,
+          ),
           children: [
-            if (!state.hasNetwork)
-              const _Banner(
-                icon: Icons.signal_wifi_off,
+            Text(
+              noneYet && state.searchedLong
+                  ? 'No phones found yet'
+                  : 'Tap the other phone',
+              style: CdType.h1.copyWith(color: c.text),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              picked.isEmpty
+                  ? 'Phones with CrossDrop open show up here.'
+                  : 'Sending ${summarizePicked(picked)}',
+              style: CdType.bodyM.copyWith(color: c.text2),
+            ),
+            if (!state.hasNetwork) ...[
+              const SizedBox(height: 16),
+              const NoticeCard(
+                tone: NoticeTone.warning,
+                icon: Icons.signal_wifi_off_rounded,
+                title: 'Not on Wi-Fi',
                 text:
-                    'Not connected to Wi-Fi or a hotspot. Join the same '
-                    'network as the other phone.',
+                    'Join the same Wi-Fi as the other phone. No Wi-Fi around? '
+                    'Use hotspot mode: one phone makes a network for the other.',
               ),
-            if (state.error != null)
-              _Banner(icon: Icons.error_outline, text: state.error!),
+            ],
+            if (state.error != null) ...[
+              const SizedBox(height: 16),
+              NoticeCard(
+                tone: NoticeTone.danger,
+                icon: Icons.error_outline_rounded,
+                text: state.error!,
+              ),
+            ],
+            const SizedBox(height: 20),
+            if (asList)
+              for (final p in radarPeers)
+                _PeerCard(
+                  peer: p,
+                  locked: p.id == _lockedId,
+                  onTap: p.enabled
+                      ? () => _tapPeer(
+                          peers.firstWhere((x) => x.deviceId == p.id),
+                        )
+                      : null,
+                )
+            else ...[
+              Radar(
+                peers: radarPeers,
+                searching: state.searching,
+                lockedId: _lockedId,
+                onTap: (p) =>
+                    _tapPeer(peers.firstWhere((x) => x.deviceId == p.id)),
+              ),
+              // More phones than the radar has room for.
+              for (final p in radarPeers.skip(radarSlots))
+                _PeerCard(
+                  peer: p,
+                  locked: p.id == _lockedId,
+                  onTap: p.enabled
+                      ? () => _tapPeer(
+                          peers.firstWhere((x) => x.deviceId == p.id),
+                        )
+                      : null,
+                ),
+            ],
+            const SizedBox(height: 8),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                _statusLine(peers.length, state.searchedLong),
+                textAlign: TextAlign.center,
+                style: CdType.bodyM.copyWith(color: c.text2),
+              ),
+            ),
+            if (noneYet && state.searchedLong) ...[
+              const SizedBox(height: 16),
+              const NoticeCard(
+                icon: Icons.phone_android_rounded,
+                title: 'Open CrossDrop on the other phone',
+                text:
+                    'It must show "Ready to receive". Some Wi-Fi networks hide '
+                    'phones from each other: the QR code gets around that.',
+              ),
+            ],
             if (suggestHotspot(
               searchedLong: state.searchedLong,
               peerCount: peers.length,
               addressUnreachable: _addressUnreachable,
-            ))
+            )) ...[
+              const SizedBox(height: 16),
               HotspotSuggestion(
                 onOpen: () => pushScreen<void>(
                   context,
@@ -155,15 +287,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
                   const HotspotModeScreen(),
                 ),
               ),
-            for (final p in peers)
-              _PeerTile(
-                peer: p,
-                enabled: !_connecting && p.isSupported,
-                onTap: () =>
-                    _connect(() => _controller.connectToPeer(p), fromQr: false),
-              ),
-            if (peers.isEmpty)
-              _EmptyState(searchedLong: state.searchedLong, onHelp: _openHelp),
+            ],
           ],
         ),
       );
@@ -171,12 +295,17 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Send to'),
         actions: [
+          TextButton.icon(
+            onPressed: _connecting ? null : _scanQr,
+            style: TextButton.styleFrom(foregroundColor: c.text),
+            icon: const Icon(Icons.qr_code_scanner_rounded),
+            label: const Text('Scan QR'),
+          ),
           IconButton(
             tooltip: 'Search again',
             onPressed: _controller.refresh,
-            icon: const Icon(Icons.refresh),
+            icon: const Icon(Icons.refresh_rounded),
           ),
         ],
         bottom: _connecting
@@ -189,31 +318,25 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       body: body,
       bottomNavigationBar: SafeArea(
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+          padding: const EdgeInsets.fromLTRB(
+            CdSpace.gutter,
+            8,
+            CdSpace.gutter,
+            12,
+          ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                alignment: WrapAlignment.center,
-                children: [
-                  FilledButton.icon(
-                    onPressed: _connecting ? null : _scanQr,
-                    icon: const Icon(Icons.qr_code_scanner),
-                    label: const Text('Scan QR code'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _connecting ? null : _enterAddress,
-                    icon: const Icon(Icons.keyboard),
-                    label: const Text('Enter IP'),
-                  ),
-                ],
+              OutlinedButton.icon(
+                style: CdButtonStyles.wide,
+                onPressed: _openHelp,
+                icon: const Icon(Icons.help_outline_rounded),
+                label: const Text("Can't find the other phone?"),
               ),
               TextButton(
-                onPressed: _openHelp,
-                child: const Text("Can't find the other phone?"),
+                onPressed: _connecting ? null : _enterAddress,
+                child: const Text('Type the address instead'),
               ),
             ],
           ),
@@ -221,6 +344,19 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       ),
     );
   }
+
+  static String _statusLine(int found, bool searchedLong) {
+    if (found == 0) {
+      return searchedLong
+          ? 'Still looking on this network…'
+          : 'Looking for nearby phones…';
+    }
+    final phones = found == 1 ? '1 phone' : '$found phones';
+    return '$phones found · still looking';
+  }
+
+  static String _capitalised(String s) =>
+      s.isEmpty ? s : s[0].toUpperCase() + s.substring(1);
 }
 
 /// How this phone reaches [host]: iPhone Personal Hotspot hands out
@@ -228,97 +364,65 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
 String connectionHint(String host) =>
     host.startsWith('172.20.10.') ? 'via iPhone hotspot' : 'same Wi-Fi';
 
-class _PeerTile extends StatelessWidget {
-  const _PeerTile({
-    required this.peer,
-    required this.enabled,
-    required this.onTap,
-  });
+/// A phone in the list fallback (large text, screen readers, or more
+/// phones than the radar holds).
+class _PeerCard extends StatelessWidget {
+  const _PeerCard({required this.peer, required this.locked, this.onTap});
 
-  final Peer peer;
-  final bool enabled;
-  final VoidCallback onTap;
+  final RadarPeer peer;
+  final bool locked;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-      child: ListTile(
-        leading: PlatformIcon(platform: peer.platform, size: 40),
-        title: Text(peer.name, maxLines: 2, overflow: TextOverflow.ellipsis),
-        subtitle: Text(
-          peer.isSupported
-              ? '${platformLabel(peer.platform)} · '
-                    '${connectionHint(peer.host)}'
-              : 'Needs a newer CrossDrop on this phone',
-        ),
-        trailing: const Icon(Icons.chevron_right),
-        enabled: enabled,
-        onTap: onTap,
-      ),
-    );
-  }
-}
-
-class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.searchedLong, required this.onHelp});
-
-  final bool searchedLong;
-  final VoidCallback onHelp;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.cd;
+    final platform = switch (peer.platform) {
+      null => 'Unknown phone',
+      final p => p.name == 'ios' ? 'iPhone' : 'Android',
+    };
     return Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        children: [
-          if (!searchedLong) ...[
-            const CircularProgressIndicator(
-              semanticsLabel: 'Looking for nearby phones',
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: locked ? c.accentSoft : c.surface1,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(CdRadius.button),
+          side: BorderSide(color: locked ? c.accent : c.line),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              children: [
+                DeviceAvatar(
+                  name: peer.name,
+                  platform: peer.platform,
+                  size: 44,
+                  locked: locked,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        peer.name,
+                        style: CdType.titleM.copyWith(color: c.text),
+                      ),
+                      Text(
+                        locked ? 'Connecting…' : '$platform · ${peer.hint}',
+                        style: CdType.small.copyWith(color: c.text2),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(Icons.chevron_right_rounded, color: c.text3),
+              ],
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Looking for nearby phones…',
-              style: theme.textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'Open CrossDrop on the other phone. It must show "Ready to '
-              'receive".',
-              textAlign: TextAlign.center,
-            ),
-          ] else ...[
-            const Icon(Icons.search_off, size: 48),
-            const SizedBox(height: 16),
-            Text('No phones found yet', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            const Text(
-              'Some Wi-Fi networks hide phones from each other. Scan the QR '
-              'code on the other phone, or use hotspot mode.',
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonal(
-              onPressed: onHelp,
-              child: const Text("Can't find the other phone?"),
-            ),
-          ],
-        ],
+          ),
+        ),
       ),
     );
   }
-}
-
-class _Banner extends StatelessWidget {
-  const _Banner({required this.icon, required this.text});
-
-  final IconData icon;
-  final String text;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-    child: WarningBox(icon: icon, text: text),
-  );
 }
