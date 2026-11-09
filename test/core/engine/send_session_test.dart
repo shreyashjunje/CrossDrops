@@ -337,6 +337,29 @@ void main() {
       expect(code, shown);
     });
 
+    test('a receiver claiming trust alone does not hide the code', () async {
+      r.trustLookup = (_, _) async => PeerTrust(
+        trusted: TrustedDevice(
+          fingerprint: me.fingerprint,
+          deviceId: sender.id,
+          name: sender.name,
+          platform: 'ios',
+          autoAccept: true,
+          firstSeen: DateTime(2026),
+          lastSeen: DateTime(2026),
+        ),
+      );
+      r.decider = (_) async => true;
+      final (item, _) = await makeFile('a.bin', 1000);
+      final s = session([item]); // this phone does not trust the receiver
+      String? code;
+      final sub = s.updates.listen((u) => code ??= u.pairingCode);
+      final result = await s.run();
+      await sub.cancel();
+      expect(result.phase, SendPhase.done);
+      expect(code, isNotNull);
+    });
+
     test('a receiver with another key stops the send, never retried', () async {
       final other = await DeviceCredentials.generate();
       final (item, _) = await makeFile('a.bin', 1000);

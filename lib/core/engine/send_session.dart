@@ -255,6 +255,7 @@ class SendSession {
     required this.receiverFingerprint,
     required DeviceCredentials credentials,
     this.expectedDeviceId,
+    this.receiverTrusted = false,
     TransferRepository? repository,
     PeerLocator? locate,
     ClientFactory? clientFactory,
@@ -351,6 +352,10 @@ class SendSession {
 
   /// The receiver's device id, if known (nearby list, QR code, stored).
   final String? expectedDeviceId;
+
+  /// Whether this phone already trusts the receiver. The code is shown
+  /// unless it does and the receiver trusts this phone too.
+  final bool receiverTrusted;
   final Duration acceptTimeout;
   final Duration pollInterval;
 
@@ -634,7 +639,11 @@ class SendSession {
       throw const _Stop(SendPhase.cancelled, 'sender');
     }
     // The receiver shows the code of the authentication behind this offer.
-    _pairingCode = created.trusted ? null : _client.pairingCode;
+    // Hidden only when both phones already trust each other: a receiver
+    // (or a man in the middle) saying "trusted" is not enough (audit S13).
+    _pairingCode = created.trusted && receiverTrusted
+        ? null
+        : _client.pairingCode;
     _log('session ${created.sessionId}: offered ${_files.length} file(s)');
     final repo = _repo;
     if (repo != null) {

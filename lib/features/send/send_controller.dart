@@ -295,6 +295,7 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
       receiverFingerprint: checked.fingerprint!,
       credentials: credentials,
       expectedDeviceId: deviceId,
+      receiverTrusted: checked.trust.isTrusted,
       repository: ref.read(transferRepositoryProvider),
       locate: deviceId == null ? null : _locator(deviceId, device.deviceId),
       opener: ref.read(sourceOpenerProvider),
