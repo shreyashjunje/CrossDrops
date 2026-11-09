@@ -75,7 +75,7 @@ void main() {
     loader.pending[video]!.complete(MemoryImage(_png));
     await tester.pump();
     await tester.pump();
-    expect(find.byIcon(Icons.play_arrow), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsOneWidget);
   });
 
   testWidgets('no preview keeps the icon; nothing to load asks nothing', (

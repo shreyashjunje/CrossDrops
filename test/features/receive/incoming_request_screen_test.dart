@@ -1,3 +1,4 @@
+import 'package:crossdrop/app/ui/ui.dart';
 import 'package:crossdrop/app/theme.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/server/receive_server.dart';
@@ -67,6 +68,10 @@ Future<List<AcceptDecision?>> open(
   return results;
 }
 
+/// The pairing code display showing [code].
+Finder codeShown(String code) =>
+    find.byWidgetPredicate((w) => w is CodeDisplay && w.code == code);
+
 void main() {
   testWidgets('untrusted sender: who, files, code and first-time warning', (
     tester,
@@ -81,7 +86,7 @@ void main() {
     expect(find.text('IMG_4.HEIC'), findsOneWidget);
     expect(find.text('IMG_5.HEIC'), findsNothing);
     expect(find.text('and 2 more'), findsOneWidget);
-    expect(find.text('482 913'), findsOneWidget);
+    expect(codeShown('482913'), findsOneWidget);
     expect(find.bySemanticsLabel('Code 4 8 2 9 1 3'), findsOneWidget);
     await tester.scrollUntilVisible(find.text('Trust this device'), 200);
     expect(find.text('Trust this device'), findsOneWidget);
@@ -126,7 +131,7 @@ void main() {
     );
     expect(find.text('iPhone · Trusted'), findsOneWidget);
     expect(find.textContaining('First time'), findsNothing);
-    expect(find.text('482 913'), findsNothing);
+    expect(codeShown('482913'), findsNothing);
     expect(find.text('Trust this device'), findsNothing);
     await tester.tap(find.text('Accept'));
     await tester.pumpAndSettle();
@@ -144,7 +149,7 @@ void main() {
     );
     expect(find.textContaining('First time'), findsNothing);
     // Still untrusted: the code check applies.
-    expect(find.text('482 913'), findsOneWidget);
+    expect(codeShown('482913'), findsOneWidget);
   });
 
   testWidgets('countdown runs down to expired', (tester) async {

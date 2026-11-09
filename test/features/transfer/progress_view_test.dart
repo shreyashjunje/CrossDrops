@@ -1,3 +1,4 @@
+import 'package:crossdrop/app/ui/ui.dart';
 import 'package:crossdrop/app/theme.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/core/security/device_identity.dart';
@@ -65,6 +66,10 @@ Future<Taps> pump(
   );
   return taps;
 }
+
+/// The pairing code display showing [code].
+Finder codeShown(String code) =>
+    find.byWidgetPredicate((w) => w is CodeDisplay && w.code == code);
 
 void main() {
   test('several files moving together say so (D-068)', () {
@@ -169,7 +174,7 @@ void main() {
       view(stage: TransferStage.waiting, pairingCode: '048213'),
     );
     expect(find.text('Waiting for Pixel 8 to accept…'), findsOneWidget);
-    expect(find.text('048 213'), findsOneWidget);
+    expect(codeShown('048213'), findsOneWidget);
     expect(find.text('Pause'), findsNothing);
   });
 

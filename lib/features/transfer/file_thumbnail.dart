@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/media_providers.dart';
+import '../../app/tokens.dart';
 import '../../core/media/thumb_ref.dart';
 import '../../core/protocol/models.dart';
 import '../../platform/thumbnails.dart';
@@ -84,23 +85,21 @@ class _FileThumbnailState extends ConsumerState<FileThumbnail> {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final c = context.cd;
     final s = widget.size;
     final image = _image;
+    final placeholder = ColoredBox(
+      color: c.surface3,
+      child: Icon(fileKindIcon(widget.kind), size: s * 0.45, color: c.text2),
+    );
     return ExcludeSemantics(
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(8),
+        // 12 for tiles, a little less for small list thumbnails.
+        borderRadius: BorderRadius.circular((s * 0.2).clamp(6, 12)),
         child: SizedBox.square(
           dimension: s,
           child: image == null
-              ? ColoredBox(
-                  color: scheme.surfaceContainerHighest,
-                  child: Icon(
-                    fileKindIcon(widget.kind),
-                    size: s * 0.5,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                )
+              ? placeholder
               : Stack(
                   fit: StackFit.expand,
                   children: [
@@ -109,22 +108,24 @@ class _FileThumbnailState extends ConsumerState<FileThumbnail> {
                       fit: BoxFit.cover,
                       gaplessPlayback: true,
                       // A broken cache file shows the icon instead.
-                      errorBuilder: (_, _, _) => ColoredBox(
-                        color: scheme.surfaceContainerHighest,
-                        child: Icon(fileKindIcon(widget.kind), size: s * 0.5),
-                      ),
+                      errorBuilder: (_, _, _) => placeholder,
                     ),
                     if (widget.kind == FileKind.video)
-                      Center(
+                      Positioned(
+                        left: 4,
+                        bottom: 4,
                         child: DecoratedBox(
-                          decoration: const BoxDecoration(
-                            color: Colors.black45,
-                            shape: BoxShape.circle,
+                          decoration: BoxDecoration(
+                            color: CdColors.dark.bg,
+                            borderRadius: BorderRadius.circular(6),
                           ),
-                          child: Icon(
-                            Icons.play_arrow,
-                            size: s * 0.4,
-                            color: Colors.white,
+                          child: Padding(
+                            padding: const EdgeInsets.all(2),
+                            child: Icon(
+                              Icons.play_arrow_rounded,
+                              size: (s * 0.28).clamp(12, 18),
+                              color: CdColors.dark.text,
+                            ),
                           ),
                         ),
                       ),
