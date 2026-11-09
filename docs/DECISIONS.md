@@ -602,3 +602,16 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - **Flow changes (owner approved):** tapping a phone on the radar sends (no extra Send button); the code check lives inside Incoming and the sender's waiting sheet instead of a separate screen; sharing from another app opens straight on the radar; "Trust this device" is off by default; History gets All, Sent, Received and Unfinished filters.
   - **Motion** is 150 to 300 ms, and every loop stops under the system "reduce motion" setting (`MediaQuery.disableAnimations`). The radar falls back to a plain list at large text sizes and with a screen reader.
 - Consequences: Every screen is rebuilt in small steps, one commit each, with the existing widget and accessibility tests kept passing. The benchmark screen keeps plain styling. Fonts add about 1.4 MB to the app. The contrast of every token pair is checked by a unit test; how the design feels, haptics and reduce motion can only be confirmed on phones (DEVICE_TESTS.md, "Redesign").
+
+## D-070: Follow-up to the security audit of 2026-11-03 (S2, S7 to S10, S13)
+- Date: 2026-11-09
+- Status: Accepted
+- Context: The audit of commit `c412bf1` left six Low or Medium findings open after S1 and S3 to S6 were fixed.
+- Decision:
+  - **S2, spoofed advert:** another mDNS service that claims a listed device id with a different fingerprint hint is ignored. The first-seen entry stays until it is lost or does not answer. Not done: listing both with a warning; the existing look-alike check stays the UI guard.
+  - **S7, iOS backups:** `crossdrop_incoming` and `crossdrop_outgoing` are excluded from backup (`isExcludedFromBackup`) when the app first resolves its folders. Android already has backup off in its manifest.
+  - **S8, foreign networks:** the receive server answers 403 `not_local` to any address that is neither loopback nor on a subnet of one of the phone's interfaces (the `crossdrop/network` `interfaces` channel). If the platform lists no usable address, requests pass: a platform gap must not block every transfer. Routed multi-subnet LANs no longer work; QR and hotspot remain.
+  - **S9, client limits:** JSON replies over 1 MB fail as `bad_response`; an event message over 64 KB closes the event socket.
+  - **S10, CI:** every action is pinned to a commit SHA, the workflow token is read-only, and Dependabot proposes action updates monthly.
+  - **S13, code display:** the sender hides the pairing code only when the receiver says it trusts this phone and this phone trusts the receiver too.
+- Consequences: S11 and S12 stay accepted as before. S7 and S8 depend on native behaviour and are only confirmed on phones (DEVICE_TESTS.md, "Audit follow-up").

@@ -1672,3 +1672,37 @@ Everything in this section. On the PC: the contrast of every colour pair in both
 | R-10 | | | | | | |
 | R-11 | | | | | | |
 | R-12 | | | | | | |
+
+## Audit follow-up (D-070)
+
+Same build on both phones, both on the same Wi-Fi, CrossDrop open, Receiving on.
+
+### A-1: Transfers still work on every network mode (S8)
+
+1. Same Wi-Fi: send 3 photos each way. Expected: both arrive.
+2. Android hotspot, iPhone joined: send 3 photos each way. Expected: both arrive.
+3. iPhone Personal Hotspot, Android joined: send 3 photos each way. Expected: both arrive.
+4. If any send fails, paste the receiver's log lines with `refused a request from outside the local network` and the sender's error.
+
+### A-2: Code shown on first contact (S13)
+
+1. On both phones, Settings > Trusted devices > Forget the other phone.
+2. Send one photo. Expected: both phones show the same 6-digit code.
+3. Trust each other (receiver Accept with "Trust this device", sender the same when it asks), send again. Expected: no code on either phone.
+
+### A-3: iOS backup exclusion (S7)
+
+1. On the iPhone, start receiving a large video and tap Pause halfway.
+2. iPhone Settings > [your name] > iCloud > Manage Account Storage > Backups > this iPhone. Expected: CrossDrop's backup size is small (well under the paused video's size). Screenshot it.
+
+### Not checked on devices
+
+Everything in this section. On the PC: the subnet rule, the spoofed-advert rule (S2), the reply and event caps (S9) and the code display rule (S13).
+
+### Results
+
+| Check | Date | iPhone (model, iOS) | Android (model, version) | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- |
+| A-1 | | | | | | |
+| A-2 | | | | | | |
+| A-3 | | | | | | |
