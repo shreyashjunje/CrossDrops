@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../platform/free_space.dart';
+
 /// Where partial and received files live.
 ///
 /// Partial files: `<app support>/crossdrop_incoming/<sessionId>/`, kept
@@ -31,6 +33,8 @@ class AppDirs {
   final String received;
   final String outgoingStaging;
 
+  static bool _excluded = false;
+
   static Future<AppDirs> resolve() async {
     // Not the OS temp or cache folder: both may be purged while the app is
     // closed, which would lose partial files a sender wants to resume.
@@ -43,10 +47,17 @@ class AppDirs {
     } else {
       base = await getApplicationDocumentsDirectory();
     }
-    return AppDirs(
+    final dirs = AppDirs(
       incomingTemp: p.join(support.path, 'crossdrop_incoming'),
       received: Platform.isIOS ? base.path : p.join(base.path, 'CrossDrop'),
       outgoingStaging: p.join(support.path, 'crossdrop_outgoing'),
     );
+    // Android turns backup off in its manifest; iOS needs it per folder.
+    if (Platform.isIOS && !_excluded) {
+      _excluded = true;
+      await excludeFromBackup(dirs.incomingTemp);
+      await excludeFromBackup(dirs.outgoingStaging);
+    }
+    return dirs;
   }
 }

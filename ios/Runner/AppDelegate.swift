@@ -112,18 +112,34 @@ final class BackgroundTaskChannel {
 ///
 /// - `freeBytes {path}` -> Int: space available for user-initiated saves on
 ///   the volume holding `path` (counts purgeable caches, like Files does).
+/// - `excludeFromBackup {path}` -> nil: creates the folder if needed and
+///   keeps it and its contents out of iCloud and computer backups.
 final class StorageChannel {
   private let channel: FlutterMethodChannel
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(name: "crossdrop/storage", binaryMessenger: messenger)
     channel.setMethodCallHandler { call, result in
-      guard call.method == "freeBytes" else {
+      guard call.method == "freeBytes" || call.method == "excludeFromBackup" else {
         result(FlutterMethodNotImplemented)
         return
       }
       guard let path = (call.arguments as? [String: Any])?["path"] as? String else {
         result(FlutterError(code: "bad_args", message: "path missing", details: nil))
+        return
+      }
+      if call.method == "excludeFromBackup" {
+        // Partial and staged files must not reach iCloud backups (audit S7).
+        do {
+          var url = URL(fileURLWithPath: path, isDirectory: true)
+          try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+          var values = URLResourceValues()
+          values.isExcludedFromBackup = true
+          try url.setResourceValues(values)
+          result(nil)
+        } catch {
+          result(FlutterError(code: "exclude_failed", message: nil, details: nil))
+        }
         return
       }
       // The folder may not exist yet; its nearest existing parent is on the

@@ -29,3 +29,18 @@ class ChannelFreeSpace implements FreeSpace {
     }
   }
 }
+
+/// Keeps the folder at [path] (created if missing) and its contents out of
+/// iCloud and computer backups, over the `crossdrop/storage` channel. iOS
+/// only; a failure is logged and ignored.
+Future<void> excludeFromBackup(String path) async {
+  try {
+    await ChannelFreeSpace._channel.invokeMethod<void>('excludeFromBackup', {
+      'path': path,
+    });
+  } on MissingPluginException {
+    // Tests and desktop.
+  } on PlatformException catch (e) {
+    logEvent('storage', 'backup exclusion failed: ${e.code}');
+  }
+}
