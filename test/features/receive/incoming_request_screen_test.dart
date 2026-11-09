@@ -79,9 +79,10 @@ void main() {
     final semantics = tester.ensureSemantics();
     await open(tester, offer(files: 7));
     expect(find.text("Yash's iPhone"), findsOneWidget);
-    expect(find.text('iPhone · Not trusted'), findsOneWidget);
+    expect(find.text('iPhone'), findsOneWidget);
+    expect(find.text('First time from this phone'), findsOneWidget);
     expect(find.textContaining('First time from this device'), findsOneWidget);
-    expect(find.text('wants to send you 7 files · 7.0 MB'), findsOneWidget);
+    expect(find.text('7 photos · 7.0 MB'), findsOneWidget);
     expect(find.text('IMG_0.HEIC'), findsOneWidget);
     expect(find.text('IMG_4.HEIC'), findsOneWidget);
     expect(find.text('IMG_5.HEIC'), findsNothing);
@@ -96,6 +97,8 @@ void main() {
 
   testWidgets('accept with trust ticked', (tester) async {
     final results = await open(tester, offer());
+    await tester.ensureVisible(find.text('Trust this device'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Trust this device'));
     await tester.pump();
     await tester.tap(find.text('Codes match, accept'));
@@ -106,6 +109,8 @@ void main() {
 
   testWidgets('decline never trusts', (tester) async {
     final results = await open(tester, offer());
+    await tester.ensureVisible(find.text('Trust this device'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Trust this device'));
     await tester.pump();
     await tester.tap(find.text('Decline'));
@@ -129,7 +134,7 @@ void main() {
       tester,
       offer(trust: PeerTrust(trusted: device("Yash's iPhone"))),
     );
-    expect(find.text('iPhone · Trusted'), findsOneWidget);
+    expect(find.text('Trusted'), findsOneWidget);
     expect(find.textContaining('First time'), findsNothing);
     expect(codeShown('482913'), findsNothing);
     expect(find.text('Trust this device'), findsNothing);
@@ -148,16 +153,16 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('First time'), findsNothing);
+    expect(find.text('Not the phone you trusted'), findsOneWidget);
     // Still untrusted: the code check applies.
     expect(codeShown('482913'), findsOneWidget);
   });
 
   testWidgets('countdown runs down to expired', (tester) async {
     await open(tester, offer());
-    await tester.scrollUntilVisible(find.textContaining('This request'), 200);
-    expect(find.text('This request expires in 60 s.'), findsOneWidget);
+    expect(find.text('Answer within 60 s'), findsOneWidget);
     await tester.pump(const Duration(seconds: 5));
-    expect(find.text('This request expires in 55 s.'), findsOneWidget);
+    expect(find.text('Answer within 55 s'), findsOneWidget);
     await tester.pump(const Duration(seconds: 60));
     expect(find.text('This request has expired.'), findsOneWidget);
   });
