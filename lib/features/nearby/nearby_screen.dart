@@ -109,7 +109,9 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
 
   Future<void> _scanQr() async {
     final payload = await Navigator.of(context).push<ConnectPayload>(
-      MaterialPageRoute(builder: (_) => const QrScanScreen()),
+      MaterialPageRoute(
+        builder: (_) => QrScanScreen(onTypeAddress: _enterAddress),
+      ),
     );
     if (payload == null || !mounted) return;
     // An Android hotspot code: join its network first (D-055).
