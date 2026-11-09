@@ -109,10 +109,12 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
       _finish();
       return;
     }
-    _controller.nextPage(
-      duration: const Duration(milliseconds: 250),
-      curve: Curves.easeOut,
-    );
+    // Reduced motion: no slide, straight to the next page (D-069).
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) {
+      _controller.jumpToPage(_page + 1);
+      return;
+    }
+    _controller.nextPage(duration: CdMotion.base, curve: CdMotion.enter);
   }
 
   @override
