@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../app/tokens.dart';
+import '../../app/ui/ui.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/security/fingerprint.dart';
 import '../../core/storage/trust_repository.dart';
@@ -20,27 +22,38 @@ class TrustedDevicesScreen extends ConsumerWidget {
     return Scaffold(
       appBar: AppBar(title: const Text('Trusted devices')),
       body: devices.isEmpty
-          ? const Center(
+          ? Center(
               child: Padding(
-                padding: EdgeInsets.all(24),
+                padding: const EdgeInsets.all(CdSpace.gutter),
                 child: Text(
                   'None yet. When you accept files, tick "Trust this '
                   'device" to skip the code check next time.',
                   textAlign: TextAlign.center,
+                  style: CdType.bodyM.copyWith(color: context.cd.text2),
                 ),
               ),
             )
           : ListView(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.fromLTRB(
+                CdSpace.gutter,
+                8,
+                CdSpace.gutter,
+                CdSpace.l,
+              ),
               children: [
+                Text(
+                  'These phones skip the code check. You still tap Accept, '
+                  'unless "Accept without asking" is on.',
+                  style: CdType.bodyM.copyWith(color: context.cd.text2),
+                ),
+                const SizedBox(height: 16),
                 for (final d in devices) _DeviceCard(device: d, repo: repo),
-                const Padding(
-                  padding: EdgeInsets.all(16),
-                  child: Text(
-                    'Accept without asking: files from that device are '
-                    'saved without the Incoming request. Only for your own '
-                    'phones.',
-                  ),
+                const SizedBox(height: 8),
+                Text(
+                  'Accept without asking: files from that device are '
+                  'saved without the Incoming request. Only for your own '
+                  'phones.',
+                  style: CdType.small.copyWith(color: context.cd.text3),
                 ),
               ],
             ),
@@ -59,18 +72,22 @@ class _DeviceCard extends StatelessWidget {
     final d = device;
     final platform = DevicePlatform.tryParse(d.platform);
     return Card(
-      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      margin: const EdgeInsets.only(bottom: 12),
+      clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
           ListTile(
-            leading: PlatformIcon(platform: platform),
+            leading: DeviceAvatar(name: d.name, platform: platform, size: 44),
             title: Text(d.name),
             subtitle: Text(
               '${platformLabel(platform)} · key ${shortFingerprint(d.fingerprint)}',
             ),
             trailing: IconButton(
               tooltip: 'Forget ${d.name}',
-              icon: const Icon(Icons.delete_outline),
+              icon: Icon(
+                Icons.delete_outline_rounded,
+                color: context.cd.danger,
+              ),
               onPressed: () => _forget(context),
             ),
           ),
@@ -93,11 +110,13 @@ class _DeviceCard extends StatelessWidget {
           'Its next transfer needs the code check and your Accept again.',
         ),
         actions: [
-          TextButton(
+          FilledButton(
+            style: CdButtonStyles.secondary(context),
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Cancel'),
           ),
-          TextButton(
+          OutlinedButton(
+            style: CdButtonStyles.danger(context),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Forget'),
           ),

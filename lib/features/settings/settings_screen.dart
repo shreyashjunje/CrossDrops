@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/navigation.dart';
 import '../../app/providers.dart';
+import '../../app/tokens.dart';
 import '../../core/bench/bench.dart';
 import '../../core/protocol/device_name.dart';
 import '../../core/security/device_identity.dart';
@@ -69,102 +70,157 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> {
       body: device == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.fromLTRB(
+                CdSpace.gutter,
+                0,
+                CdSpace.gutter,
+                CdSpace.l,
+              ),
               children: [
                 const _Header('This phone'),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16),
-                  child: TextField(
-                    controller: _name,
-                    decoration: InputDecoration(
-                      labelText: 'Device name',
-                      helperText: 'Other phones see this name.',
-                      errorText: _error,
-                      suffixIcon: IconButton(
-                        tooltip: 'Save name',
-                        icon: const Icon(Icons.check),
-                        onPressed: _save,
+                _Group(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+                      child: TextField(
+                        controller: _name,
+                        decoration: InputDecoration(
+                          labelText: 'Device name',
+                          helperText: 'Other phones see this name.',
+                          errorText: _error,
+                          suffixIcon: IconButton(
+                            tooltip: 'Save name',
+                            icon: const Icon(Icons.check),
+                            onPressed: _save,
+                          ),
+                        ),
+                        maxLength: maxDeviceNameBytes,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _save(),
                       ),
                     ),
-                    maxLength: maxDeviceNameBytes,
-                    textInputAction: TextInputAction.done,
-                    onSubmitted: (_) => _save(),
-                  ),
+                  ],
                 ),
                 const _Header('Receiving'),
-                SwitchListTile(
-                  title: const Text('Ready to receive when CrossDrop is open'),
-                  subtitle: const Text(
-                    'Off: this phone is hidden from other phones and refuses '
-                    'files from devices you have not trusted. Same as the '
-                    'switch on the home screen.',
-                  ),
-                  value: ref.watch(receivingEnabledProvider).value ?? true,
-                  onChanged: (on) => ref
-                      .read(settingsRepositoryProvider)
-                      .setReceivingEnabled(on),
+                _Group(
+                  children: [
+                    SwitchListTile(
+                      title: const Text(
+                        'Ready to receive when CrossDrop is open',
+                      ),
+                      subtitle: const Text(
+                        'Off: this phone is hidden from other phones and refuses '
+                        'files from devices you have not trusted. Same as the '
+                        'switch on the home screen.',
+                      ),
+                      value: ref.watch(receivingEnabledProvider).value ?? true,
+                      onChanged: (on) => ref
+                          .read(settingsRepositoryProvider)
+                          .setReceivingEnabled(on),
+                    ),
+                  ],
                 ),
                 if (me == DevicePlatform.ios) const _FormatSettings(),
                 const _Header('Security'),
-                ListTile(
-                  leading: const Icon(Icons.verified_user_outlined),
-                  title: const Text('Trusted devices'),
-                  subtitle: Text(
-                    trusted == 0
-                        ? 'None'
-                        : '$trusted ${trusted == 1 ? 'device' : 'devices'}',
-                  ),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => pushScreen<void>(
-                    context,
-                    Routes.settings,
-                    const TrustedDevicesScreen(),
-                  ),
+                _Group(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.verified_user_outlined),
+                      title: const Text('Trusted devices'),
+                      subtitle: Text(
+                        trusted == 0
+                            ? 'None'
+                            : '$trusted ${trusted == 1 ? 'device' : 'devices'}',
+                      ),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => pushScreen<void>(
+                        context,
+                        Routes.settings,
+                        const TrustedDevicesScreen(),
+                      ),
+                    ),
+                  ],
                 ),
                 const _Header('Help'),
-                ListTile(
-                  leading: const Icon(Icons.help_outline),
-                  title: const Text("Can't find the other phone?"),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => pushScreen<void>(
-                    context,
-                    Routes.findHelp,
-                    FindHelpScreen(platform: me),
-                  ),
-                ),
-                ListTile(
-                  leading: const Icon(Icons.school_outlined),
-                  title: const Text('Show the introduction'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => pushScreen<void>(
-                    context,
-                    Routes.settings,
-                    OnboardingScreen(replay: true, platform: me),
-                  ),
-                ),
-                if (benchBuild)
-                  ListTile(
-                    leading: const Icon(Icons.speed),
-                    title: const Text('Benchmark (test build)'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => pushScreen<void>(
-                      context,
-                      Routes.settings,
-                      const BenchScreen(),
+                _Group(
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.help_outline),
+                      title: const Text("Can't find the other phone?"),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => pushScreen<void>(
+                        context,
+                        Routes.findHelp,
+                        FindHelpScreen(platform: me),
+                      ),
                     ),
-                  ),
-                ListTile(
-                  leading: const Icon(Icons.info_outline),
-                  title: const Text('About CrossDrop'),
-                  trailing: const Icon(Icons.chevron_right),
-                  onTap: () => pushScreen<void>(
-                    context,
-                    Routes.settings,
-                    const AboutScreen(),
-                  ),
+                    ListTile(
+                      leading: const Icon(Icons.school_outlined),
+                      title: const Text('Show the introduction'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => pushScreen<void>(
+                        context,
+                        Routes.settings,
+                        OnboardingScreen(replay: true, platform: me),
+                      ),
+                    ),
+                    if (benchBuild)
+                      ListTile(
+                        leading: const Icon(Icons.speed),
+                        title: const Text('Benchmark (test build)'),
+                        trailing: const Icon(Icons.chevron_right),
+                        onTap: () => pushScreen<void>(
+                          context,
+                          Routes.settings,
+                          const BenchScreen(),
+                        ),
+                      ),
+                    ListTile(
+                      leading: const Icon(Icons.info_outline),
+                      title: const Text('About CrossDrop'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () => pushScreen<void>(
+                        context,
+                        Routes.settings,
+                        const AboutScreen(),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
+    );
+  }
+}
+
+/// A settings section: one card, rows split by hairlines.
+class _Group extends StatelessWidget {
+  const _Group({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    return Container(
+      decoration: BoxDecoration(
+        color: c.surface1,
+        borderRadius: BorderRadius.circular(CdRadius.button),
+        border: Border.all(color: c.line),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            for (final (i, child) in children.indexed) ...[
+              if (i > 0) Divider(height: 1, color: c.line),
+              child,
+            ],
+          ],
+        ),
+      ),
     );
   }
 }
@@ -176,13 +232,13 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(16, 24, 16, 8),
+    padding: const EdgeInsets.fromLTRB(4, 24, 4, 8),
     child: Semantics(
       header: true,
       child: Text(
-        text,
-        style: Theme.of(context).textTheme.titleSmall
-            ?.copyWith(color: Theme.of(context).colorScheme.primary),
+        text.toUpperCase(),
+        semanticsLabel: text,
+        style: CdType.overline.copyWith(color: context.cd.text2),
       ),
     ),
   );
@@ -201,25 +257,29 @@ class _FormatSettings extends ConsumerWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const _Header('Sending photos to Android'),
-        SwitchListTile(
-          title: const Text('Convert HEIC to JPEG'),
-          subtitle: const Text(
-            'Lowers quality and removes HDR: each photo is re-encoded. Only '
-            'for older Android galleries that cannot open HEIC. Off '
-            '(recommended): photos are sent in original quality, unchanged.',
-          ),
-          value: settings?.convertHeicToJpeg ?? false,
-          onChanged: settings == null ? null : repo.setConvertHeicToJpeg,
-        ),
-        SwitchListTile(
-          title: const Text('Send Live Photo videos'),
-          subtitle: const Text(
-            'Also send the short video of each Live Photo, as a separate '
-            'file. Android cannot play them as Live Photos. Off: only the '
-            'photo is sent.',
-          ),
-          value: settings?.sendLivePhotoVideo ?? false,
-          onChanged: settings == null ? null : repo.setSendLivePhotoVideo,
+        _Group(
+          children: [
+            SwitchListTile(
+              title: const Text('Convert HEIC to JPEG'),
+              subtitle: const Text(
+                'Lowers quality and removes HDR: each photo is re-encoded. Only '
+                'for older Android galleries that cannot open HEIC. Off '
+                '(recommended): photos are sent in original quality, unchanged.',
+              ),
+              value: settings?.convertHeicToJpeg ?? false,
+              onChanged: settings == null ? null : repo.setConvertHeicToJpeg,
+            ),
+            SwitchListTile(
+              title: const Text('Send Live Photo videos'),
+              subtitle: const Text(
+                'Also send the short video of each Live Photo, as a separate '
+                'file. Android cannot play them as Live Photos. Off: only the '
+                'photo is sent.',
+              ),
+              value: settings?.sendLivePhotoVideo ?? false,
+              onChanged: settings == null ? null : repo.setSendLivePhotoVideo,
+            ),
+          ],
         ),
       ],
     );
