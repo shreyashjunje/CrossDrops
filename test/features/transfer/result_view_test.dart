@@ -98,6 +98,9 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('What happened'), findsNothing);
+      // The file rows are under the thumbnails.
+      await tester.ensureVisible(find.text('Open').first);
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Open').first);
       expect(calls.opened, ['IMG_4021.HEIC']);
       await tester.tap(find.text('Done'));
