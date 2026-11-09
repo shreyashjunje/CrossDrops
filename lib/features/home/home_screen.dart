@@ -226,6 +226,7 @@ class _SendHero extends StatelessWidget {
   Widget build(BuildContext context) {
     final c = context.cd;
     return Semantics(
+      container: true,
       button: true,
       label: 'Send photos, videos or files',
       excludeSemantics: true,

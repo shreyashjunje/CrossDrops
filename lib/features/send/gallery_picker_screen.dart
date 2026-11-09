@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:photo_manager/photo_manager.dart';
 
+import '../../app/tokens.dart';
+import '../../app/ui/ui.dart';
 import '../../core/media/format_plan.dart';
 import '../../core/media/thumbnail_queue.dart';
 import '../../core/protocol/models.dart';
@@ -265,13 +267,15 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
                 ),
               )
             : const Text('Photos and videos'),
-        actions: [
-          TextButton(
-            onPressed: n == 0 ? null : _done,
-            child: Text(n == 0 ? 'Add' : 'Add $n'),
-          ),
-        ],
+        leading: IconButton(
+          tooltip: 'Close',
+          onPressed: () => Navigator.of(context).pop(),
+          icon: const Icon(Icons.close_rounded),
+        ),
       ),
+      bottomNavigationBar: _access == _Access.denied
+          ? null
+          : _AddBar(count: n, onAdd: n == 0 ? null : _done),
       body: switch (_access) {
         _Access.checking => const Center(child: CircularProgressIndicator()),
         _Access.denied => const _DeniedView(),
@@ -281,9 +285,10 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
             if (_loadError != null)
               Padding(
                 padding: const EdgeInsets.all(16),
-                child: Text(
-                  'Could not load your photos. Pull down to try again.',
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                child: NoticeCard(
+                  tone: NoticeTone.danger,
+                  icon: Icons.error_outline_rounded,
+                  text: 'Could not load your photos. Pull down to try again.',
                 ),
               ),
             Expanded(child: _grid()),
@@ -382,7 +387,7 @@ class _TileState extends State<_Tile> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.cd;
     final asset = widget.asset;
     final order = widget.order;
     final onTap = widget.onTap;
@@ -409,35 +414,62 @@ class _TileState extends State<_Tile> {
           fit: StackFit.expand,
           children: [
             if (bytes == null)
-              ColoredBox(color: theme.colorScheme.surfaceContainerHighest)
+              ColoredBox(color: c.surface3)
             else
               Image.memory(bytes, fit: BoxFit.cover, gaplessPlayback: true),
             if (video)
               Positioned(
-                right: 4,
-                bottom: 4,
+                left: 5,
+                bottom: 5,
                 child: _Badge(_duration(asset.duration)),
               ),
-            if (asset.isLivePhoto)
-              const Positioned(left: 4, bottom: 4, child: _Badge('LIVE')),
+            if (asset.isLivePhoto && !video)
+              const Positioned(left: 5, bottom: 5, child: _Badge('Live')),
             if (order != null) ...[
-              ColoredBox(color: Colors.black.withValues(alpha: 0.25)),
+              const ColoredBox(color: Color(0x400E1116)),
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: c.accent, width: 3),
+                ),
+              ),
               Positioned(
-                right: 4,
-                top: 4,
-                child: CircleAvatar(
-                  radius: 12,
-                  backgroundColor: theme.colorScheme.primary,
+                right: 6,
+                top: 6,
+                child: Container(
+                  width: 26,
+                  height: 26,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: c.accent,
+                    shape: BoxShape.circle,
+                  ),
                   child: Text(
                     '$order',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: theme.colorScheme.onPrimary,
+                    textScaler: TextScaler.noScaling,
+                    style: CdType.titleS.copyWith(
+                      fontSize: 13,
+                      color: c.onAccent,
                     ),
                   ),
                 ),
               ),
-            ],
+            ] else
+              Positioned(
+                right: 6,
+                top: 6,
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: const Color(0x590E1116),
+                    border: Border.all(
+                      color: const Color(0xFFEEF1F5),
+                      width: 2,
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),
@@ -460,17 +492,74 @@ class _Badge extends StatelessWidget {
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: BoxDecoration(
-      color: Colors.black54,
-      borderRadius: BorderRadius.circular(4),
+      color: CdColors.dark.bg,
+      borderRadius: BorderRadius.circular(6),
     ),
     child: Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
       child: Text(
         text,
-        style: const TextStyle(color: Colors.white, fontSize: 11),
+        textScaler: TextScaler.noScaling,
+        style: CdType.small.copyWith(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: CdColors.dark.text,
+        ),
       ),
     ),
   );
+}
+
+/// How many are picked, and Add.
+class _AddBar extends StatelessWidget {
+  const _AddBar({required this.count, required this.onAdd});
+
+  final int count;
+  final VoidCallback? onAdd;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: c.surface1,
+        border: Border(top: BorderSide(color: c.line)),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            CdSpace.gutter,
+            12,
+            CdSpace.gutter,
+            12,
+          ),
+          child: Row(
+            children: [
+              Expanded(
+                child: Semantics(
+                  liveRegion: true,
+                  child: Text(
+                    count == 0
+                        ? 'Tap photos to choose them'
+                        : '$count selected',
+                    style: CdType.titleS.copyWith(
+                      fontSize: 15,
+                      color: count == 0 ? c.text2 : c.text,
+                    ),
+                  ),
+                ),
+              ),
+              FilledButton(
+                onPressed: onAdd,
+                child: Text(count == 0 ? 'Add' : 'Add $count'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 /// iOS "Limited" or Android 14 "Selected photos" access.
@@ -479,73 +568,86 @@ class _LimitedBanner extends StatelessWidget {
   final Future<void> Function() onChanged;
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Material(
-      color: theme.colorScheme.secondaryContainer,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(
-                'CrossDrop can see only the photos you allowed.',
-                style: TextStyle(color: theme.colorScheme.onSecondaryContainer),
-              ),
-            ),
-            TextButton(
-              onPressed: () async {
-                await PhotoManager.presentLimited(type: RequestType.common);
-                await onChanged();
-              },
-              child: const Text('Select more'),
-            ),
-            TextButton(
-              onPressed: PhotoManager.openSetting,
-              child: const Text('Settings'),
-            ),
-          ],
-        ),
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(CdSpace.gutter, 4, CdSpace.gutter, 12),
+    child: NoticeCard(
+      icon: Icons.photo_library_outlined,
+      text: 'CrossDrop can see only the photos you allowed.',
+      action: Wrap(
+        spacing: 8,
+        children: [
+          TextButton(
+            onPressed: () async {
+              await PhotoManager.presentLimited(type: RequestType.common);
+              await onChanged();
+            },
+            child: const Text('Select more'),
+          ),
+          TextButton(
+            onPressed: PhotoManager.openSetting,
+            child: const Text('Settings'),
+          ),
+        ],
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _DeniedView extends StatelessWidget {
   const _DeniedView();
 
   @override
-  Widget build(BuildContext context) => Center(
-    child: Padding(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.photo_library_outlined, size: 48),
-          const SizedBox(height: 16),
-          Text(
-            'CrossDrop has no access to your photos',
-            style: Theme.of(context).textTheme.titleMedium,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          Text(
-            Platform.isIOS
-                ? 'To send photos and videos, open Settings > CrossDrop > '
-                      'Photos and choose "Full Access" or "Limited Access". '
-                      'You can still send other files with "Files".'
-                : 'To send photos and videos, open Settings and allow '
-                      'CrossDrop to access photos and videos. You can still '
-                      'send other files with "Files".',
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 16),
-          FilledButton(
-            onPressed: PhotoManager.openSetting,
-            child: const Text('Open Settings'),
-          ),
-        ],
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(
+        CdSpace.gutter,
+        48,
+        CdSpace.gutter,
+        24,
       ),
-    ),
-  );
+      children: [
+        Center(
+          child: Container(
+            width: 72,
+            height: 72,
+            decoration: BoxDecoration(
+              color: c.surface2,
+              borderRadius: BorderRadius.circular(CdRadius.card),
+              border: Border.all(color: c.line),
+            ),
+            child: Icon(Icons.lock_outline_rounded, size: 32, color: c.text2),
+          ),
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'CrossDrop can\u2019t see your photos',
+          textAlign: TextAlign.center,
+          style: CdType.h2.copyWith(color: c.text),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          Platform.isIOS
+              ? 'To send photos and videos, open Settings \u203a CrossDrop \u203a '
+                    'Photos and choose "Full Access" or "Limited Access".'
+              : 'To send photos and videos, open Settings and allow '
+                    'CrossDrop to access photos and videos.',
+          textAlign: TextAlign.center,
+          style: CdType.bodyL.copyWith(color: c.text2),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'You can still send other files with "Files".',
+          textAlign: TextAlign.center,
+          style: CdType.bodyM.copyWith(color: c.text3),
+        ),
+        const SizedBox(height: 28),
+        FilledButton(
+          style: CdButtonStyles.wide,
+          onPressed: PhotoManager.openSetting,
+          child: const Text('Open Settings'),
+        ),
+      ],
+    );
+  }
 }
