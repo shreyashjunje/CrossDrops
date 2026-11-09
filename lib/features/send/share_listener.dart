@@ -112,19 +112,24 @@ class _ShareListenerState extends ConsumerState<ShareListener>
     }
     ref.read(sendControllerProvider.notifier).addShared(shared.files);
     final top = topRouteObserver.top;
-    if (top != Routes.nearby && top != Routes.send) {
+    final opened = top != Routes.nearby && top != Routes.send;
+    if (opened) {
       // On top of whatever is open, so a running receive keeps going.
+      // Straight to the radar: the files are already chosen (D-069).
       navigatorKey.currentState?.push(
         MaterialPageRoute<void>(
           settings: const RouteSettings(name: Routes.send),
-          builder: (_) => const SendScreen(),
+          builder: (_) => const SendScreen(chooseOnOpen: true),
         ),
       );
     }
     final n = shared.files.length;
+    final files = '$n ${n == 1 ? 'file' : 'files'}';
     _snack(
       [
-        '$n ${n == 1 ? 'file' : 'files'} ready. Tap Send to choose the phone.',
+        top == Routes.nearby || opened
+            ? '$files ready. Tap the other phone.'
+            : '$files ready. Tap Send to choose the phone.',
         ...notes,
       ].join(' '),
     );

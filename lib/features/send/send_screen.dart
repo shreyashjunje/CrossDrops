@@ -21,11 +21,33 @@ import 'send_controller.dart';
 /// and how big it is, then Send, which asks for the phone to send to.
 /// Layout per D-069: two sources when nothing is picked, then a grid of
 /// previews with an Add tile and one Send button.
-class SendScreen extends ConsumerWidget {
-  const SendScreen({super.key});
+///
+/// With [chooseOnOpen] (files shared from another app), the radar opens
+/// at once; Back from it shows this screen with the files picked.
+class SendScreen extends ConsumerStatefulWidget {
+  const SendScreen({super.key, this.chooseOnOpen = false});
+
+  final bool chooseOnOpen;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<SendScreen> createState() => _SendScreenState();
+}
+
+class _SendScreenState extends ConsumerState<SendScreen> {
+  @override
+  void initState() {
+    super.initState();
+    if (widget.chooseOnOpen) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && ref.read(sendControllerProvider).canSend) {
+          _chooseAndSend(context, ref);
+        }
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final c = context.cd;
     final state = ref.watch(sendControllerProvider);
     final controller = ref.read(sendControllerProvider.notifier);
