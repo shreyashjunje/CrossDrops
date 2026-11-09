@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../app/tokens.dart';
+import '../../app/ui/ui.dart';
 import '../../core/security/device_identity.dart';
+import 'onboarding_art.dart';
 
 /// One page of the introduction.
 class OnboardingPage {
@@ -124,7 +127,13 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
               alignment: AlignmentDirectional.centerEnd,
               child: last
                   ? const SizedBox(height: 48)
-                  : TextButton(onPressed: _finish, child: const Text('Skip')),
+                  : TextButton(
+                      onPressed: _finish,
+                      style: TextButton.styleFrom(
+                        foregroundColor: context.cd.text2,
+                      ),
+                      child: const Text('Skip'),
+                    ),
             ),
             Expanded(
               child: PageView(
@@ -132,18 +141,26 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
                 onPageChanged: (i) => setState(() => _page = i),
                 children: [
                   for (final (i, p) in pages.indexed)
-                    _Page(page: p, index: i, count: pages.length),
+                    _Page(
+                      page: p,
+                      index: i,
+                      count: pages.length,
+                      platform: widget.platform ?? DevicePlatform.current,
+                    ),
                 ],
               ),
             ),
             _Dots(count: pages.length, current: _page),
             Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(
+                CdSpace.gutter,
+                16,
+                CdSpace.gutter,
+                16,
+              ),
               child: FilledButton(
                 onPressed: () => _next(pages.length),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(56),
-                ),
+                style: CdButtonStyles.wide,
                 child: Text(
                   last ? (widget.replay ? 'Close' : 'Get started') : 'Next',
                 ),
@@ -157,36 +174,43 @@ class _OnboardingScreenState extends ConsumerState<OnboardingScreen> {
 }
 
 class _Page extends StatelessWidget {
-  const _Page({required this.page, required this.index, required this.count});
+  const _Page({
+    required this.page,
+    required this.index,
+    required this.count,
+    required this.platform,
+  });
 
   final OnboardingPage page;
   final int index;
   final int count;
+  final DevicePlatform platform;
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    final c = context.cd;
     // Scrolls when the system text size is large.
     return ListView(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: CdSpace.gutter),
       children: [
-        Icon(page.icon, size: 96, color: theme.colorScheme.primary),
-        const SizedBox(height: 24),
+        OnboardingArt(index: index, platform: platform),
+        const SizedBox(height: 16),
         Semantics(
           header: true,
           label: 'Page ${index + 1} of $count. ${page.title}',
           excludeSemantics: true,
-          child: Text(
-            page.title,
-            textAlign: TextAlign.center,
-            style: theme.textTheme.headlineSmall,
-          ),
+          child: Text(page.title, style: CdType.h1.copyWith(color: c.text)),
         ),
-        const SizedBox(height: 16),
-        for (final p in page.body)
+        const SizedBox(height: 12),
+        for (final (i, p) in page.body.indexed)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Text(p, style: theme.textTheme.bodyLarge),
+            child: Text(
+              p,
+              style: (i == 0 ? CdType.bodyL : CdType.bodyM).copyWith(
+                color: i == 0 ? c.text2 : c.text3,
+              ),
+            ),
           ),
       ],
     );
@@ -201,20 +225,23 @@ class _Dots extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
+    final c = context.cd;
+    final reduce = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
     // The page headers already say "Page 1 of 3".
     return ExcludeSemantics(
       child: Row(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           for (var i = 0; i < count; i++)
-            Container(
-              margin: const EdgeInsets.all(4),
-              width: i == current ? 20 : 8,
-              height: 8,
+            AnimatedContainer(
+              duration: reduce ? Duration.zero : CdMotion.base,
+              curve: CdMotion.enter,
+              margin: const EdgeInsets.all(3),
+              width: i == current ? 24 : 6,
+              height: 6,
               decoration: BoxDecoration(
-                color: i == current ? scheme.primary : scheme.outlineVariant,
-                borderRadius: BorderRadius.circular(4),
+                color: i == current ? c.accent : c.lineStrong,
+                borderRadius: BorderRadius.circular(3),
               ),
             ),
         ],
