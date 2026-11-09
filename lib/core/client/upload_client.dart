@@ -73,11 +73,23 @@ class UploadTarget {
   final int size;
 }
 
+/// Largest JSON reply the client reads from the receiver (audit S9).
+const int maxReplyBytes = 1024 * 1024;
+
+/// Largest event message the client accepts before closing the socket.
+const int maxEventChars = 64 * 1024;
+
 /// The receiver's event WebSocket for one session.
 class EventConnection {
   EventConnection._(this._ws)
     : events = _ws
-          .where((m) => m is String)
+          .where((m) {
+            if (m is! String) return false;
+            if (m.length <= maxEventChars) return true;
+            // A receiver that floods us is not one we keep listening to.
+            unawaited(_ws.close(WebSocketStatus.messageTooBig));
+            return false;
+          })
           .map((m) {
             try {
               return SessionEvent.fromJson(jsonDecode(m as String));
@@ -644,7 +656,18 @@ class UploadClient {
   }
 
   static Future<Map<String, Object?>> _decode(HttpClientResponse res) async {
-    final text = await res.transform(utf8.decoder).join();
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in res) {
+      bytes.add(chunk);
+      if (bytes.length > maxReplyBytes) {
+        throw UploadException(
+          'bad_response',
+          'response too large',
+          statusCode: res.statusCode,
+        );
+      }
+    }
+    final text = utf8.decode(bytes.takeBytes(), allowMalformed: true);
     Object? json;
     try {
       json = jsonDecode(text);

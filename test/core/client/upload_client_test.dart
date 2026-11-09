@@ -130,4 +130,44 @@ void main() {
       throwsA(isA<UploadException>().having((e) => e.code, 'code', 'network')),
     );
   });
+
+  test('refuses a reply larger than maxReplyBytes', () async {
+    final server = await SecureServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+      identity.serverContext(),
+    );
+    addTearDown(server.close);
+    server.listen((socket) {
+      socket.listen((data) {
+        final head = latin1.decode(data.take(64).toList());
+        if (answerAuth(socket, head)) return;
+        if (!head.startsWith('GET ')) return;
+        final body = '{"pad":"${'x' * (maxReplyBytes + 1)}"}';
+        socket.write(
+          'HTTP/1.1 200 OK\r\n'
+          'content-type: application/json\r\n'
+          'content-length: ${body.length}\r\n'
+          'connection: close\r\n\r\n$body',
+        );
+        socket.close();
+      }, onError: (_) {});
+    });
+
+    final client = UploadClient(
+      host: '127.0.0.1',
+      port: server.port,
+      fingerprint: identity.fingerprint,
+      credentials: sender,
+    );
+    addTearDown(client.close);
+    await expectLater(
+      client.fileStatus(UploadTarget(sessionId: 's', fileId: 'f1', size: 0)),
+      throwsA(
+        isA<UploadException>()
+            .having((e) => e.code, 'code', 'bad_response')
+            .having((e) => e.message, 'message', 'response too large'),
+      ),
+    );
+  });
 }
