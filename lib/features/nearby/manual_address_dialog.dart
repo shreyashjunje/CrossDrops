@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../app/tokens.dart';
 import '../../core/protocol/connect_payload.dart';
 
 /// Validates a typed IPv4 address: a dotted literal on a local network.
@@ -51,25 +52,33 @@ class _ManualAddressDialogState extends State<ManualAddressDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: const Text('Enter address'),
+      title: const Text('Type the address'),
       content: Form(
         key: _form,
         child: Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Type the IP and port shown on the other phone.'),
+            const Text(
+              'On the other phone: Show my QR code \u203a No camera? Type '
+              'the address. Copy the two numbers here.',
+            ),
+            const SizedBox(height: 16),
             TextFormField(
               controller: _host,
               autofocus: true,
-              decoration: const InputDecoration(labelText: 'IP address'),
+              style: CdType.h3,
+              decoration: const InputDecoration(labelText: 'Address'),
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
               validator: (v) => validateManualHost(v ?? ''),
               textInputAction: TextInputAction.next,
             ),
+            const SizedBox(height: 12),
             TextFormField(
               controller: _port,
+              style: CdType.h3,
               decoration: const InputDecoration(labelText: 'Port'),
               keyboardType: TextInputType.number,
               validator: (v) => validateManualPort(v ?? ''),
