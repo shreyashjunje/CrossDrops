@@ -98,7 +98,12 @@ void main() {
     expect(find.text('Sending to Pixel 8'), findsOneWidget);
     expect(find.text('Sending 2 of 2'), findsOneWidget);
     expect(find.text('297.0 MB of 412.0 MB sent · 72%'), findsOneWidget);
-    expect(find.text('18.4 MB/s · 7 s left'), findsOneWidget);
+    expect(find.text('18.4 MB/s'), findsOneWidget);
+    expect(find.text('7 s left'), findsOneWidget);
+    final total = tester.getSemantics(find.bySemanticsLabel('Total progress'));
+    expect(total.value, '72%');
+    // The file list is under the big numbers.
+    await tester.scrollUntilVisible(find.text('IMG_4021.MOV'), 200);
     expect(find.text('IMG_4022.HEIC'), findsOneWidget);
     expect(find.text('IMG_4021.MOV'), findsOneWidget);
     expect(find.text('71%'), findsOneWidget);
@@ -110,8 +115,6 @@ void main() {
       find.bySemanticsLabel(RegExp(r'^IMG_4021\.MOV\s+[\d.]+ MB\s+71%$')),
       findsOneWidget,
     );
-    final total = tester.getSemantics(find.bySemanticsLabel('Total progress'));
-    expect(total.value, '72%');
     semantics.dispose();
   });
 

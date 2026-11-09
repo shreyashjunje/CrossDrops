@@ -3,6 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/media_providers.dart';
 import '../../app/navigation.dart';
+import '../../app/tokens.dart';
+import '../../app/ui/ui.dart';
+import '../../platform/haptics.dart';
 import '../../core/media/prepare.dart';
 import '../../core/media/save_target.dart';
 import '../../core/security/device_identity.dart';
@@ -27,6 +30,7 @@ class TransferScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final id = receiveSessionId;
+    _listenForHaptics(ref, id);
     final Widget body;
     if (id == null) {
       final s = ref.watch(sendControllerProvider);
@@ -117,6 +121,42 @@ class TransferScreen extends ConsumerWidget {
     );
   }
 
+  /// Accepted (sender), done and failed get a haptic (D-069).
+  static void _listenForHaptics(WidgetRef ref, String? id) {
+    void play(TransferStage? was, TransferStage? now, {required bool sending}) {
+      if (now == null || now == was) return;
+      final haptics = ref.read(hapticsProvider);
+      if (sending &&
+          now == TransferStage.running &&
+          was == TransferStage.waiting) {
+        haptics.play(HapticMoment.accepted);
+      } else if (now == TransferStage.done) {
+        haptics.play(HapticMoment.done);
+      } else if (now == TransferStage.failed || now == TransferStage.rejected) {
+        haptics.play(HapticMoment.failed);
+      }
+    }
+
+    if (id == null) {
+      ref.listen<TransferStage?>(
+        sendControllerProvider.select(
+          (s) => TransferView.fromSend(s.snapshot, peerName: '')?.stage,
+        ),
+        (was, now) => play(was, now, sending: true),
+      );
+    } else {
+      ref.listen<TransferStage?>(
+        receiveStateProvider.select((s) {
+          final session = s.sessions[id];
+          return session == null
+              ? null
+              : TransferView.fromIncoming(session).stage;
+        }),
+        (was, now) => play(was, now, sending: false),
+      );
+    }
+  }
+
   static void _close(BuildContext context) =>
       Navigator.of(context).popUntil((r) => r.isFirst);
 
@@ -173,11 +213,13 @@ class TransferScreen extends ConsumerWidget {
           'unfinished parts are deleted.',
         ),
         actions: [
-          TextButton(
+          FilledButton(
+            style: CdButtonStyles.secondary(context),
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Keep going'),
           ),
-          TextButton(
+          OutlinedButton(
+            style: CdButtonStyles.danger(context),
             onPressed: () => Navigator.of(context).pop(true),
             child: const Text('Cancel transfer'),
           ),
@@ -200,27 +242,60 @@ class _Preparing extends StatelessWidget {
   final VoidCallback onCancel;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(24),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        LinearProgressIndicator(value: fraction),
-        const SizedBox(height: 16),
-        Semantics(
-          liveRegion: true,
-          child: Text(
-            text,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(CdSpace.gutter),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Spacer(),
+            Center(
+              child: fraction == null
+                  ? SizedBox.square(
+                      dimension: 72,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 6,
+                        color: c.accentInk,
+                        backgroundColor: c.surface3,
+                      ),
+                    )
+                  : ProgressRing(value: fraction!, size: 72, stroke: 6),
+            ),
+            const SizedBox(height: 24),
+            Text(
+              'Getting the files ready',
+              textAlign: TextAlign.center,
+              style: CdType.h2.copyWith(color: c.text),
+            ),
+            const SizedBox(height: 8),
+            Semantics(
+              liveRegion: true,
+              child: Text(
+                text,
+                textAlign: TextAlign.center,
+                style: CdType.bodyM.copyWith(color: c.text2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            const NoticeCard(
+              icon: Icons.cloud_download_outlined,
+              text:
+                  'Photos kept only in iCloud download first, in full '
+                  'quality. Keep this screen open.',
+            ),
+            const Spacer(),
+            OutlinedButton(
+              style: CdButtonStyles.danger(context).merge(CdButtonStyles.wide),
+              onPressed: onCancel,
+              child: const Text('Cancel'),
+            ),
+          ],
         ),
-        const SizedBox(height: 24),
-        OutlinedButton(onPressed: onCancel, child: const Text('Cancel')),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
 
 class _NotSent extends StatelessWidget {
@@ -230,26 +305,46 @@ class _NotSent extends StatelessWidget {
   final VoidCallback onBack;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.all(24),
-    child: Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Icon(
-          Icons.info_outline,
-          size: 56,
-          color: Theme.of(context).colorScheme.onSurfaceVariant,
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(CdSpace.gutter),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Spacer(),
+            Center(
+              child: Container(
+                width: 72,
+                height: 72,
+                decoration: BoxDecoration(
+                  color: c.surface2,
+                  borderRadius: BorderRadius.circular(CdRadius.card),
+                  border: Border.all(color: c.line),
+                ),
+                child: Icon(
+                  Icons.info_outline_rounded,
+                  size: 32,
+                  color: c.text2,
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: CdType.h3.copyWith(color: c.text),
+            ),
+            const Spacer(),
+            FilledButton(
+              style: CdButtonStyles.wide,
+              onPressed: onBack,
+              child: const Text('Back'),
+            ),
+          ],
         ),
-        const SizedBox(height: 16),
-        Text(
-          message,
-          textAlign: TextAlign.center,
-          style: Theme.of(context).textTheme.titleMedium,
-        ),
-        const SizedBox(height: 24),
-        FilledButton(onPressed: onBack, child: const Text('Back')),
-      ],
-    ),
-  );
+      ),
+    );
+  }
 }
