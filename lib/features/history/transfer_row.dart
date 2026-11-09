@@ -5,6 +5,7 @@ import '../../app/ui/ui.dart';
 import '../../core/storage/transfer_repository.dart';
 import '../transfer/transfer_format.dart';
 import '../transfer/transfer_view.dart';
+import '../transfer/widgets.dart';
 
 /// A status word and tone for a stored transfer: "Sent", "Unfinished"...
 (String, BadgeTone) transferTag(TransferView v, {required bool sending}) =>
@@ -48,8 +49,11 @@ class TransferRow extends StatelessWidget {
     final (tag, tone) = transferTag(v, sending: sending);
     final quiet =
         v.stage == TransferStage.cancelled || v.stage == TransferStage.rejected;
-    final meta =
-        '${formatSize(s.totalBytes)} · ${formatTime(s.createdAt.toLocal())}';
+    final meta = [
+      formatSize(s.totalBytes),
+      platformLabel(v.peerPlatform),
+      formatTime(s.createdAt.toLocal()),
+    ].join(' · ');
     return MergeSemantics(
       child: InkWell(
         onTap: onTap,

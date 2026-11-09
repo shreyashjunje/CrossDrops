@@ -65,21 +65,32 @@ void main() {
     await tester.runAsync(() => Future<void>.delayed(Duration.zero));
     await tester.pumpAndSettle();
     expect(find.text('Today'), findsOneWidget);
-    expect(find.text("To Yash's iPhone"), findsOneWidget);
-    expect(find.text('1 file · 2.0 MB · iPhone'), findsOneWidget);
-    expect(find.text('Done'), findsOneWidget);
-    expect(find.text('From Pixel 8'), findsOneWidget);
-    expect(find.text('2 files · 4.0 MB · Android phone'), findsOneWidget);
+    expect(find.text("1 photo to Yash's iPhone"), findsOneWidget);
+    expect(find.textContaining('2.0 MB · iPhone · '), findsOneWidget);
+    expect(find.text('Sent'), findsWidgets);
+    expect(find.text('2 photos from Pixel 8'), findsOneWidget);
+    expect(find.textContaining('4.0 MB · Android phone · '), findsOneWidget);
     expect(find.text('Failed'), findsOneWidget);
     final semantics = tester.ensureSemantics();
-    // One node per row: "Sent To Yash's iPhone ... Done".
+    // One node per row: "Sent 1 photo to Yash's iPhone ... Sent".
     expect(
-      find.bySemanticsLabel(RegExp(r"^Sent\s+To Yash's iPhone")),
+      find.bySemanticsLabel(RegExp(r"^Sent\s+1 photo to Yash's iPhone")),
       findsOneWidget,
     );
     semantics.dispose();
 
-    await tester.tap(find.text('From Pixel 8'));
+    // Filters: only what was received.
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Received'));
+    await tester.pumpAndSettle();
+    expect(find.text("1 photo to Yash's iPhone"), findsNothing);
+    expect(find.text('2 photos from Pixel 8'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Unfinished'));
+    await tester.pumpAndSettle();
+    expect(find.text('Nothing here yet.'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'All'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('2 photos from Pixel 8'));
     await tester.pumpAndSettle();
     expect(find.text('Nothing could be saved'), findsOneWidget);
   });

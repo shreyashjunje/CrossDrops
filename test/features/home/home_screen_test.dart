@@ -90,12 +90,7 @@ void main() {
     await tester.tap(find.text('History'));
     await settle();
     expect(find.text('Send'), findsNothing);
-    expect(
-      find.text(
-        'No transfers yet. Files you send and receive are listed here.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('No transfers yet'), findsOneWidget);
 
     // System Back on a tab other than Home goes to Home, not out of the app.
     await tester.binding.handlePopRoute();
