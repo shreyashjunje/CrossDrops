@@ -9,6 +9,8 @@ import 'dart:typed_data';
 import 'package:crossdrop/core/engine/chunked_reader.dart';
 import 'package:crossdrop/core/engine/fd_file.dart';
 import 'package:crossdrop/core/engine/sha256_isolate.dart';
+import 'package:crossdrop/core/engine/tree_hash.dart';
+import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -132,4 +134,51 @@ void main() {
       FdFile(fd).close();
     }
   });
+
+  test('a stripe of a descriptor, through the worker and blocking', () async {
+    // D-071: upload workers read their blocks straight from the descriptor.
+    final path = p.join(dir.path, 'f.bin');
+    final data = bytes(300 * 1024 + 9);
+    File(path).writeAsBytesSync(data);
+    const stripe = StripeSpec(index: 1, count: 3, block: 64 * 1024);
+    final want = [
+      for (final r in stripe.ranges(1000, data.length))
+        ...data.sublist(r.start, r.end),
+    ];
+    final fd = FdFile.openPath(path);
+    try {
+      for (final blocking in [false, true]) {
+        final got = await readSourceRanges(
+          FdSource(fd),
+          stripe.ranges(1000, data.length),
+          chunkSize: 50000,
+          blocking: blocking,
+        ).toList();
+        expect([for (final c in got) ...c], want, reason: '$blocking');
+        expect(got.every((c) => c.length <= 50000), isTrue);
+      }
+    } finally {
+      FdFile(fd).close();
+    }
+  });
+
+  test(
+    'the tree hash of a descriptor equals the tree hash of its bytes',
+    () async {
+      final path = p.join(dir.path, 'g.bin');
+      final data = bytes(3 * treeLeafBytes + 77);
+      File(path).writeAsBytesSync(data);
+      final fromBytes = await TreeHasher.spawn();
+      await fromBytes.add(data);
+      final fd = FdFile.openPath(path);
+      try {
+        final fromFd = await TreeHasher.spawn(workers: 3);
+        await fromFd.addSourcePrefix(FdSource(fd), data.length);
+        expect(await fromFd.close(), await fromBytes.close());
+        await fromFd.exited;
+      } finally {
+        FdFile(fd).close();
+      }
+    },
+  );
 }

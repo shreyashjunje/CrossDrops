@@ -2,6 +2,7 @@
 // Not part of the app. Uses the same server and client code as the app.
 //
 //   dart run tool/crossdrop_cli.dart receive [--port 8443] [--dir received]
+//                                            [--lanes 3]
 //   dart run tool/crossdrop_cli.dart send <ip> <port> <file>
 //   dart run tool/crossdrop_cli.dart fake-qr <ip> <port> [out.svg]
 //
@@ -55,9 +56,12 @@ Usage:
 Future<void> _receive(List<String> args) async {
   var port = 8443;
   var dir = 'received';
+  // As the app; 0 takes every upload on the main port, as before D-071.
+  var lanes = ReceiveServer.maxParallelUploads;
   for (var i = 0; i + 1 < args.length; i += 2) {
     if (args[i] == '--port') port = int.parse(args[i + 1]);
     if (args[i] == '--dir') dir = args[i + 1];
+    if (args[i] == '--lanes') lanes = int.parse(args[i + 1]);
   }
   final saveDir = p.absolute(dir);
   final tempDir = p.join(Directory.systemTemp.path, 'crossdrop_cli_incoming');
@@ -83,6 +87,7 @@ Future<void> _receive(List<String> args) async {
       return true;
     },
     port: port,
+    dataLanes: lanes,
   );
   stdout.writeln('Receiving on port ${server.port}. Saving to $saveDir');
   stdout.writeln(
@@ -160,7 +165,9 @@ Future<void> _send(List<String> args) async {
     credentials: await DeviceCredentials.generate(),
   );
   try {
-    final pending = client.offerFile(path);
+    // What the receiver offers: data ports, stripes, the tree hash (D-071).
+    final receiver = await client.info();
+    final pending = client.offerFile(path, receiver: receiver);
     // The code is known once the offer is authenticated.
     unawaited(
       Future<void>.delayed(const Duration(seconds: 1), () {
@@ -175,6 +182,7 @@ Future<void> _send(List<String> args) async {
     var lastPrint = 0;
     final sha = await client.transfer(
       target,
+      receiver: receiver,
       onProgress: (pr) {
         if (watch.elapsedMilliseconds - lastPrint > 500 || pr.fraction == 1) {
           lastPrint = watch.elapsedMilliseconds;

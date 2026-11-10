@@ -175,6 +175,75 @@ class SenderInfo {
   }
 }
 
+/// One of several connections that carry a file's bytes side by side
+/// (D-071): `PUT ...?offset=N&stripe=I&stripes=C&block=B`.
+///
+/// The bytes from the offset on are cut into blocks of [block] bytes;
+/// connection [index] carries blocks `index`, `index + count`, ... The
+/// receiver puts the blocks back in order, so the file is still written
+/// from front to back and resume and the SHA-256 work as with one
+/// connection.
+class StripeSpec {
+  const StripeSpec({
+    required this.index,
+    required this.count,
+    this.block = defaultBlock,
+  });
+
+  final int index;
+  final int count;
+  final int block;
+
+  static const int maxCount = 4;
+  static const int defaultBlock = 1024 * 1024;
+  static const int minBlock = 64 * 1024;
+  static const int maxBlock = 4 * 1024 * 1024;
+
+  /// Null without a `stripe` parameter. Throws [FormatError] for values
+  /// out of range.
+  static StripeSpec? fromQuery(Map<String, String> q) {
+    if (!q.containsKey('stripe')) return null;
+    final index = int.tryParse(q['stripe'] ?? '');
+    final count = int.tryParse(q['stripes'] ?? '');
+    final block = int.tryParse(q['block'] ?? '');
+    if (index == null ||
+        count == null ||
+        block == null ||
+        count < 2 ||
+        count > maxCount ||
+        index < 0 ||
+        index >= count ||
+        block < minBlock ||
+        block > maxBlock) {
+      throw FormatError('invalid stripe');
+    }
+    return StripeSpec(index: index, count: count, block: block);
+  }
+
+  Map<String, String> toQuery() => {
+    'stripe': '$index',
+    'stripes': '$count',
+    'block': '$block',
+  };
+
+  /// The parts of bytes [offset, size) this connection carries, in order.
+  Iterable<({int start, int end})> ranges(int offset, int size) sync* {
+    final step = block * count;
+    for (var start = offset + index * block; start < size; start += step) {
+      final end = start + block;
+      yield (start: start, end: end < size ? end : size);
+    }
+  }
+
+  /// How many of [total] bytes this connection carries.
+  int share(int total) {
+    final full = total ~/ block;
+    final mine = full > index ? (full - 1 - index) ~/ count + 1 : 0;
+    final tail = full % count == index ? total % block : 0;
+    return mine * block + tail;
+  }
+}
+
 /// Reply to `GET /v1/info`.
 class DeviceInfo {
   const DeviceInfo({
@@ -183,6 +252,9 @@ class DeviceInfo {
     required this.platform,
     this.versions = const [protocolVersion],
     this.uploadSlots = 1,
+    this.dataPorts = const [],
+    this.stripes = 1,
+    this.treeHash = false,
   });
 
   final String id;
@@ -196,8 +268,22 @@ class DeviceInfo {
   /// Absent in replies from older versions, which take one at a time.
   final int uploadSlots;
 
+  /// Extra ports, same address and certificate, that take only the `PUT`
+  /// of file bytes and decrypt it off the receiver's main isolate (D-071).
+  /// Empty for older versions: everything goes to the main port.
+  final List<int> dataPorts;
+
+  /// Connections one file's bytes may be spread over (D-071). 1 for older
+  /// versions, which take a file on one connection.
+  final int stripes;
+
+  /// The receiver checks a file by its tree hash when the upload asks for
+  /// it with `hash=tree` (D-071). False for older versions.
+  final bool treeHash;
+
   /// The most a receiver may ask for; a larger claim is cut to this.
   static const int maxUploadSlots = 8;
+  static const int maxDataPorts = 8;
 
   DeviceInfo withUploadSlots(int slots) => DeviceInfo(
     id: id,
@@ -205,6 +291,24 @@ class DeviceInfo {
     platform: platform,
     versions: versions,
     uploadSlots: slots,
+    dataPorts: dataPorts,
+    stripes: stripes,
+    treeHash: treeHash,
+  );
+
+  DeviceInfo withDataPlane({
+    List<int>? dataPorts,
+    int? stripes,
+    bool? treeHash,
+  }) => DeviceInfo(
+    id: id,
+    name: name,
+    platform: platform,
+    versions: versions,
+    uploadSlots: uploadSlots,
+    dataPorts: dataPorts ?? this.dataPorts,
+    stripes: stripes ?? this.stripes,
+    treeHash: treeHash ?? this.treeHash,
   );
 
   Map<String, Object?> toJson() => {
@@ -213,6 +317,9 @@ class DeviceInfo {
     'platform': platform,
     'versions': versions,
     if (uploadSlots != 1) 'uploadSlots': uploadSlots,
+    if (dataPorts.isNotEmpty) 'dataPorts': dataPorts,
+    if (stripes != 1) 'stripes': stripes,
+    if (treeHash) 'treeHash': true,
   };
 
   factory DeviceInfo.fromJson(Object? json) {
@@ -222,13 +329,19 @@ class DeviceInfo {
     final platform = json['platform'];
     final versions = json['versions'];
     final slots = json['uploadSlots'] ?? 1;
+    final ports = json['dataPorts'] ?? const <Object?>[];
+    final stripes = json['stripes'] ?? 1;
     if (id is! String ||
         name is! String ||
         platform is! String ||
         versions is! List ||
         versions.any((v) => v is! int) ||
         slots is! int ||
-        slots < 1) {
+        slots < 1 ||
+        ports is! List ||
+        ports.any((p) => p is! int || p < 1 || p > 65535) ||
+        stripes is! int ||
+        stripes < 1) {
       throw FormatError('invalid info');
     }
     return DeviceInfo(
@@ -237,6 +350,9 @@ class DeviceInfo {
       platform: platform,
       versions: versions.cast<int>(),
       uploadSlots: slots > maxUploadSlots ? maxUploadSlots : slots,
+      dataPorts: ports.take(maxDataPorts).cast<int>().toList(),
+      stripes: stripes > StripeSpec.maxCount ? StripeSpec.maxCount : stripes,
+      treeHash: json['treeHash'] == true,
     );
   }
 }
@@ -372,20 +488,25 @@ class FileStatus {
 
 /// Body of `POST .../files/{fileId}/complete`.
 class CompleteRequest {
-  const CompleteRequest({required this.sha256});
+  const CompleteRequest({required this.sha256, this.tree = false});
 
-  /// Lowercase hex SHA-256 of the whole file.
+  /// Lowercase hex SHA-256 of the whole file; with [tree], of its 1 MB
+  /// leaves' SHA-256 values (the tree hash, D-071).
   final String sha256;
 
-  Map<String, Object?> toJson() => {'sha256': sha256};
+  /// Sent as `sha256t` instead of `sha256`.
+  final bool tree;
+
+  Map<String, Object?> toJson() => {tree ? 'sha256t' : 'sha256': sha256};
 
   factory CompleteRequest.fromJson(Object? json) {
     if (json is! Map<String, Object?>) throw FormatError('not an object');
-    final sha = json['sha256'];
+    final tree = json.containsKey('sha256t');
+    final sha = json[tree ? 'sha256t' : 'sha256'];
     if (sha is! String || !RegExp(r'^[0-9a-fA-F]{64}$').hasMatch(sha)) {
       throw FormatError('invalid sha256');
     }
-    return CompleteRequest(sha256: sha.toLowerCase());
+    return CompleteRequest(sha256: sha.toLowerCase(), tree: tree);
   }
 }
 

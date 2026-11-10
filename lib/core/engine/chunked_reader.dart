@@ -110,6 +110,55 @@ Stream<Uint8List> _readFd(int fd, int start, int? end, int chunkSize) async* {
   }
 }
 
+/// Streams the given [ranges] of [source], in order, in chunks of at most
+/// [chunkSize]: the whole rest of a file, or one stripe of it (D-071).
+///
+/// With [blocking], descriptor reads block the calling isolate instead of
+/// going through the [FdWorker]: for upload workers, which are background
+/// isolates already.
+Stream<Uint8List> readSourceRanges(
+  ByteSource source,
+  Iterable<({int start, int end})> ranges, {
+  int chunkSize = defaultChunkSize,
+  bool blocking = false,
+}) async* {
+  final RandomAccessFile? raf;
+  final Future<Uint8List> Function(int pos, int want) read;
+  switch (source) {
+    case PathSource(:final path):
+      final file = raf = await File(path).open();
+      read = (pos, want) async {
+        await file.setPosition(pos);
+        return file.read(want);
+      };
+    case FdSource(:final fd):
+      raf = null;
+      if (blocking) {
+        final file = FdFile(fd);
+        read = (pos, want) async => file.readAt(pos, want);
+      } else {
+        final io = await FdWorker.instance;
+        read = (pos, want) => io.readAt(fd, pos, want);
+      }
+  }
+  try {
+    for (final r in ranges) {
+      var pos = r.start;
+      while (pos < r.end) {
+        final want = r.end - pos < chunkSize ? r.end - pos : chunkSize;
+        final chunk = await read(pos, want);
+        if (chunk.isEmpty) {
+          throw const FileSystemException('file shorter than expected');
+        }
+        pos += chunk.length;
+        yield chunk;
+      }
+    }
+  } finally {
+    await raf?.close();
+  }
+}
+
 /// Blocking chunk reader for background isolates (the hash worker).
 /// Yields between chunks so the isolate can see a stop request.
 Stream<Uint8List> readSourceChunksInIsolate(

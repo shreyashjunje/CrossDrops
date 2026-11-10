@@ -5,6 +5,32 @@ import 'dart:typed_data';
 import 'package:crypto/crypto.dart';
 
 import 'chunked_reader.dart';
+import 'tree_hash.dart';
+
+/// A file's hash, computed off the calling isolate: the plain SHA-256
+/// ([Sha256Isolate]) or the tree hash ([TreeHasher], D-071).
+abstract interface class FileHasher {
+  /// Adds the next bytes of the file.
+  Future<void> add(Uint8List chunk);
+
+  /// Hashes bytes [0, length) of [source], read in the background.
+  Future<void> addSourcePrefix(ByteSource source, int length);
+
+  /// Returns the lowercase hex digest and stops the workers.
+  Future<String> close();
+
+  /// Stops without a digest.
+  void abort();
+
+  /// Completes when the workers have stopped and released their files.
+  Future<void> get exited;
+
+  /// A new hasher for a file of [length] bytes.
+  static Future<FileHasher> spawn({required bool tree, required int length}) =>
+      tree
+      ? TreeHasher.spawn(workers: TreeHasher.workersFor(length))
+      : Sha256Isolate.spawn();
+}
 
 /// Incremental SHA-256 computed in a background isolate, so hashing never
 /// blocks the UI isolate (CLAUDE.md hard rule 3).
@@ -12,7 +38,7 @@ import 'chunked_reader.dart';
 /// Chunks are handed over with [TransferableTypedData]. At most
 /// [maxInFlight] chunks wait in the worker; [add] waits beyond that, so a
 /// slow hasher slows the stream instead of growing memory.
-class Sha256Isolate {
+class Sha256Isolate implements FileHasher {
   Sha256Isolate._(
     this._isolate,
     this._toWorker,
@@ -36,6 +62,7 @@ class Sha256Isolate {
   final int maxInFlight;
 
   /// Completes when the worker isolate has stopped and released its files.
+  @override
   final Future<void> exited;
 
   int _inFlight = 0;
@@ -102,12 +129,14 @@ class Sha256Isolate {
       addSourcePrefix(PathSource(path), length);
 
   /// [addFilePrefix] for any [ByteSource] (a descriptor on Android).
+  @override
   Future<void> addSourcePrefix(ByteSource source, int length) async {
     if (length <= 0) return;
     await _send(['file', source, length]);
   }
 
   /// Adds [chunk] to the hash. Waits if too many chunks are in flight.
+  @override
   Future<void> add(Uint8List chunk) async {
     if (chunk.isEmpty) return;
     await _send([
@@ -129,6 +158,7 @@ class Sha256Isolate {
   }
 
   /// Returns the lowercase hex digest and stops the worker.
+  @override
   Future<String> close() {
     _checkUsable();
     _closed = true;
@@ -140,6 +170,7 @@ class Sha256Isolate {
   /// Stops the worker without a digest. Later [add] and [addFilePrefix]
   /// calls are ignored, so a producer that is still running when its
   /// transfer is cancelled does not fail.
+  @override
   void abort() {
     if (_aborted) return;
     _aborted = true;
@@ -185,7 +216,7 @@ class BackgroundFileHash {
   BackgroundFileHash._(this._done);
 
   final Completer<String> _done;
-  Sha256Isolate? _hasher;
+  FileHasher? _hasher;
   bool _aborted = false;
   late final Future<void> _running;
 
@@ -193,16 +224,24 @@ class BackgroundFileHash {
       startSource(PathSource(path), length);
 
   /// [start] for any [ByteSource]. The source must stay open until
-  /// [digest] completes or [abort] returns.
-  static BackgroundFileHash startSource(ByteSource source, int length) {
+  /// [digest] completes or [abort] returns. With [tree], the tree hash,
+  /// read and hashed on several cores (D-071).
+  static BackgroundFileHash startSource(
+    ByteSource source,
+    int length, {
+    bool tree = false,
+  }) {
     final h = BackgroundFileHash._(Completer<String>());
-    h._running = h._run(source, length);
+    h._running = h._run(source, length, tree);
     return h;
   }
 
-  Future<void> _run(ByteSource source, int length) async {
+  Future<void> _run(ByteSource source, int length, bool tree) async {
     try {
-      final hasher = _hasher = await Sha256Isolate.spawn(maxInFlight: 1);
+      final hasher = _hasher = await FileHasher.spawn(
+        tree: tree,
+        length: length,
+      );
       if (_aborted) return hasher.abort();
       await hasher.addSourcePrefix(source, length);
       final digest = await hasher.close();

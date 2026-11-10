@@ -45,6 +45,134 @@ void main() {
     });
   });
 
+  group('data plane (D-071)', () {
+    const base = {
+      'id': 'd',
+      'name': 'n',
+      'platform': 'android',
+      'versions': [2],
+    };
+
+    test('older replies: no data ports, one connection, plain hash', () {
+      final info = DeviceInfo.fromJson(base);
+      expect(info.dataPorts, isEmpty);
+      expect(info.stripes, 1);
+      expect(info.treeHash, isFalse);
+      expect(info.toJson().keys, isNot(contains('dataPorts')));
+      expect(info.toJson().keys, isNot(contains('stripes')));
+      expect(info.toJson().keys, isNot(contains('treeHash')));
+    });
+
+    test('round trip, with caps', () {
+      final info = const DeviceInfo(id: 'd', name: 'n', platform: 'ios')
+          .withUploadSlots(3)
+          .withDataPlane(dataPorts: [5001, 5002], stripes: 3, treeHash: true);
+      final back = DeviceInfo.fromJson(info.toJson());
+      expect(back.dataPorts, [5001, 5002]);
+      expect(back.stripes, 3);
+      expect(back.treeHash, isTrue);
+      expect(back.uploadSlots, 3);
+      final many = DeviceInfo.fromJson({
+        ...base,
+        'dataPorts': [for (var i = 1; i <= 20; i++) i],
+        'stripes': 99,
+      });
+      expect(many.dataPorts, hasLength(DeviceInfo.maxDataPorts));
+      expect(many.stripes, StripeSpec.maxCount);
+    });
+
+    test('nonsense is refused', () {
+      for (final bad in <Map<String, Object?>>[
+        {'dataPorts': 5001},
+        {
+          'dataPorts': [0],
+        },
+        {
+          'dataPorts': [70000],
+        },
+        {
+          'dataPorts': ['5001'],
+        },
+        {'stripes': 0},
+        {'stripes': '3'},
+      ]) {
+        expect(
+          () => DeviceInfo.fromJson({...base, ...bad}),
+          throwsA(isA<FormatError>()),
+          reason: '$bad',
+        );
+      }
+    });
+
+    test('stripes: every byte once, in order, shares add up', () {
+      for (final (offset, size, count, block) in [
+        (0, 10 * 1024 * 1024, 3, 1024 * 1024),
+        (12345, 5 * 1024 * 1024 + 7, 3, 1024 * 1024),
+        (1, 200000, 2, 65536),
+        (0, 65536 * 4, 4, 65536),
+      ]) {
+        final parts = [
+          for (var i = 0; i < count; i++)
+            StripeSpec(index: i, count: count, block: block),
+        ];
+        final ranges = [for (final s in parts) ...s.ranges(offset, size)]
+          ..sort((a, b) => a.start.compareTo(b.start));
+        var at = offset;
+        for (final r in ranges) {
+          expect(r.start, at);
+          expect(r.end - r.start, lessThanOrEqualTo(block));
+          at = r.end;
+        }
+        expect(at, size);
+        for (final s in parts) {
+          expect(
+            s.share(size - offset),
+            s.ranges(offset, size).fold<int>(0, (n, r) => n + r.end - r.start),
+            reason: '$offset $size ${s.index}/$count',
+          );
+        }
+      }
+    });
+
+    test('stripe parameters are read strictly', () {
+      expect(StripeSpec.fromQuery({'offset': '0'}), isNull);
+      final s = StripeSpec.fromQuery(
+        const StripeSpec(index: 2, count: 3).toQuery(),
+      )!;
+      expect((s.index, s.count, s.block), (2, 3, StripeSpec.defaultBlock));
+      for (final bad in [
+        {'stripe': '0'},
+        {'stripe': '0', 'stripes': '1', 'block': '65536'},
+        {'stripe': '3', 'stripes': '3', 'block': '65536'},
+        {'stripe': '-1', 'stripes': '3', 'block': '65536'},
+        {'stripe': '0', 'stripes': '5', 'block': '65536'},
+        {'stripe': '0', 'stripes': '2', 'block': '1000'},
+        {'stripe': '0', 'stripes': '2', 'block': '99999999'},
+        {'stripe': 'x', 'stripes': '2', 'block': '65536'},
+      ]) {
+        expect(
+          () => StripeSpec.fromQuery(bad),
+          throwsA(isA<FormatError>()),
+          reason: '$bad',
+        );
+      }
+    });
+
+    test('complete carries one hash: plain or tree', () {
+      final sha = 'ab' * 32;
+      final plain = CompleteRequest.fromJson({'sha256': sha.toUpperCase()});
+      expect((plain.sha256, plain.tree), (sha, false));
+      expect(plain.toJson(), {'sha256': sha});
+      final tree = CompleteRequest.fromJson({'sha256t': sha});
+      expect((tree.sha256, tree.tree), (sha, true));
+      expect(tree.toJson(), {'sha256t': sha});
+      expect(
+        () => CompleteRequest.fromJson({'sha256t': 'zz'}),
+        throwsA(isA<FormatError>()),
+      );
+    });
+  });
+
   group('SessionOffer', () {
     test('round-trips through JSON', () {
       const offer = SessionOffer(

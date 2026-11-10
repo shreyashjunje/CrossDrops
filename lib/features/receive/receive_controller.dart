@@ -498,6 +498,7 @@ class ReceiveController extends Notifier<ReceiveState> {
         acceptsUntrusted: () => _receivingOn,
         freeSpace: freeSpace.freeBytes,
         allowPeer: _isLocalPeer,
+        dataLanes: ReceiveServer.maxParallelUploads,
       );
       if (!ref.mounted) {
         await server.close();

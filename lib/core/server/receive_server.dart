@@ -26,6 +26,7 @@ import '../storage/transfer_repository.dart';
 import '../storage/trust_repository.dart';
 import 'rate_limiter.dart';
 import '../media/save_target.dart';
+import 'data_lanes.dart';
 import 'file_store.dart';
 import 'sender_auth.dart';
 
@@ -233,8 +234,12 @@ class _ReceivingFile {
 
   /// Incremental hash of bytes [0, hashedBytes) of the part file, kept
   /// across uploads so a resume after a drop costs nothing.
-  Sha256Isolate? hasher;
+  FileHasher? hasher;
   int hashedBytes = 0;
+
+  /// [hasher] and [digest] are the tree hash (D-071), as the sender asked
+  /// with `hash=tree`.
+  bool treeHash = false;
 
   void dropHasher() {
     hasher?.abort();
@@ -253,6 +258,9 @@ class _ReceivingFile {
 
   /// Bytes the running upload read from the socket but has not written.
   int buffered = 0;
+
+  /// The running upload's connections, when it arrives on several (D-071).
+  _StripeGroup? stripes;
 
   bool get busy => _busy != null;
 
@@ -361,7 +369,8 @@ class ReceiveServer {
     this._clock,
   );
 
-  final DeviceInfo _info;
+  DeviceInfo _info;
+  DataLanes? _lanes;
   final SenderAuthenticator _auth;
   final TrustLookup _trustLookup;
   final bool Function() _acceptsUntrusted;
@@ -424,6 +433,10 @@ class ReceiveServer {
   /// a slow write, fsync or hash step, still a bounded few buffers.
   static const int receiveQueueBytes = 8 * 1024 * 1024;
 
+  /// Connections one file's bytes may arrive on (D-071), advertised as
+  /// `stripes` in `/v1/info`.
+  static const int maxStripes = 3;
+
   /// Starts listening on [port] (0 = random, as ARCHITECTURE.md asks) and
   /// restores unfinished sessions from [repository].
   ///
@@ -438,6 +451,10 @@ class ReceiveServer {
   /// An ended session stays visible to its sender for [endedRetention], so
   /// a sender that lost the connection can still learn the outcome; then
   /// it is forgotten ([prune]).
+  ///
+  /// With [dataLanes] above 0, that many extra ports take uploads and
+  /// decrypt them off this isolate ([DataLanes], D-071). If they cannot
+  /// start, the server runs without them.
   static Future<ReceiveServer> start({
     required DeviceInfo info,
     required DeviceCredentials credentials,
@@ -461,9 +478,12 @@ class ReceiveServer {
     int freeSpaceReserve = 64 * 1024 * 1024,
     Duration endedRetention = const Duration(minutes: 5),
     DateTime Function()? clock,
+    int dataLanes = 0,
   }) async {
     final server = ReceiveServer._(
-      info.withUploadSlots(maxParallelUploads),
+      info
+          .withUploadSlots(maxParallelUploads)
+          .withDataPlane(stripes: maxStripes, treeHash: true),
       authenticator ??
           SenderAuthenticator(ownFingerprint: credentials.fingerprint),
       trustLookup,
@@ -495,6 +515,20 @@ class ReceiveServer {
     );
     // Idle keep-alive connections are closed sooner than dart:io's 120 s.
     server._server.idleTimeout = const Duration(seconds: 30);
+    if (dataLanes > 0) {
+      try {
+        final lanes = server._lanes = await DataLanes.start(
+          credentials: credentials,
+          handler: server._handler(),
+          count: dataLanes,
+          address: address,
+          maxHeaderBytes: limits.maxHeaderBytes,
+        );
+        server._info = server._info.withDataPlane(dataPorts: lanes.ports);
+      } catch (e) {
+        _log('no data lanes, the main port takes uploads: ${e.runtimeType}');
+      }
+    }
     server._pruneTimer = Timer.periodic(
       const Duration(seconds: 30),
       (_) => unawaited(server.prune()),
@@ -504,6 +538,9 @@ class ReceiveServer {
   }
 
   int get port => _server.port;
+
+  /// The data lanes' ports (D-071); empty without lanes.
+  List<int> get dataPorts => _info.dataPorts;
 
   /// Whether the listening socket still takes connections, by a TCP
   /// connect over loopback that sends nothing. iOS may reclaim a listening
@@ -580,6 +617,7 @@ class ReceiveServer {
       }
     }
     await _server.close(force: true);
+    await _lanes?.close();
     // Uploads see their sockets close and release their files.
     await Future.wait([
       for (final s in _sessions.values)
@@ -1307,6 +1345,29 @@ class ReceiveServer {
     if (offset == null || offset < 0) {
       return _error(400, ErrorCodes.badRequest, 'missing or bad offset');
     }
+    final StripeSpec? stripe;
+    try {
+      stripe = StripeSpec.fromQuery(req.url.queryParameters);
+    } on FormatError catch (e) {
+      return _error(400, ErrorCodes.badRequest, e.message);
+    }
+    final tree = req.url.queryParameters['hash'] == 'tree';
+    final total = f.offer.size - offset;
+    if (stripe != null) {
+      // Each connection declares exactly its part of the rest, so no part
+      // can bring more than its share (hard rule 6).
+      if (stripe.count > maxStripes ||
+          total < stripe.count * stripe.block ||
+          req.contentLength != stripe.share(total)) {
+        return _error(400, ErrorCodes.badRequest, 'invalid stripe');
+      }
+      final running = f.stripes;
+      if (running != null) {
+        return running.accepts(offset, stripe)
+            ? running.join(stripe.index, req.read())
+            : _error(409, ErrorCodes.busy, 'another upload is in progress');
+      }
+    }
     if (f.busy) {
       return _error(409, ErrorCodes.busy, 'another upload is in progress');
     }
@@ -1314,9 +1375,33 @@ class ReceiveServer {
       return _error(503, ErrorCodes.busy, 'too many uploads at once');
     }
     f.lock();
+    final group = stripe == null
+        ? null
+        : f.stripes = _StripeGroup(offset, stripe, total);
     try {
-      return await _receive(req, s, f, offset);
+      if (group == null) {
+        return await _receive(
+          req.read(),
+          req.contentLength,
+          s,
+          f,
+          offset,
+          tree,
+        );
+      }
+      final reply = await _receive(
+        group.merge(stripe!.index, req.read()),
+        total,
+        s,
+        f,
+        offset,
+        tree,
+      );
+      // Every connection of the upload gets the same answer.
+      return group.finish(reply.statusCode, await reply.readAsString());
     } finally {
+      f.stripes = null;
+      group?.finish(500, jsonEncode({'error': ErrorCodes.ioError}));
       f.unlock();
       final pending = f.checkpointRequest;
       f.checkpointRequest = null;
@@ -1324,11 +1409,16 @@ class ReceiveServer {
     }
   }
 
+  /// Appends [body] to the part from [offset]. [declared] is the length
+  /// the request announced, if any. With [tree] the running hash is the
+  /// tree hash.
   Future<Response> _receive(
-    Request req,
+    Stream<List<int>> body,
+    int? declared,
     _Session s,
     _ReceivingFile f,
     int offset,
+    bool tree,
   ) async {
     final size = f.offer.size;
     final received = await _store.length(f.location);
@@ -1341,7 +1431,6 @@ class ReceiveServer {
         {'receivedBytes': received},
       );
     }
-    final declared = req.contentLength;
     if (declared != null && offset + declared > size) {
       await _failFile(s, f, ErrorCodes.tooManyBytes);
       return _error(413, ErrorCodes.tooManyBytes, 'body exceeds declared size');
@@ -1370,11 +1459,14 @@ class ReceiveServer {
     // matches the bytes on disk (after a restart) don't hash here: hashing
     // a large prefix would stall the upload. /complete hashes from disk.
     var hasher = f.hasher;
-    if (hasher == null || f.hashedBytes != offset) {
+    if (hasher == null || f.hashedBytes != offset || f.treeHash != tree) {
       f.dropHasher();
-      hasher = offset == 0 ? await Sha256Isolate.spawn() : null;
+      hasher = offset == 0
+          ? await FileHasher.spawn(tree: tree, length: size)
+          : null;
       f.hasher = hasher;
       f.hashedBytes = offset;
+      f.treeHash = tree;
     }
     final PartFile raf;
     try {
@@ -1405,8 +1497,7 @@ class ReceiveServer {
       w?.complete();
     }
 
-    final sub = req
-        .read()
+    final sub = body
         .timeout(_bodyIdleTimeout)
         .listen(null, cancelOnError: true);
     sub
@@ -1646,7 +1737,11 @@ class ReceiveServer {
         fid,
         status: FileTransferStatus.verifying,
       );
-      final digest = f.digest ?? await _hashPart(s, f);
+      // The sender says which hash it holds; ours from the upload counts
+      // only if it is the same kind.
+      final digest = f.digest != null && f.treeHash == body.tree
+          ? f.digest!
+          : await _hashPart(s, f, tree: body.tree);
       if (s.status.isTerminal) return _sessionGate(s)!;
       if (digest != body.sha256) return await _hashMismatch(s, f);
 
@@ -1866,12 +1961,16 @@ class ReceiveServer {
     }
   }
 
-  /// SHA-256 of the part on disk, after an app restart lost the running
+  /// Hash of the part on disk, after an app restart lost the running
   /// hash.
-  Future<String> _hashPart(_Session s, _ReceivingFile f) async {
+  Future<String> _hashPart(
+    _Session s,
+    _ReceivingFile f, {
+    required bool tree,
+  }) async {
     final part = await _openPart(s, f);
     try {
-      final hasher = await Sha256Isolate.spawn();
+      final hasher = await FileHasher.spawn(tree: tree, length: f.offer.size);
       await hasher.addSourcePrefix(part.source, f.offer.size);
       return await hasher.close();
     } finally {
@@ -1925,4 +2024,164 @@ class ReceiveServer {
 
 class _BodyTooLarge implements Exception {
   const _BodyTooLarge();
+}
+
+/// The connections of one striped upload (D-071), put back together as one
+/// body in file order: block 0 from connection 0, block 1 from connection
+/// 1, and so on around. `_receive` then appends it like any other upload.
+///
+/// A connection is read at most [credit] bytes ahead of its turn, and not
+/// at all before the upload passed its checks. If one of them fails, the
+/// body ends there with an error: what was written is a whole prefix of the
+/// file, and the sender resumes from it.
+class _StripeGroup {
+  _StripeGroup(this.offset, StripeSpec first, this.total)
+    : count = first.count,
+      block = first.block {
+    _left = total < block ? total : block;
+  }
+
+  final int offset;
+  final int count;
+  final int block;
+
+  /// Bytes of the whole upload, over all connections.
+  final int total;
+
+  int get credit => 2 * block;
+
+  late final StreamController<List<int>> _out = StreamController(
+    onListen: _start,
+    onResume: _pump,
+    onCancel: _end,
+  );
+  final Map<int, _Stripe> _parts = {};
+  final Completer<(int, String)> _reply = Completer();
+  bool _started = false;
+  bool _ended = false;
+  int _turn = 0;
+  int _left = 0;
+  int _emitted = 0;
+
+  /// Whether a request for [offset] and [s] is a missing part of this
+  /// upload.
+  bool accepts(int offset, StripeSpec s) =>
+      offset == this.offset &&
+      s.count == count &&
+      s.block == block &&
+      !_parts.containsKey(s.index);
+
+  /// Adds the first connection; returns the body of the whole upload.
+  Stream<List<int>> merge(int index, Stream<List<int>> body) {
+    _add(index, body);
+    return _out.stream;
+  }
+
+  /// Adds another connection; completes with the upload's answer.
+  Future<Response> join(int index, Stream<List<int>> body) async {
+    _add(index, body);
+    final (status, text) = await _reply.future;
+    return _answer(status, text);
+  }
+
+  /// Ends the upload with this answer for every connection. Only the
+  /// first call counts.
+  Response finish(int status, String text) {
+    if (!_reply.isCompleted) _reply.complete((status, text));
+    _end();
+    return _answer(status, text);
+  }
+
+  static Response _answer(int status, String text) => Response(
+    status,
+    body: text,
+    headers: {'content-type': 'application/json'},
+  );
+
+  void _add(int index, Stream<List<int>> body) {
+    final part = _Stripe();
+    _parts[index] = part;
+    final sub = part.sub = body.listen(
+      (chunk) {
+        part.queue.add(chunk);
+        part.bytes += chunk.length;
+        if (part.bytes >= credit && !part.sub.isPaused) part.sub.pause();
+        _pump();
+      },
+      onError: (Object e) => _fail(e),
+      onDone: () {
+        part.done = true;
+        _pump();
+      },
+      cancelOnError: true,
+    );
+    if (_ended) {
+      unawaited(sub.cancel());
+    } else if (!_started) {
+      sub.pause();
+    }
+  }
+
+  void _start() {
+    _started = true;
+    for (final part in _parts.values) {
+      part.sub.resume();
+    }
+    _pump();
+  }
+
+  /// Hands on what the connection whose turn it is has brought.
+  void _pump() {
+    while (!_ended && _started && !_out.isPaused) {
+      final part = _parts[_turn];
+      if (part == null) return; // that connection has not arrived yet
+      if (part.queue.isEmpty) {
+        if (part.done) _fail(const SocketException('stripe ended early'));
+        return;
+      }
+      var chunk = part.queue.removeFirst();
+      if (chunk.length > _left) {
+        part.queue.addFirst(chunk.sublist(_left));
+        chunk = chunk.sublist(0, _left);
+      }
+      part.bytes -= chunk.length;
+      if (part.sub.isPaused && part.bytes < credit) part.sub.resume();
+      _out.add(chunk);
+      _emitted += chunk.length;
+      _left -= chunk.length;
+      if (_emitted == total) {
+        _ended = true;
+        unawaited(_out.close());
+        return;
+      }
+      if (_left == 0) {
+        _turn = (_turn + 1) % count;
+        final rest = total - _emitted;
+        _left = rest < block ? rest : block;
+      }
+    }
+  }
+
+  void _fail(Object error) {
+    if (_ended) return;
+    _out.addError(error);
+    unawaited(_out.close());
+    _end();
+  }
+
+  void _end() {
+    _ended = true;
+    for (final part in _parts.values) {
+      unawaited(part.sub.cancel());
+    }
+  }
+}
+
+class _Stripe {
+  late final StreamSubscription<List<int>> sub;
+  final ListQueue<List<int>> queue = ListQueue();
+
+  /// Bytes in [queue].
+  int bytes = 0;
+  bool done = false;
 }

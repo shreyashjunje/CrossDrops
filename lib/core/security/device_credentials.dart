@@ -110,7 +110,15 @@ class DeviceCredentials {
 
   /// TLS context for the receive server: this certificate, TLS 1.3 only
   /// (both ends are CrossDrop, so 1.3 is always available).
-  SecurityContext serverContext() => SecurityContext(withTrustedRoots: false)
+  SecurityContext serverContext() =>
+      serverContextFor(certificatePem, privateKeyPem);
+
+  /// [serverContext] from the PEM strings, for the data lane isolates
+  /// (D-071): a [SecurityContext] cannot cross isolates.
+  static SecurityContext serverContextFor(
+    String certificatePem,
+    String privateKeyPem,
+  ) => SecurityContext(withTrustedRoots: false)
     ..useCertificateChainBytes(utf8.encode(certificatePem))
     ..usePrivateKeyBytes(utf8.encode(privateKeyPem))
     ..minimumTlsProtocolVersion = TlsProtocolVersion.tls1_3;

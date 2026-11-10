@@ -404,6 +404,18 @@ class SendSession {
 
   /// Lanes the receiver allows, from its info; 1 until known.
   int _slots = 1;
+
+  /// The receiver's ports for large uploads and the connections it takes
+  /// per file, from its info (D-071). Emptied when they keep failing.
+  List<int> _dataPorts = const [];
+  int _stripes = 1;
+
+  /// Files are checked by their tree hash, if the receiver can (D-071).
+  bool _treeHash = false;
+
+  /// Large uploads running now. One alone is spread over [_stripes]
+  /// connections; several side by side already use as many.
+  int _largeUploads = 0;
   final List<_Lane> _lanes = [];
 
   /// The first outcome a lane reached; the other lanes stop with it.
@@ -824,6 +836,9 @@ class SendSession {
       _clientFactory(_host, _port)..adoptToken(_client.token);
 
   int _slotsFor(DeviceInfo info) {
+    _dataPorts = info.dataPorts;
+    _stripes = info.stripes;
+    _treeHash = info.treeHash;
     final n = info.uploadSlots < parallelUploads
         ? info.uploadSlots
         : parallelUploads;
@@ -841,12 +856,15 @@ class SendSession {
       fileId: f.fileId,
       source: opened.source,
       size: f.item.size,
+      treeHash: _treeHash,
     );
     final hash = _hashes[f.fileId] ??= BackgroundFileHash.startSource(
       opened.source,
       f.item.size,
+      tree: _treeHash,
     );
     final backoff = _newBackoff();
+    var deadPortTries = 0;
     while (true) {
       await _waitWhilePaused();
       _checkStop();
@@ -877,19 +895,45 @@ class SendSession {
           f.status = FileTransferStatus.receiving;
           _emit(SendPhase.sending, force: true);
           final uploading = lane.uploading = Completer<void>();
+          final from = status.receivedBytes;
+          // Large uploads go to the receiver's data ports, with the TLS
+          // work off this isolate on both phones (D-071).
+          final fast =
+              _dataPorts.isNotEmpty &&
+              f.item.size - from >= UploadClient.fastMinBytes;
+          var moved = false;
+          void onProgress(TransferProgress p) {
+            moved = moved || p.sentBytes > from;
+            _tracker.set(f.fileId, p.sentBytes);
+            // The last chunks before a pause takes effect stay paused.
+            _emit(_pauseGate == null ? SendPhase.sending : SendPhase.paused);
+          }
+
+          if (fast) _largeUploads++;
           try {
-            await client.put(
-              target,
-              status.receivedBytes,
-              onProgress: (p) {
-                _tracker.set(f.fileId, p.sentBytes);
-                // The last chunks before a pause takes effect stay paused.
-                _emit(
-                  _pauseGate == null ? SendPhase.sending : SendPhase.paused,
-                );
-              },
-            );
+            if (fast) {
+              await client.putFast(
+                target,
+                from,
+                dataPorts: _dataPorts,
+                stripes: _largeUploads == 1 ? _stripes : 1,
+                lane: _lanes.indexOf(lane),
+                onProgress: onProgress,
+              );
+            } else {
+              await client.put(target, from, onProgress: onProgress);
+            }
+          } on UploadException catch (e) {
+            // The main port just answered, and a data port twice took not
+            // one byte: it is gone (iOS can reclaim a listening socket).
+            // The rest of the session uses the main port.
+            if (fast && !moved && _isTransient(e) && ++deadPortTries >= 2) {
+              _log('data ports do not answer, using the main port');
+              _dataPorts = const [];
+            }
+            rethrow;
           } finally {
+            if (fast) _largeUploads--;
             lane.uploading = null;
             uploading.complete();
           }
