@@ -138,6 +138,12 @@ abstract interface class UsbCamera {
 
   /// Closes the device and deletes the thumbnail cache.
   Future<void> close();
+
+  /// Cable test: whether this phone can reach apps on the plugged-in iPhone
+  /// through Apple's USB multiplexing protocol, and [port] (CrossDrop's
+  /// port on the iPhone) if given. A plain-text report, one step per line,
+  /// with no names or file data. Closes the open device first.
+  Future<String> probeTunnel({int? port});
 }
 
 /// [UsbCamera] over `crossdrop/usb_camera`.
@@ -208,6 +214,10 @@ class ChannelUsbCamera implements UsbCamera {
 
   @override
   Future<void> close() => _channel.invokeMethod<void>('close');
+
+  @override
+  Future<String> probeTunnel({int? port}) async =>
+      await _channel.invokeMethod<String>('probe', {'port': port}) ?? '';
 }
 
 UsbCameraDevice _device(Map<Object?, Object?> m) =>
@@ -287,4 +297,7 @@ class NoUsbCamera implements UsbCamera {
 
   @override
   Future<void> close() async {}
+
+  @override
+  Future<String> probeTunnel({int? port}) async => 'Cable test needs Android.';
 }

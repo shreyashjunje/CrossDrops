@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../app/navigation.dart';
 import '../../app/providers.dart';
 import '../../app/tokens.dart';
 import '../../app/version.dart';
+import '../usb_import/cable_probe_screen.dart';
+import '../usb_import/usb_import_controller.dart';
 
 /// What CrossDrop is, how it keeps files private, this phone's security
 /// key, and the open-source licenses.
@@ -121,6 +124,22 @@ class AboutScreen extends ConsumerWidget {
               ),
             ),
           const SizedBox(height: 24),
+          if (ref.watch(usbImportAvailableProvider)) ...[
+            OutlinedButton(
+              style: const ButtonStyle(
+                minimumSize: WidgetStatePropertyAll(
+                  Size.fromHeight(CdSpace.buttonHeight),
+                ),
+              ),
+              onPressed: () => pushScreen<void>(
+                context,
+                Routes.settings,
+                const CableProbeScreen(),
+              ),
+              child: const Text('Cable test'),
+            ),
+            const SizedBox(height: 12),
+          ],
           OutlinedButton(
             style: const ButtonStyle(
               minimumSize: WidgetStatePropertyAll(

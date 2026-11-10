@@ -53,6 +53,8 @@ import java.util.concurrent.atomic.AtomicBoolean
  * - `importFile {handle, name, mime, collection, expectedSize?, takenMs?}`
  *   -> {uri, collection, bytes}. Errors: `size_mismatch`, `cancelled`,
  *   `disconnected`, `no_space`, `io`.
+ * - `probe {port?}` -> text report of the cable test (UsbTunnelProbe).
+ *   Closes the open device first.
  * - `cancelCurrent`: stops the copy in progress between chunks.
  * - `close`.
  *
@@ -187,6 +189,7 @@ class UsbCameraChannel(
                     )
                 }
             }
+            "probe" -> probe(call.argument<Number>("port")?.toInt(), result)
             "cancelCurrent" -> {
                 cancel.set(true)
                 result.success(null)
@@ -230,7 +233,25 @@ class UsbCameraChannel(
             result.error("disconnected", null, null)
             return
         }
-        val go = { onMtp(result) { openOnMtp(d) } }
+        withPermission(d, result) { onMtp(result) { openOnMtp(d) } }
+    }
+
+    /** Cable test: closes any open import first, then runs [UsbTunnelProbe]. */
+    private fun probe(port: Int?, result: MethodChannel.Result) {
+        val d = usb.deviceList.values.firstOrNull { it.vendorId == APPLE_VENDOR_ID }
+        if (d == null) {
+            result.success("No iPhone found on the cable.")
+            return
+        }
+        withPermission(d, result) {
+            onMtp(result) {
+                closeDevice()
+                UsbTunnelProbe(usb).run(d, port).joinToString("\n").also { log("probe:\n$it") }
+            }
+        }
+    }
+
+    private fun withPermission(d: UsbDevice, result: MethodChannel.Result, go: () -> Unit) {
         if (usb.hasPermission(d)) {
             go()
             return
@@ -238,7 +259,12 @@ class UsbCameraChannel(
         // A second request replaces the first; its caller gets "denied".
         permissionWaiter?.invoke(false)
         permissionWaiter = { granted ->
-            if (granted) go() else result.error("permission_denied", null, null)
+            if (granted) {
+                go()
+            } else {
+                log("open: USB access denied")
+                result.error("permission_denied", null, null)
+            }
         }
         val intent = Intent(ACTION_PERMISSION).setPackage(activity.packageName)
         // Mutable: the system adds EXTRA_PERMISSION_GRANTED. Explicit
@@ -250,17 +276,23 @@ class UsbCameraChannel(
     private fun openOnMtp(d: UsbDevice): Any? {
         closeDevice()
         clearThumbs()
-        val connection = usb.openDevice(d) ?: throw ChannelError("busy")
+        val connection = usb.openDevice(d)
+        if (connection == null) {
+            log("open: Android refused to open the device")
+            throw ChannelError("busy")
+        }
         val m = MtpDevice(d)
         // Fails when another app (Files, a gallery) has claimed the
         // interface.
         if (!m.open(connection)) {
             connection.close()
+            log("open: camera interface held elsewhere")
             throw ChannelError("busy")
         }
         val storages = m.storageIds
         if (storages == null || storages.isEmpty()) {
             m.close()
+            log("open: no storage (locked or Allow not tapped)")
             throw ChannelError("locked")
         }
         device = m

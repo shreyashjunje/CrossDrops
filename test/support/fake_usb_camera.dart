@@ -112,4 +112,14 @@ class FakeUsbCamera implements UsbCamera {
 
   @override
   Future<void> close() async => closes++;
+
+  /// What [probeTunnel] answers.
+  String probeReport = 'Handshake: ok, version 2';
+  int? probedPort;
+
+  @override
+  Future<String> probeTunnel({int? port}) async {
+    probedPort = port;
+    return probeReport;
+  }
 }
