@@ -1469,6 +1469,28 @@ Android imports from an iPhone plugged in by cable ([features/usb-import.md](fea
 
 1. Repeat U-1 to U-3 with an iPhone that has Lightning, through a Lightning to USB-C cable.
 
+### U-10: Photos while copying (added 2026-11-10)
+
+1. Choose 10 or more photos and one video of a few hundred MB. Tap **Copy to this phone**.
+2. Expected: a large preview of the item being copied, the percentage, and a strip of all chosen items below it. Each item gets a lime tick when it is done; the item being copied has a lime outline and the strip follows it.
+3. Expected: previews appear within about a second, also while the large video is copying (they load between its 1 MB parts). If logcat shows `partial reads refused`, previews wait for each whole file instead: note it.
+
+**Paste back:** a screenshot while the video copies; whether previews appeared during it.
+
+### U-11: Cable test for Android to iPhone (added 2026-11-10)
+
+Checks whether Android can reach the CrossDrop app on the iPhone over the cable. Nothing is copied.
+
+1. Close the cable import screen. Plug in the iPhone and unlock it.
+2. iPhone: open CrossDrop > **My QR code**. Note the port it shows. Keep that screen open.
+3. Android: Settings > About > **Cable test**. Type the port. Tap **Run test**.
+4. If the iPhone asks to trust this device, tap **Trust**, enter the passcode, and tap **Run test** again.
+5. Tap **Copy report** and paste the whole report back. Also paste `adb logcat -s crossdrop.usb` from the same minute if you can.
+
+What the lines mean (for reference): `Camera interface: held by another app` explains a `busy` import (U-8). `Switch to config ...: refused` or `Claim usbmux interface: FAIL` means this Android phone cannot use the cable tunnel. `Handshake: ok` and `Built-in service ...: reachable` mean the tunnel works. `CrossDrop (port ...): reachable` means Android to iPhone by cable can be built on it.
+
+6. Afterwards, run U-2 and U-3 once more to check that cable import still works after the test.
+
 ### Not checked on devices
 
 Covered by tests on the PC: pairing of Live and edited files, AAE skipping, day groups, filters, the copy plan and name sanitizing, the free-space refusal, retry once, stop on unplug, full disk and Stop, per-item ticks, thumbnail ordering and cancelling, and the screen states (locked retry, busy, denied). Not covered anywhere yet: a phone running out of space during the copy, and files of 4 GB or more (whole-file path).
@@ -1487,6 +1509,8 @@ Covered by tests on the PC: pairing of Live and edited files, AAE skipping, day 
 | U-7 unplug while copying | | | | | | |
 | U-8 another app holds the iPhone | | | | | | |
 | U-9 Lightning iPhone | | | | | | |
+| U-10 photos while copying | | | | | | |
+| U-11 cable test (Android to iPhone) | | | | | | |
 
 ## Send screen fixes (D-068)
 
