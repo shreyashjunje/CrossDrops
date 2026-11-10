@@ -2,6 +2,11 @@
 
 All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Keep a Changelog](https://keepachangelog.com): group entries under Added, Changed, Fixed or Removed, under a heading of the date (`## YYYY-MM-DD`) or version once releases exist.
 
+## 2026-11-10
+
+### Changed
+- **Faster large files (D-071):** files of 8 MB or more are encrypted and decrypted off the app's main thread on both phones, a file of 32 MB or more travels over three connections at once, and files are checked with a SHA-256 tree hash that uses several processor cores. On a PC the same 1 GB transfer went from about 60 to about 110 to 130 MB/s. Phones older than this change are served as before. Not yet measured on phones; a slow Wi-Fi link (2.4 GHz) stays slow.
+
 ## 2026-11-09
 
 ### Changed

@@ -8,6 +8,8 @@ All v1 features in CLAUDE.md are now in the code: transfer engine, discovery, QR
 
 **Added 2026-11-08 (D-068):** real file names on iPhone picks, previews of picked, sent and received files, a faster photo picker and preparation, three files at once, and "original quality" with exact byte counts on the Done screen. Unit-tested; device checks N-1 to N-8 in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Send screen fixes". The iOS Swift part (QuickLook previews) has not been compiled yet: the next CI build is its first.
 
+**Added 2026-11-10 (D-071):** large files use data ports, upload worker isolates, up to three connections per file and a tree hash. Built and unit-tested; a 1 GB loopback transfer on the PC went from about 60 to about 110 to 130 MB/s ([BENCHMARKS.md](BENCHMARKS.md)). Nothing of it has run on a phone: device checks F-1 to F-6 in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Faster transfers". It is on the branch `speed-data-lanes`, not on `main`.
+
 **Added 2026-11-08:** import from an iPhone by cable on Android (D-067, [features/usb-import.md](features/usb-import.md)). Built and unit-tested; device checks U-1 to U-9 in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Cable import".
 
 ## What is left

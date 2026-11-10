@@ -615,3 +615,28 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - **S10, CI:** every action is pinned to a commit SHA, the workflow token is read-only, and Dependabot proposes action updates monthly.
   - **S13, code display:** the sender hides the pairing code only when the receiver says it trusts this phone and this phone trusts the receiver too.
 - Consequences: S11 and S12 stay accepted as before. S7 and S8 depend on native behaviour and are only confirmed on phones (DEVICE_TESTS.md, "Audit follow-up").
+
+## D-071: Data lanes, upload workers, stripes and the tree hash
+- Date: 2026-11-10
+- Status: Accepted (built and unit-tested; not yet run on phones)
+- Context: The owner reported that transfers between the two phones are very slow and that files seem to get smaller. D-066 had put the larger speed changes on hold until there were numbers. There were none from phones, so the engine was measured on the owner's PC (12 threads, AOT, loopback, no radio):
+  - pure-Dart SHA-256 in an isolate: about 135 MB/s alone, about 75 MB/s while a transfer runs;
+  - dart:io TLS 1.3, one stream: about 90 MB/s; two to four streams in the **same** isolate: about 125 MB/s together; one isolate per stream: 72, 131, 167 and 201 MB/s for 1 to 4;
+  - a real 1 GB transfer between two CLI processes: about 60 MB/s, with both main isolates busy the whole time.
+  So the app itself, not Wi-Fi, set the ceiling on a good link: all TLS data moved through one isolate per phone (dart:io does it in 8 KB steps, each a round trip through the event loop), that isolate also draws the UI, and the three lanes of D-068 shared it. Once that was lifted, one SHA-256 over the file was the next limit.
+  On size: the same 1 GB file arrived with the same byte count and SHA-256. Nothing in the transfer path changes a byte.
+- Decision:
+  - **Data lanes** on the receiver: three isolates, each an HTTPS listener on its own port with the same certificate, that take only `PUT`, decrypt, and forward the body to the unchanged handler on the main isolate with a 2 MB window. Every check, the part file, the checkpoints and the events stay where they were. Advertised as `dataPorts`.
+  - **Upload workers** on the sender: an upload of 8 MB or more runs `UploadClient.put` in its own isolate with its own pinned connection and the session's token. Smaller files stay on the main port: an isolate and a handshake cost more than they save on a photo.
+  - **Stripes:** from 32 MB a file goes over up to three connections in 1 MB blocks, put back in order by the receiver. Chosen over byte ranges written out of order because the part file stays append-only: resume, the checkpoint rule (D-022, D-065) and the size check (hard rule 6) did not have to change. Only one large file at a time is striped; several large files side by side already use a connection each.
+  - **Tree hash:** SHA-256 over the SHA-256 of each 1 MB leaf, hashed on up to three isolates. Still SHA-256, still changes with any bit, and pure Dart, so it runs and is tested the same on both platforms. Not chosen: native SHA-256 (CommonCrypto would be easy on iOS, but Android has no public system library, so the Android phone would still limit every transfer, and it could not be tested on the PC); a faster non-cryptographic hash (weaker promise).
+  - **Negotiation:** all of it through new fields in `/v1/info` (`dataPorts`, `stripes`, `treeHash`). No protocol version bump: an older sender or receiver gets exactly the old path. If the data ports stop answering while the main port works, the sender falls back to the main port.
+  - **Not done:** refreshing the data ports after the receiver restarts mid-session (the fallback covers it); native TLS; anything for the radio link (see Consequences).
+- Consequences:
+  - Same PC, same 1 GB file: about 110 to 130 MB/s instead of 60, with sender and receiver sharing one CPU. Two phones each do half of that work, so the gain there may differ and must be measured (BENCHMARKS.md).
+  - This raises the app's own ceiling. It does nothing for a slow link: on 2.4 GHz Wi-Fi (many routers, most phone hotspots) a few MB/s is all the radio gives, and through a router every byte crosses the air twice.
+  - More isolates while a large file moves: three lanes (always there, idle otherwise) and up to three hash workers on the receiver, three upload workers and three hash workers on the sender. Memory per large upload stays bounded: about 20 MB on the receiver (8 MB queue, 2 MB per lane window, 2 MB per stripe), about 2 MB per worker on the sender.
+  - The stored `sha256` of a received file is the tree root when the sender used the tree hash.
+  - `CLAUDE.md` still says "SHA-256 ... sent in /complete" and one connection per session in its summary; ARCHITECTURE.md is the reference.
+  - On Android, upload workers and hash workers read content URIs with blocking `pread` on the descriptor. That path only runs on Linux in CI and on phones, not on the Windows PC.
+  - Device checks F-1 to F-6 in DEVICE_TESTS.md, "Faster transfers".

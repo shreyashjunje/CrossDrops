@@ -1730,3 +1730,60 @@ Everything in this section. On the PC: the subnet rule, the spoofed-advert rule 
 | A-1 | | | | | | |
 | A-2 | | | | | | |
 | A-3 | | | | | | |
+
+## Faster transfers (D-071)
+
+Data ports, stripes and the tree hash. Same build on both phones unless a step says otherwise. Android: `adb logcat -s flutter` running.
+
+### Preparation (once)
+
+- On each phone: one video of 500 MB or more, one of about 20 MB, and 30 photos.
+- Note how the phones are connected for every figure: same router (2.4 or 5 GHz), Android hotspot, or iPhone Personal Hotspot. The Android phone's Wi-Fi details show the band and link speed.
+
+### F-1: One large video, both directions
+
+1. Send the 500 MB+ video iPhone to Android. Expected: it arrives and the Done screen says verified; exact bytes equal on both phones.
+2. Sender log shows three lines `file f0: sending from 0 of ... (part 1/3)`, `(part 2/3)`, `(part 3/3)`.
+3. Note the average MB/s from the Done screen. Repeat Android to iPhone.
+4. If you still have an older build on both phones, send the same video with it on the same network and note that figure too.
+
+### F-2: Mixed selection
+
+1. Send the 20 MB video, the 500 MB video and 30 photos together.
+2. Expected: everything arrives and verifies; photos keep moving while the videos go; the progress screen stays smooth.
+
+### F-3: Pause, Wi-Fi drop and cancel on a large video
+
+1. While the large video moves, tap Pause. Expected: it stops within about a second. Resume: it continues from where it was (not from 0) and verifies.
+2. Start again; turn the receiver's Wi-Fi off for 10 s, then on. Expected: "Connection lost. Trying again…", then it continues and verifies.
+3. Start again; Cancel on the sender. Expected: no partial file left in the gallery.
+
+### F-4: iPhone receiver leaves and comes back
+
+1. Android sends the large video to the iPhone. Halfway, press Home on the iPhone, wait 60 s, open CrossDrop again.
+2. Expected: the sender retries and the video finishes and verifies. The sender log may show `data ports do not answer, using the main port`; that is the designed fallback (slower, still correct).
+
+### F-5: Older build on one phone
+
+1. Receiver on a build from before this change, sender on this build: send the 20 MB video and 5 photos. Expected: all arrive, one connection per file, no errors.
+2. The other way round (sender old, receiver new). Expected: the same.
+
+### F-6: Heat and battery
+
+1. Send 2 GB or more in one go, each direction.
+2. Expected: no stall, the app stays responsive, the phone does not show a heat warning. Note the MB/s at the start and at the end.
+
+### Not checked on devices
+
+Everything in this section. On the PC: the lanes, stripes in every failure case, the tree hash, the fallback, pause and cancel with workers, and a 1 GB loopback transfer. Not on the PC at all: reading Android content URIs from the worker isolates.
+
+### Results
+
+| Check | Date | iPhone (model, iOS) | Android (model, version) | Network | Commit | Result / MB/s | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| F-1 | | | | | | | |
+| F-2 | | | | | | | |
+| F-3 | | | | | | | |
+| F-4 | | | | | | | |
+| F-5 | | | | | | | |
+| F-6 | | | | | | | |

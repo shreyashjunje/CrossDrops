@@ -264,3 +264,21 @@ Chosen buffer: … (filled in from the CSVs)
 ### Parallel streams
 
 Several files at once were built on the owner's request (D-068, 3 lanes); compare `parallelUploads` 1 and 3 with 30 photos and with one large video. Parallel streams within one file are not built. After Step B I compare, per network: single-stream MB/s, both phones' CPU %, and, if you can run it, an iperf3 baseline (Android: an iperf3 app or Termux `iperf3 -s`; iPhone: an iperf3 client app; `-P 4` for four streams). I propose parallel streams only if CrossDrop is clearly below the iperf3 figure (more than about 25 %) while neither phone's CPU is near one core, and I show you those numbers first.
+
+## PC loopback baseline (2026-11-10, D-071)
+
+Not a phone result. One Windows PC (12 threads), AOT builds, sender and receiver as two processes of `tool/crossdrop_cli.dart` on 127.0.0.1, one 1 GB file of random bytes, MB = 10^6 bytes. It shows the engine's own ceiling with no radio in the way; both ends share one CPU, so each phone has less to do than this PC did.
+
+| What | MB/s |
+| --- | --- |
+| SHA-256, pure Dart, one isolate, nothing else running | about 135 |
+| TLS 1.3 only, one stream | about 90 |
+| TLS 1.3 only, 2 / 3 / 4 streams in one isolate | 124 / 113 / 126 |
+| TLS 1.3 only, 2 / 3 / 4 streams, one isolate each | 131 / 167 / 201 |
+| Transfer before D-071 (`receive --lanes 0`, older sender) | 58 to 62 |
+| Transfer with data lanes and stripes, plain SHA-256 | 72 to 76 (the receiver's hash was the limit) |
+| Transfer with D-071 complete (lanes, stripes, tree hash) | 108 to 129 |
+
+To repeat: `dart build cli -t tool/crossdrop_cli.dart -o <dir>`, then `<dir>/bundle/bin/crossdrop_cli.exe receive --port 18443 [--lanes 0]` and `... send 127.0.0.1 18443 <file>`.
+
+The figures that decide anything are the phone ones: DEVICE_TESTS.md F-1, on a named network.
