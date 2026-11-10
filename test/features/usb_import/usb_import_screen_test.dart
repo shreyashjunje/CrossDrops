@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:crossdrop/core/usb_import/camera_roll.dart';
 import 'package:crossdrop/features/usb_import/usb_import_card.dart';
 import 'package:crossdrop/features/usb_import/usb_import_controller.dart';
@@ -65,6 +67,35 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.bySemanticsLabel(RegExp('copied')), findsWidgets);
     expect(find.bySemanticsLabel(RegExp('^Photo.*copied')), findsNothing);
+  });
+
+  testWidgets('while copying, shows the items and ticks the finished ones', (
+    tester,
+  ) async {
+    final camera = FakeUsbCamera(objects: objects);
+    final gate = Completer<void>();
+    camera.copyGates[2] = gate;
+    await tester.pumpWidget(app(camera, const UsbImportScreen()));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.image_outlined));
+    await tester.tap(find.byIcon(Icons.videocam));
+    await tester.pump();
+    await tester.tap(find.widgetWithText(FilledButton, 'Copy to this phone'));
+    await tester.pump();
+    await tester.pump();
+
+    // The photo (newest) is done; the video is being copied.
+    expect(camera.copied, [1]);
+    expect(find.text('Copying 2 of 2'), findsOneWidget);
+    expect(find.byIcon(Icons.check_rounded), findsOneWidget);
+    // Big preview of the video, plus both items in the strip.
+    expect(find.byIcon(Icons.videocam_outlined), findsNWidgets(2));
+    expect(find.byIcon(Icons.image_outlined), findsOneWidget);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Copied 2 files'), findsOneWidget);
   });
 
   testWidgets('without an iPhone it explains how to connect', (tester) async {

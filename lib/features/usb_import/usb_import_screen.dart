@@ -68,6 +68,8 @@ class UsbImportScreen extends ConsumerWidget {
             UsbImportPhase.ready => _Gallery(state: s, controller: c),
             UsbImportPhase.importing => _Copying(
               progress: s.progress,
+              items: s.selectedItems,
+              thumbs: c.thumbnails,
               onStop: () => _confirmStop(context, c),
             ),
             UsbImportPhase.done => _Summary(
@@ -480,7 +482,93 @@ class _DayHeader extends StatelessWidget {
   );
 }
 
-class _Tile extends StatefulWidget {
+/// The iPhone's own preview of [item], from [thumbs]; the kind's icon
+/// while it loads or when there is none. Gives up its place in the queue
+/// when it leaves the screen.
+class _CameraThumb extends StatefulWidget {
+  const _CameraThumb({super.key, required this.item, required this.thumbs});
+
+  final RollItem item;
+  final ThumbnailQueue<int, String>? thumbs;
+
+  @override
+  State<_CameraThumb> createState() => _CameraThumbState();
+}
+
+class _CameraThumbState extends State<_CameraThumb> {
+  String? _path;
+  bool _asked = false;
+
+  int get _handle => widget.item.primary.handle;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  @override
+  void didUpdateWidget(_CameraThumb old) {
+    super.didUpdateWidget(old);
+    if (old.thumbs != widget.thumbs ||
+        old.item.primary.handle != widget.item.primary.handle) {
+      old.thumbs?.cancel(old.item.primary.handle);
+      _path = null;
+      _asked = false;
+      _load();
+    }
+  }
+
+  void _load() {
+    final q = widget.thumbs;
+    if (q == null || _asked) return;
+    _asked = true;
+    final handle = _handle;
+    if (q.has(handle)) {
+      _path = q.cached(handle);
+      return;
+    }
+    unawaited(
+      q.load(handle).then((p) {
+        if (mounted && p != null && handle == _handle) {
+          setState(() => _path = p);
+        }
+      }),
+    );
+  }
+
+  @override
+  void dispose() {
+    widget.thumbs?.cancel(_handle);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    final path = _path;
+    if (path == null) {
+      return ColoredBox(
+        color: c.surface3,
+        child: Icon(
+          widget.item.kind == RollKind.video
+              ? Icons.videocam_outlined
+              : Icons.image_outlined,
+          color: c.text3,
+        ),
+      );
+    }
+    return Image.file(
+      File(path),
+      fit: BoxFit.cover,
+      cacheWidth: 256,
+      gaplessPlayback: true,
+      errorBuilder: (_, _, _) => ColoredBox(color: c.surface3),
+    );
+  }
+}
+
+class _Tile extends StatelessWidget {
   const _Tile({
     super.key,
     required this.item,
@@ -497,55 +585,8 @@ class _Tile extends StatefulWidget {
   final VoidCallback onTap;
 
   @override
-  State<_Tile> createState() => _TileState();
-}
-
-class _TileState extends State<_Tile> {
-  String? _path;
-  bool _asked = false;
-
-  int get _handle => widget.item.primary.handle;
-
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  @override
-  void didUpdateWidget(_Tile old) {
-    super.didUpdateWidget(old);
-    if (old.thumbs != widget.thumbs) {
-      _asked = false;
-      _load();
-    }
-  }
-
-  void _load() {
-    final q = widget.thumbs;
-    if (q == null || _asked) return;
-    _asked = true;
-    if (q.has(_handle)) {
-      _path = q.cached(_handle);
-      return;
-    }
-    unawaited(
-      q.load(_handle).then((p) {
-        if (mounted && p != null) setState(() => _path = p);
-      }),
-    );
-  }
-
-  @override
-  void dispose() {
-    widget.thumbs?.cancel(_handle);
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
     final c = context.cd;
-    final item = widget.item;
     final t = item.taken;
     final label = [
       item.kind == RollKind.video ? 'Video' : 'Photo',
@@ -553,39 +594,21 @@ class _TileState extends State<_Tile> {
       if (item.isLive) 'Live',
       if (item.isEdited) 'edited',
       if (t != null) formatDay(t, DateTime.now()),
-      if (widget.imported) 'copied',
-      if (widget.selected) 'selected',
+      if (imported) 'copied',
+      if (selected) 'selected',
     ].join(', ');
-    final path = _path;
     return Semantics(
-      selected: widget.selected,
+      selected: selected,
       label: label,
       button: true,
-      onTap: widget.onTap,
+      onTap: onTap,
       excludeSemantics: true,
       child: GestureDetector(
-        onTap: widget.onTap,
+        onTap: onTap,
         child: Stack(
           fit: StackFit.expand,
           children: [
-            if (path == null)
-              ColoredBox(
-                color: c.surface3,
-                child: Icon(
-                  item.kind == RollKind.video
-                      ? Icons.videocam_outlined
-                      : Icons.image_outlined,
-                  color: c.text3,
-                ),
-              )
-            else
-              Image.file(
-                File(path),
-                fit: BoxFit.cover,
-                cacheWidth: 256,
-                gaplessPlayback: true,
-                errorBuilder: (_, _, _) => ColoredBox(color: c.surface3),
-              ),
+            _CameraThumb(item: item, thumbs: thumbs),
             if (item.kind == RollKind.video)
               Positioned(
                 right: 5,
@@ -607,7 +630,7 @@ class _TileState extends State<_Tile> {
               ),
             if (item.isLive)
               const Positioned(left: 5, bottom: 5, child: _Badge('Live')),
-            if (widget.imported)
+            if (imported)
               Positioned(
                 left: 5,
                 top: 5,
@@ -625,7 +648,7 @@ class _TileState extends State<_Tile> {
                   ),
                 ),
               ),
-            if (widget.selected) ...[
+            if (selected) ...[
               const ColoredBox(color: Color(0x400E1116)),
               DecoratedBox(
                 decoration: BoxDecoration(
@@ -678,64 +701,237 @@ class _Badge extends StatelessWidget {
   );
 }
 
-class _Copying extends StatelessWidget {
-  const _Copying({required this.progress, required this.onStop});
+/// While copying: the photo being copied, the percentage, and a strip of
+/// every item in the copy, ticked as each one is done.
+class _Copying extends StatefulWidget {
+  const _Copying({
+    required this.progress,
+    required this.items,
+    required this.thumbs,
+    required this.onStop,
+  });
 
   final ImportProgress? progress;
+
+  /// The items being copied, in copy order.
+  final List<RollItem> items;
+  final ThumbnailQueue<int, String>? thumbs;
   final VoidCallback onStop;
+
+  @override
+  State<_Copying> createState() => _CopyingState();
+}
+
+class _CopyingState extends State<_Copying> {
+  static const _strip = 64.0;
+  static const _gap = 6.0;
+  final _scroll = ScrollController();
+
+  @override
+  void didUpdateWidget(_Copying old) {
+    super.didUpdateWidget(old);
+    final key = widget.progress?.currentItem;
+    if (key == null || key == old.progress?.currentItem) return;
+    final i = widget.items.indexWhere((it) => it.key == key);
+    if (i < 0) return;
+    // Keep the item being copied in view, a little in from the left.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scroll.hasClients) return;
+      final target = ((i - 1) * (_strip + _gap)).clamp(
+        0.0,
+        _scroll.position.maxScrollExtent,
+      );
+      if (MediaQuery.disableAnimationsOf(context)) {
+        _scroll.jumpTo(target);
+      } else {
+        unawaited(
+          _scroll.animateTo(
+            target,
+            duration: CdMotion.base,
+            curve: Curves.easeOut,
+          ),
+        );
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  /// The item being copied; between files, the next one not done yet.
+  RollItem? _current() {
+    final items = widget.items;
+    if (items.isEmpty) return null;
+    final p = widget.progress;
+    final key = p?.currentItem;
+    final copied = p?.copiedItems ?? const <String>{};
+    return items.where((i) => i.key == key).firstOrNull ??
+        items.where((i) => !copied.contains(i.key)).firstOrNull ??
+        items.last;
+  }
 
   @override
   Widget build(BuildContext context) {
     final c = context.cd;
-    final p = progress;
+    final p = widget.progress;
     final percent = p == null ? 0 : (p.fraction * 100).floor();
+    final current = _current();
+    final copied = p?.copiedItems ?? const <String>{};
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(CdSpace.gutter),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Spacer(),
-            ExcludeSemantics(
-              child: Text(
-                '$percent%',
-                style: CdType.displayXL.copyWith(color: c.text),
+            Expanded(
+              child: ListView(
+                children: [
+                  if (current != null)
+                    Center(
+                      child: ExcludeSemantics(
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(CdRadius.button),
+                          child: SizedBox.square(
+                            dimension: 168,
+                            child: _CameraThumb(
+                              key: ValueKey(current.key),
+                              item: current,
+                              thumbs: widget.thumbs,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: 20),
+                  ..._details(c, p, percent),
+                  if (widget.items.length > 1) ...[
+                    const SizedBox(height: 20),
+                    ExcludeSemantics(
+                      child: SizedBox(
+                        height: _strip,
+                        child: ListView.separated(
+                          controller: _scroll,
+                          scrollDirection: Axis.horizontal,
+                          itemCount: widget.items.length,
+                          separatorBuilder: (_, _) =>
+                              const SizedBox(width: _gap),
+                          itemBuilder: (context, i) {
+                            final item = widget.items[i];
+                            return _StripTile(
+                              key: ValueKey(item.key),
+                              item: item,
+                              thumbs: widget.thumbs,
+                              size: _strip,
+                              copied: copied.contains(item.key),
+                              current: item.key == current?.key,
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 20),
+                  const NoticeCard(
+                    tone: NoticeTone.accent,
+                    icon: Icons.cable_rounded,
+                    text: 'Keep the cable plugged in and the iPhone unlocked.',
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 6),
-            Semantics(
-              liveRegion: true,
-              child: Text(
-                p == null
-                    ? 'Starting...'
-                    : 'Copying ${p.filesDone + (p.filesDone < p.filesTotal ? 1 : 0)} '
-                          'of ${p.filesTotal}',
-                style: CdType.titleM.copyWith(fontSize: 17, color: c.text),
-              ),
-            ),
-            const SizedBox(height: 18),
-            if (p == null)
-              const LinearProgressIndicator(minHeight: 10)
-            else
-              CdProgressBar(value: p.fraction, semanticLabel: 'Copy progress'),
-            const SizedBox(height: 8),
-            if (p != null)
-              Text(
-                '${formatSize(p.bytesDone)} of ${formatSize(p.bytesTotal)}',
-                style: CdType.small.copyWith(color: c.text2),
-              ),
-            const SizedBox(height: 24),
-            const NoticeCard(
-              tone: NoticeTone.accent,
-              icon: Icons.cable_rounded,
-              text: 'Keep the cable plugged in and the iPhone unlocked.',
-            ),
-            const Spacer(),
+            const SizedBox(height: 12),
             OutlinedButton(
               style: CdButtonStyles.danger(context).merge(CdButtonStyles.wide),
-              onPressed: onStop,
+              onPressed: widget.onStop,
               child: const Text('Stop'),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<Widget> _details(CdColors c, ImportProgress? p, int percent) => [
+    ExcludeSemantics(
+      child: Text('$percent%', style: CdType.displayXL.copyWith(color: c.text)),
+    ),
+    const SizedBox(height: 6),
+    Semantics(
+      liveRegion: true,
+      child: Text(
+        p == null
+            ? 'Starting...'
+            : 'Copying ${p.filesDone + (p.filesDone < p.filesTotal ? 1 : 0)} '
+                  'of ${p.filesTotal}',
+        style: CdType.titleM.copyWith(fontSize: 17, color: c.text),
+      ),
+    ),
+    const SizedBox(height: 18),
+    if (p == null)
+      const LinearProgressIndicator(minHeight: 10)
+    else
+      CdProgressBar(value: p.fraction, semanticLabel: 'Copy progress'),
+    const SizedBox(height: 8),
+    if (p != null)
+      Text(
+        '${formatSize(p.bytesDone)} of ${formatSize(p.bytesTotal)}',
+        style: CdType.small.copyWith(color: c.text2),
+      ),
+  ];
+}
+
+/// One item in the copy strip: ticked when done, outlined while copying.
+class _StripTile extends StatelessWidget {
+  const _StripTile({
+    super.key,
+    required this.item,
+    required this.thumbs,
+    required this.size,
+    required this.copied,
+    required this.current,
+  });
+
+  final RollItem item;
+  final ThumbnailQueue<int, String>? thumbs;
+  final double size;
+  final bool copied;
+  final bool current;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(8),
+      child: SizedBox.square(
+        dimension: size,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            _CameraThumb(item: item, thumbs: thumbs),
+            if (copied) ...[
+              const ColoredBox(color: Color(0x660E1116)),
+              Center(
+                child: Container(
+                  width: 24,
+                  height: 24,
+                  decoration: BoxDecoration(
+                    color: c.accent,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(Icons.check_rounded, color: c.onAccent, size: 16),
+                ),
+              ),
+            ],
+            if (current)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: c.accent, width: 3),
+                ),
+              ),
           ],
         ),
       ),

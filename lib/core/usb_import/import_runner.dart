@@ -28,12 +28,20 @@ class ImportProgress {
     required this.filesTotal,
     required this.bytesDone,
     required this.bytesTotal,
+    this.currentItem,
+    this.copiedItems = const {},
   });
 
   final int filesDone;
   final int filesTotal;
   final int bytesDone;
   final int bytesTotal;
+
+  /// [ImportFile.itemKey] of the file being copied; null between files.
+  final String? currentItem;
+
+  /// Items whose files have all been copied so far.
+  final Set<String> copiedItems;
 
   double get fraction => bytesTotal <= 0
       ? (filesTotal == 0 ? 1 : filesDone / filesTotal)
@@ -95,6 +103,8 @@ class ImportRunner {
 
   bool _cancelled = false;
   int? _currentHandle;
+  String? _currentItem;
+  final Set<String> _copiedItems = {};
   int _currentBytes = 0;
   int _doneBytes = 0;
   int _doneFiles = 0;
@@ -118,6 +128,8 @@ class ImportRunner {
     filesTotal: _totalFiles,
     bytesDone: _doneBytes + _currentBytes,
     bytesTotal: _totalBytes,
+    currentItem: _currentItem,
+    copiedItems: Set.unmodifiable(_copiedItems),
   );
 
   void _emit() => _onProgress?.call(progress);
@@ -136,6 +148,10 @@ class ImportRunner {
     if (free != null && free < needed) {
       throw NotEnoughSpace(needed: needed, free: free);
     }
+    final perItem = <String, int>{};
+    for (final f in files) {
+      perItem.update(f.itemKey, (n) => n + 1, ifAbsent: () => 1);
+    }
     _emit();
 
     final failedItems = <String>{};
@@ -151,14 +167,24 @@ class ImportRunner {
       }
       final f = files[i];
       _currentHandle = f.object.handle;
+      _currentItem = f.itemKey;
       _currentBytes = 0;
+      _emit();
       final result = await _copyWithRetry(f);
       _currentHandle = null;
+      _currentItem = null;
       _currentBytes = 0;
       switch (result) {
         case _Copied(:final written):
           bytes += written;
-          copiedFiles.update(f.itemKey, (n) => n + 1, ifAbsent: () => 1);
+          final n = copiedFiles.update(
+            f.itemKey,
+            (n) => n + 1,
+            ifAbsent: () => 1,
+          );
+          if (n == perItem[f.itemKey] && !failedItems.contains(f.itemKey)) {
+            _copiedItems.add(f.itemKey);
+          }
         case _Failed():
           failed++;
           failedItems.add(f.itemKey);
@@ -171,16 +197,8 @@ class ImportRunner {
       _emit();
     }
 
-    final perItem = <String, int>{};
-    for (final f in files) {
-      perItem.update(f.itemKey, (n) => n + 1, ifAbsent: () => 1);
-    }
-    final copiedItems = {
-      for (final e in copiedFiles.entries)
-        if (!failedItems.contains(e.key) && perItem[e.key] == e.value) e.key,
-    };
     final summary = ImportSummary(
-      copiedItems: copiedItems,
+      copiedItems: Set.of(_copiedItems),
       copiedFiles: copiedFiles.values.fold(0, (a, b) => a + b),
       failedFiles: failed,
       notTried: files.length - i,

@@ -43,6 +43,36 @@ void main() {
     expect(progress.last.fraction, 1);
   });
 
+  test('reports the item being copied and items as they finish', () async {
+    final seen = <String>[];
+    late ImportRunner runner;
+    runner = ImportRunner(
+      copy: (f) async {
+        final p = runner.progress;
+        seen.add('${p.currentItem}: ${p.copiedItems.join(',')}');
+        if (f.object.handle == 4) throw const CopyFailure('size_mismatch');
+        return 100;
+      },
+      freeBytes: () async => null,
+    );
+    // A Live Photo (two files), a single photo, and one that fails.
+    final s = await runner.run([
+      file(1, item: 'live'),
+      file(2, item: 'live'),
+      file(3),
+      file(4),
+    ]);
+    expect(seen, [
+      'live: ',
+      'live: ',
+      'i3: live',
+      'i4: live,i3',
+      'i4: live,i3',
+    ]);
+    expect(runner.progress.currentItem, isNull);
+    expect(s.copiedItems, {'live', 'i3'});
+  });
+
   test('refuses before copying when space is short', () async {
     var calls = 0;
     final runner = ImportRunner(
@@ -151,6 +181,7 @@ void main() {
       freeBytes: () async => null,
     );
     await runner.run([file(1)], onProgress: (p) => seen.add(p.bytesDone));
-    expect(seen, [0, 40, 100]);
+    // Start, file 1 started, its device progress, file 1 done.
+    expect(seen, [0, 0, 40, 100]);
   });
 }

@@ -24,6 +24,7 @@ import io.flutter.plugin.common.MethodChannel
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
@@ -76,6 +77,7 @@ class UsbCameraChannel(
     private val ticker: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor()
     private val main = Handler(Looper.getMainLooper())
     private val cancel = AtomicBoolean(false)
+    private val quick = ConcurrentLinkedQueue<Runnable>()
 
     private var sink: EventChannel.EventSink? = null
     private var permissionWaiter: ((Boolean) -> Unit)? = null
@@ -174,8 +176,8 @@ class UsbCameraChannel(
                 cameras().map { mapOf("id" to it.deviceName, "name" to nameOf(it)) },
             )
             "open" -> open(call.argument<String>("id")!!, result)
-            "nextPage" -> onMtp(result) { nextPage(call.argument<Number>("max")?.toInt() ?: 500) }
-            "thumbnail" -> onMtp(result) { thumbnail(call.argument<Number>("handle")!!.toInt()) }
+            "nextPage" -> onMtpQuick(result) { nextPage(call.argument<Number>("max")?.toInt() ?: 500) }
+            "thumbnail" -> onMtpQuick(result) { thumbnail(call.argument<Number>("handle")!!.toInt()) }
             "importFile" -> {
                 cancel.set(false)
                 onMtp(result) {
@@ -461,6 +463,7 @@ class UsbCameraChannel(
             if (n <= 0 || n > want) throw failure()
             out.write(buffer, 0, n.toInt())
             offset += n
+            runQuick()
             val now = System.nanoTime()
             if (now - lastEvent > PROGRESS_NS) {
                 lastEvent = now
@@ -507,18 +510,40 @@ class UsbCameraChannel(
 
     private fun onMtp(result: MethodChannel.Result, work: () -> Any?) {
         try {
-            mtp.execute {
-                try {
-                    val value = work()
-                    main.post { result.success(value) }
-                } catch (e: Exception) {
-                    val code = errorCode(e)
-                    log("failed: $code")
-                    main.post { result.error(code, null, null) }
-                }
-            }
+            mtp.execute(task(result, work))
         } catch (e: java.util.concurrent.RejectedExecutionException) {
             result.error("disconnected", null, null)
+        }
+    }
+
+    /**
+     * Short calls (a preview, a page of the list): also run between the
+     * 1 MB parts of a copy, so the screen does not wait for a whole file.
+     * Whichever comes first, the copy loop or the queue, runs it.
+     */
+    private fun onMtpQuick(result: MethodChannel.Result, work: () -> Any?) {
+        val t = task(result, work)
+        quick.add(t)
+        try {
+            mtp.execute { runQuick() }
+        } catch (e: java.util.concurrent.RejectedExecutionException) {
+            if (quick.remove(t)) result.error("disconnected", null, null)
+        }
+    }
+
+    /** On the mtp thread only. */
+    private fun runQuick() {
+        while (true) (quick.poll() ?: return).run()
+    }
+
+    private fun task(result: MethodChannel.Result, work: () -> Any?) = Runnable {
+        try {
+            val value = work()
+            main.post { result.success(value) }
+        } catch (e: Exception) {
+            val code = errorCode(e)
+            log("failed: $code")
+            main.post { result.error(code, null, null) }
         }
     }
 
