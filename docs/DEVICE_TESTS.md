@@ -1787,3 +1787,60 @@ Everything in this section. On the PC: the lanes, stripes in every failure case,
 | F-4 | | | | | | | |
 | F-5 | | | | | | | |
 | F-6 | | | | | | | |
+
+## Many files (D-072)
+
+Export during the send, six lanes, withdraw, grouped Photos saves. Same build on both phones. Android: `adb logcat -v time -s flutter > log.txt` running (the timestamps are what matter).
+
+### Preparation (once)
+
+- On the iPhone: 600 photos (a mix of HEIC, Live Photos and a few edited ones). If "Optimize iPhone Storage" is on, note it.
+- On the Android phone: 300 photos.
+- Note for every figure: same router (2.4 or 5 GHz), Android hotspot or iPhone Personal Hotspot.
+
+### M-1: 600 photos iPhone to Android, same Wi-Fi
+
+1. Select the 600 photos, send. Time it from tapping the receiver to the Done screen.
+2. Expected: "Preparing" lasts a few seconds at most, not minutes; the progress bar starts moving almost at once; all 600 arrive, Done says verified.
+3. In the Android log, `file fN: verified and saved` lines come at a steady pace, several per second.
+4. Paste back: the total time, the average MB/s on the Done screen, the network, and `log.txt`.
+5. If you still have the build from before this change, do the same with it and note its time.
+
+### M-2: 300 photos Android to iPhone
+
+1. Send the 300 photos to the iPhone. Expected: all arrive in Photos, with their original dates, and none twice.
+2. Note the total time and the average MB/s.
+
+### M-3: Edited photos and Live Photos
+
+1. Send 5 edited photos and 5 Live Photos (default settings) iPhone to Android. Expected: all arrive; the edited ones show the edit; byte sizes match the iPhone's "Save to Files" export of the same items.
+
+### M-4: A photo that cannot be read
+
+1. Make a copy of one photo in Photos (Duplicate), so you can delete it safely. Select 100 photos with the duplicate as the last one, send to Android.
+2. At about 10 %, switch to Photos, delete the duplicate, switch back to CrossDrop (the send pauses while CrossDrop is in the background, then continues).
+3. Expected: 99 photos arrive; the deleted one shows as failed on the result screen; the send does not stop as a whole. The iPhone log or result shows `source_unreadable` for that file only.
+
+### M-5: Wi-Fi drop in the middle of 600
+
+1. Start M-1; at about 30 %, turn the Android phone's Wi-Fi off for 10 s, then on.
+2. Expected: "Connection lost. Trying again…", then it continues and all 600 verify.
+
+### M-6: Cancel in the middle
+
+1. Start M-1; at about 30 %, Cancel on the iPhone. Expected: it stops at once; no partial file is left in the Android gallery; sending again works.
+
+### Not checked on devices
+
+Everything in this section. On the PC: the six lanes, the skipped status call, withdraw (old and new receiver), files that only exist once opened, the large-file cap, and the export pipeline with a fake library. Not on the PC at all: the Swift `plan` call and grouped Photos saves (they compile only in CI).
+
+### Results
+
+| Check | Date | iPhone (model, iOS) | Android (model, version) | Network | Commit | Time / MB/s | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| M-1 | | | | | | | |
+| M-2 | | | | | | | |
+| M-3 | | | | | | | |
+| M-4 | | | | | | | |
+| M-5 | | | | | | | |
+| M-6 | | | | | | | |

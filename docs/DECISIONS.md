@@ -640,3 +640,26 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - `CLAUDE.md` still says "SHA-256 ... sent in /complete" and one connection per session in its summary; ARCHITECTURE.md is the reference.
   - On Android, upload workers and hash workers read content URIs with blocking `pread` on the descriptor. That path only runs on Linux in CI and on phones, not on the Windows PC.
   - Device checks F-1 to F-6 in DEVICE_TESTS.md, "Faster transfers".
+
+## D-072: Many files as fast as one (export during the send, six lanes, withdraw, grouped Photos saves)
+- Date: 2026-11-22
+- Status: Accepted (built and unit-tested; not yet run on phones)
+- Context: The owner sent 2 or 3 photos quickly, but 600 photos iPhone to Android on the same Wi-Fi were "slow like hell". On the PC, through the real `SendSession` and `ReceiveServer` over loopback with on-disk databases, 600 × 3 MB took 29.3 s (61.7 MB/s, about 49 ms per file) against 26.2 s (68.8 MB/s) for one 1.8 GB file: the protocol itself handles many files. What the PC does not have, and the phones do:
+  - the iPhone exported every picked photo to staging before the offer, three at a time, downloading iCloud originals first; nothing was sent until the last one was done;
+  - each file cost three round trips (status, PUT, complete), and the three lanes all waited on `complete`, which on the receiver includes the save into the gallery; on phone Wi-Fi a round trip is tens of milliseconds, not near zero;
+  - an iPhone receiver saved each photo in its own `performChanges`, and Photos takes changes one at a time;
+  - every file forced three progress snapshots of the whole list (600 entries), redrawn on the isolate that also moves small files' TLS.
+- Decision:
+  - **Export during the send (iOS).** A new `plan` call returns what `export` would produce, with each file's size from the library (`PHAssetResource` `fileSize`, read by key) and the path the export will write, without writing anything. Such items are offered at once; `ExportPipeline` exports them in offer order, four at a time, while earlier files are already moving, and opening a file waits for its export. Only unedited originals (`.photo`, `.video`, `.pairedVideo`) are planned, whose bytes `requestData` returns unchanged; an edited item, a HEIC to be converted, or a resource without a size is exported before the offer as before. No conversion, no quality change: the bytes are the library's original. The size is compared again when the file is opened.
+  - **Withdraw a file.** `DELETE /v1/sessions/{id}/files/{fileId}`: the sender cannot read that file (export failed, deleted meanwhile, size changed), the receiver fails it alone with `withdrawn`, the session goes on. An older receiver answers `not_found` and the send stops, as before. A failed export is tried once more when the send opens the file.
+  - **Six upload lanes** (receiver `uploadSlots` 6, sender default 6), so the link keeps moving while files wait on round trips and saves. Data lane isolates stay at three; at most three files of 8 MB or more at once, each with its worker and hash workers.
+  - **One round trip less:** after a fresh offer, a file's first PUT goes out without asking its status. If the receiver did have bytes, the PUT gets `offset_mismatch` and the retry asks.
+  - **Grouped Photos saves (iOS receiver):** saves that arrive while one runs go into the next `performChanges`, up to 20. A group Photos refuses is saved again one by one, so a bad file fails alone. The reply to `complete` still comes after the save.
+  - **Lighter progress:** per-file state changes are throttled like byte progress (10 per second), with a trailing update so the last state always shows.
+  - Not done: native TLS, keeping small files' TLS off the UI isolate (measure on phones first), re-exporting after an app restart mid-send (those files are withdrawn), a free-space check for planned exports before the offer.
+- Consequences:
+  - PC numbers barely move: loopback has no round-trip time and no Photos library. The gains are on the phones and must be measured (M-1 to M-6 in DEVICE_TESTS.md).
+  - The Preparing screen is short for library photos; iCloud downloads now happen during the send, so a photo that cannot be downloaded fails in the result instead of being left out before the offer.
+  - `fileSize` is not public API. If iOS ever reports a wrong size, that file is withdrawn (not corrupted): the sender compares the size before sending and the receiver never takes more bytes than offered.
+  - A resumable failure (Wi-Fi gone for 2 minutes) keeps the exports running, so Resume finds them. After an app restart, files not exported yet are withdrawn.
+  - The Swift changes (`plan`, grouped saves) compile only in CI (no Mac here).
