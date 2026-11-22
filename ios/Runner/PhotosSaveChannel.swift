@@ -14,8 +14,26 @@ import UniformTypeIdentifiers
 ///   identifier. The file is gone afterwards (moved into the library).
 ///   Errors: `permission`, `unsupported` (Photos refused the file; it is
 ///   still at `path`), `no_space`, `io`.
+///
+/// Saves that arrive while one is running are grouped into the next
+/// `performChanges`, up to [maxBatch] (D-072): Photos takes changes one at
+/// a time, and one change per photo made it the limit when receiving
+/// hundreds. A group Photos refuses is saved again one by one, so a bad
+/// file fails alone.
 final class PhotosSaveChannel {
   private let channel: FlutterMethodChannel
+  private let lock = NSLock()
+  private var pending: [PendingSave] = []
+  private var saving = false
+  private static let maxBatch = 20
+
+  private struct PendingSave {
+    let url: URL
+    let video: Bool
+    let name: String?
+    let created: Date?
+    let done: (Result<String, ExportError>) -> Void
+  }
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(name: "crossdrop/photos", binaryMessenger: messenger)
@@ -66,30 +84,75 @@ final class PhotosSaveChannel {
     default:
       break
     }
-    var placeholder: PHObjectPlaceholder?
+    lock.lock()
+    pending.append(PendingSave(url: url, video: video, name: name, created: created, done: done))
+    let start = !saving
+    saving = true
+    lock.unlock()
+    if start { flush() }
+  }
+
+  /// Saves what is waiting, a group at a time, until nothing is.
+  private func flush() {
+    lock.lock()
+    let batch = Array(pending.prefix(Self.maxBatch))
+    pending.removeFirst(batch.count)
+    if batch.isEmpty { saving = false }
+    lock.unlock()
+    if batch.isEmpty { return }
+    perform(batch) { [weak self] in self?.flush() }
+  }
+
+  private func perform(_ batch: [PendingSave], then next: @escaping () -> Void) {
+    var placeholders: [PHObjectPlaceholder?] = []
     PHPhotoLibrary.shared().performChanges({
-      let request = PHAssetCreationRequest.forAsset()
-      let options = PHAssetResourceCreationOptions()
-      // Move, not copy: a 4 GB video must not need 8 GB.
-      options.shouldMoveFile = true
-      if let name {
-        options.originalFilename = name
-        // Do not let Photos guess the type.
-        let ext = (name as NSString).pathExtension
-        if let type = UTType(filenameExtension: ext) {
-          options.uniformTypeIdentifier = type.identifier
+      placeholders = batch.map(Self.creationRequest)
+    }) { [weak self] success, error in
+      if success {
+        for (item, placeholder) in zip(batch, placeholders) {
+          if let id = placeholder?.localIdentifier {
+            item.done(.success(id))
+          } else {
+            item.done(.failure(ExportError(code: "unsupported")))
+          }
         }
+        next()
+      } else if batch.count == 1 {
+        batch[0].done(.failure(ExportError(code: Self.code(for: error))))
+        next()
+      } else if let self {
+        // One refused file fails the whole change: try each alone.
+        self.performEach(batch[...], then: next)
+      } else {
+        for item in batch { item.done(.failure(ExportError(code: Self.code(for: error)))) }
       }
-      request.addResource(with: video ? .video : .photo, fileURL: url, options: options)
-      if let created { request.creationDate = created }
-      placeholder = request.placeholderForCreatedAsset
-    }) { success, error in
-      if success, let id = placeholder?.localIdentifier {
-        done(.success(id))
-        return
-      }
-      done(.failure(ExportError(code: Self.code(for: error))))
     }
+  }
+
+  private func performEach(_ rest: ArraySlice<PendingSave>, then next: @escaping () -> Void) {
+    guard let first = rest.first else {
+      next()
+      return
+    }
+    perform([first]) { [weak self] in self?.performEach(rest.dropFirst(), then: next) }
+  }
+
+  private static func creationRequest(_ item: PendingSave) -> PHObjectPlaceholder? {
+    let request = PHAssetCreationRequest.forAsset()
+    let options = PHAssetResourceCreationOptions()
+    // Move, not copy: a 4 GB video must not need 8 GB.
+    options.shouldMoveFile = true
+    if let name = item.name {
+      options.originalFilename = name
+      // Do not let Photos guess the type.
+      let ext = (name as NSString).pathExtension
+      if let type = UTType(filenameExtension: ext) {
+        options.uniformTypeIdentifier = type.identifier
+      }
+    }
+    request.addResource(with: item.video ? .video : .photo, fileURL: item.url, options: options)
+    if let created = item.created { request.creationDate = created }
+    return request.placeholderForCreatedAsset
   }
 
   private static func code(for error: Error?) -> String {
