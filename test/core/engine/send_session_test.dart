@@ -481,6 +481,28 @@ void main() {
       expect(opener.openNow, 0);
     });
 
+    test('files made during the send; a failed one is withdrawn', () async {
+      // As iOS exports during the send (D-072): offered before they exist.
+      final a = await makeFile('a.jpg', 3000, seed: 8);
+      final c = await makeFile('c.jpg', 4000, seed: 9);
+      final opener = _LateOpener({
+        p.join(src.path, 'late_a'): a.$1.path,
+        p.join(src.path, 'late_b'): null, // its export fails
+        p.join(src.path, 'late_c'): c.$1.path,
+      });
+      final result = await session([
+        SendItem(path: p.join(src.path, 'late_a'), name: 'a.jpg', size: 3000),
+        SendItem(path: p.join(src.path, 'late_b'), name: 'b.jpg', size: 10),
+        SendItem(path: p.join(src.path, 'late_c'), name: 'c.jpg', size: 4000),
+      ], opener: opener).run();
+
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      expect(result.savedCount, 2);
+      expect(result.files[1].error, SendReasons.sourceUnreadable);
+      await expectSavedMatches({'a.jpg': a.$2, 'c.jpg': c.$2});
+      expect(r.server.sessions.single.status, SessionStatus.done);
+    });
+
     test('an older receiver that cannot withdraw: the send stops', () async {
       final a = await makeFile('a.jpg', 1000, seed: 6);
       final opener = _MappedOpener({'content://x/1': a.$1.path}, failAfter: 1);
@@ -994,6 +1016,28 @@ class _HookedClient extends UploadClient {
     final s = await super.fileStatus(t);
     onFileStatus();
     return s;
+  }
+}
+
+/// Sources that exist only once opened, like iOS exports made during the
+/// send (D-072). A null target fails its "export".
+class _LateOpener implements DeferredSourceOpener {
+  _LateOpener(this.targets);
+  final Map<String, String?> targets;
+  final Set<String> made = {};
+
+  @override
+  bool isPending(String ref) => !made.contains(ref);
+
+  @override
+  Future<OpenedSource> open(String ref) async {
+    if (!made.contains(ref)) {
+      final from = targets[ref];
+      if (from == null) throw const SourceUnavailable('icloud');
+      await File(from).copy(ref);
+      made.add(ref);
+    }
+    return const FileSourceOpener().open(ref);
   }
 }
 

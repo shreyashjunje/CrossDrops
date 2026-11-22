@@ -1,6 +1,9 @@
 import 'dart:io';
 
+import 'dart:async';
+
 import 'package:crossdrop/core/engine/source_opener.dart';
+import 'package:crossdrop/core/media/export_pipeline.dart';
 import 'package:crossdrop/core/media/format_plan.dart';
 import 'package:crossdrop/core/media/prepare.dart';
 import 'package:crossdrop/core/protocol/models.dart';
@@ -24,6 +27,7 @@ void main() {
     FormatSettings settings = const FormatSettings(),
     SourceOpener opener = const FileSourceOpener(),
     int parallel = Preparer.defaultParallel,
+    ExportPipeline? pipeline,
   }) => Preparer(
     platform: media,
     opener: opener,
@@ -31,6 +35,7 @@ void main() {
     settings: settings,
     receiver: DevicePlatform.android,
     parallel: parallel,
+    pipeline: pipeline,
     newBatchId: () => 'batch1',
   );
 
@@ -42,6 +47,95 @@ void main() {
   }) => PickedAsset(
     LibraryAsset(id: id, kind: kind, originalName: name, isLivePhoto: live),
   );
+
+  group('export during the send (D-072)', () {
+    test('planned items are offered first and exported in order', () async {
+      media.plannable.addAll(['a', 'b', 'c']);
+      final pipeline = ExportPipeline(
+        media,
+        const FileSourceOpener(),
+        parallel: 1,
+      );
+      final r = await preparer(pipeline: pipeline).prepare([
+        asset('a', name: 'IMG_1.HEIC'),
+        asset('b', name: 'IMG_2.HEIC'),
+        asset('c', kind: FileKind.video, name: 'IMG_3.MOV'),
+      ]);
+
+      expect(media.exported, isEmpty, reason: 'nothing exported yet');
+      expect(r.items.map((i) => i.name), [
+        'IMG_1.HEIC',
+        'IMG_2.HEIC',
+        'IMG_3.MOV',
+      ]);
+      expect(r.items.map((i) => i.size), [3, 3, 3]);
+      expect(r.stagingDir, p.join(staging, 'batch1'), reason: 'kept');
+      expect(pipeline.isPending(r.items[2].path), isTrue);
+
+      // Opening the last one first starts its export at once.
+      final o = await pipeline.open(r.items[2].path);
+      expect(o.length, 3);
+      await o.close();
+      expect(media.exported, ['c']);
+      expect(pipeline.isPending(r.items[2].path), isFalse);
+
+      pipeline.start();
+      await (await pipeline.open(r.items[1].path)).close();
+      expect(media.exported, ['c', 'a', 'b']);
+      await pipeline.cancel();
+    });
+
+    test('a failed export is tried once more, then unavailable', () async {
+      media.plannable.add('a');
+      media.failures['a'] = 'icloud';
+      final pipeline = ExportPipeline(media, const FileSourceOpener());
+      final r = await preparer(pipeline: pipeline)
+          .prepare([asset('a', name: 'IMG_1.HEIC')]);
+      pipeline.start();
+      await expectLater(
+        pipeline.open(r.items.single.path),
+        throwsA(isA<SourceUnavailable>()),
+      );
+      expect(media.exported, ['a', 'a'], reason: 'background, then retry');
+      await expectLater(
+        pipeline.open(r.items.single.path),
+        throwsA(isA<SourceUnavailable>()),
+      );
+      expect(media.exported, hasLength(2), reason: 'no third try');
+    });
+
+    test('a conversion is exported up front, as before', () async {
+      media.plannable.add('a');
+      final pipeline = ExportPipeline(media, const FileSourceOpener());
+      final r = await preparer(
+        pipeline: pipeline,
+        settings: const FormatSettings(convertHeicToJpeg: true),
+      ).prepare([asset('a', name: 'IMG_1.HEIC')]);
+      expect(media.exported, ['a']);
+      expect(pipeline.isEmpty, isTrue);
+      expect(r.items.single.name, 'IMG_1.JPG');
+    });
+
+    test('cancel stops the exports still to come', () async {
+      media.plannable.addAll(['a', 'b', 'c']);
+      final gate = Completer<void>();
+      media.onExport = (_) => gate.future;
+      final pipeline = ExportPipeline(
+        media,
+        const FileSourceOpener(),
+        parallel: 1,
+      );
+      await preparer(pipeline: pipeline)
+          .prepare([asset('a'), asset('b'), asset('c')]);
+      pipeline.start();
+      await Future<void>.delayed(Duration.zero);
+      final cancelled = pipeline.cancel();
+      gate.complete();
+      await cancelled;
+      expect(media.exported, ['a']);
+      expect(media.cancels, 1);
+    });
+  });
 
   test('exports photos and videos with their original names', () async {
     final r = await preparer().prepare([
@@ -311,6 +405,31 @@ class _FakeMedia implements MediaPlatform {
   final List<String> exported = [];
   Future<void> Function(String id)? onExport;
   int cancels = 0;
+
+  /// Ids whose files [planAsset] knows ahead (D-072).
+  final Set<String> plannable = {};
+  final List<String> planned = [];
+
+  @override
+  Future<List<ResolvedFile>?> planAsset(
+    LibraryAsset asset,
+    ExportPlan plan,
+    String dir,
+  ) async {
+    if (!plannable.contains(asset.id) || plan.convertToJpeg) return null;
+    planned.add(asset.id);
+    return [
+      ResolvedFile(
+        ref: p.join(dir, 'still.bin'),
+        size: 3,
+        role: asset.kind == FileKind.video
+            ? ResolvedRole.video
+            : ResolvedRole.still,
+        resourceName: asset.originalName,
+        created: DateTime.utc(2026, 1, 2),
+      ),
+    ];
+  }
 
   @override
   Future<List<ResolvedFile>> resolveAsset(

@@ -64,29 +64,56 @@ class IosMedia implements MediaPlatform {
         'jpeg': plan.convertToJpeg,
         'pairedVideo': plan.includePairedVideo,
       }))!;
-      final createdMs = m['createdMs'] as num?;
-      final created = createdMs == null
-          ? null
-          : DateTime.fromMillisecondsSinceEpoch(createdMs.toInt(), isUtc: true);
-      final original = m['originalName'] as String?;
-      return [
-        for (final f in (m['files']! as List).cast<Map<Object?, Object?>>())
-          ResolvedFile(
-            ref: f['path']! as String,
-            size: (f['size']! as num).toInt(),
-            role: f['role']! as String,
-            resourceName: f['resourceName'] as String?,
-            originalName: original,
-            created: created,
-            converted: f['converted'] as bool? ?? false,
-          ),
-      ];
+      return _resolved(m);
     } on PlatformException catch (e) {
       throw MediaUnavailable(e.code);
     } finally {
       remove();
       _progress.remove(token);
     }
+  }
+
+  /// `plan`: the same reply as `export`, with the library's sizes, and
+  /// nothing written. Null when a size is not known ahead (D-072).
+  @override
+  Future<List<ResolvedFile>?> planAsset(
+    LibraryAsset asset,
+    ExportPlan plan,
+    String dir,
+  ) async {
+    try {
+      final m = await _channel.invokeMapMethod<String, Object?>('plan', {
+        'id': asset.id,
+        'dir': dir,
+        'jpeg': plan.convertToJpeg,
+        'pairedVideo': plan.includePairedVideo,
+      });
+      return m == null ? null : _resolved(m);
+    } on PlatformException {
+      return null;
+    } on MissingPluginException {
+      return null;
+    }
+  }
+
+  static List<ResolvedFile> _resolved(Map<String, Object?> m) {
+    final createdMs = m['createdMs'] as num?;
+    final created = createdMs == null
+        ? null
+        : DateTime.fromMillisecondsSinceEpoch(createdMs.toInt(), isUtc: true);
+    final original = m['originalName'] as String?;
+    return [
+      for (final f in (m['files']! as List).cast<Map<Object?, Object?>>())
+        ResolvedFile(
+          ref: f['path']! as String,
+          size: (f['size']! as num).toInt(),
+          role: f['role']! as String,
+          resourceName: f['resourceName'] as String?,
+          originalName: original,
+          created: created,
+          converted: f['converted'] as bool? ?? false,
+        ),
+    ];
   }
 
   /// One `describe` call for all of them (PHAssetResource names, no

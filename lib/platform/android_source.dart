@@ -185,6 +185,14 @@ class AndroidMedia implements MediaPlatform {
     ];
   }
 
+  /// Nothing to plan: [resolveAsset] copies nothing on Android.
+  @override
+  Future<List<ResolvedFile>?> planAsset(
+    LibraryAsset asset,
+    ExportPlan plan,
+    String dir,
+  ) async => null;
+
   /// The picker already has MediaStore's display names on Android.
   @override
   Future<Map<String, String>> originalNames(List<String> ids) async => const {};

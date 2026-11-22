@@ -38,6 +38,13 @@ abstract interface class SourceOpener {
   Future<OpenedSource> open(String ref);
 }
 
+/// An opener some of whose sources do not exist yet: iOS library items
+/// exported while the send runs (D-072). [open] waits for them.
+abstract interface class DeferredSourceOpener implements SourceOpener {
+  /// [ref] is still being made; its size was given ahead.
+  bool isPending(String ref);
+}
+
 /// Plain files: picked documents, iOS exports, tests and tools.
 class FileSourceOpener implements SourceOpener {
   const FileSourceOpener();

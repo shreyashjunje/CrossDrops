@@ -1212,6 +1212,10 @@ class SendSession {
   /// The source still exists and has the offered size. Opens and closes
   /// it, so checking 10,000 files never holds 10,000 descriptors.
   Future<bool> _sourceIntact(_File f) async {
+    // Exported during the send; its size is checked when it is opened.
+    if (_opener case DeferredSourceOpener o when o.isPending(f.item.path)) {
+      return true;
+    }
     try {
       final o = await _opener.open(f.item.path);
       await o.close();

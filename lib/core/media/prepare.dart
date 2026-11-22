@@ -10,6 +10,7 @@ import '../protocol/file_type.dart';
 import '../protocol/models.dart';
 import '../security/device_identity.dart';
 import '../storage/file_name_sanitizer.dart';
+import 'export_pipeline.dart';
 import 'format_plan.dart';
 import 'thumb_ref.dart';
 
@@ -209,6 +210,16 @@ abstract interface class MediaPlatform {
   /// [MediaUnavailable].
   Future<int> copyIntoStaging(String ref, String dest, PrepareControl control);
 
+  /// What [resolveAsset] would produce, with exact sizes, without
+  /// exporting (D-072); `ref` is the path the export will write. Null when
+  /// that is not known ahead (an edited item, a conversion, a size the
+  /// library does not give). Android returns null: it never copies.
+  Future<List<ResolvedFile>?> planAsset(
+    LibraryAsset asset,
+    ExportPlan plan,
+    String dir,
+  );
+
   /// The library's own file names (`IMG_1234.HEIC`) for asset [ids], so
   /// the Send screen shows them before anything is exported. Ids it cannot
   /// name are left out. Never throws.
@@ -247,6 +258,7 @@ class Preparer {
     this.settings = const FormatSettings(),
     this.receiver,
     this.parallel = defaultParallel,
+    this.pipeline,
     String Function()? newBatchId,
   }) : assert(parallel >= 1),
        _media = platform,
@@ -267,6 +279,10 @@ class Preparer {
   final FormatSettings settings;
   final DevicePlatform? receiver;
   final int parallel;
+
+  /// With one, library items whose sizes are known ahead are planned, not
+  /// exported, and [pipeline] exports them during the send (D-072).
+  final ExportPipeline? pipeline;
   final String Function() _newBatchId;
 
   /// Prepares [parallel] items at a time; the result keeps the pick
@@ -325,7 +341,9 @@ class Preparer {
       for (var w = 0; w < min(parallel, count); w++) worker(),
     ]);
     final skipped = [for (final s in skips) ?s];
-    final staged = await _keepIfUsed(batch);
+    final staged = pipeline?.isEmpty == false
+        ? batch
+        : await _keepIfUsed(batch);
     if (ctl.isCancelled) {
       if (staged != null) await deleteStaging(staged);
       return PrepareResult(items: const [], skipped: skipped, cancelled: true);
@@ -346,13 +364,16 @@ class Preparer {
   ) async {
     final asset = picked.asset;
     final plan = planExport(asset, settings, receiver: receiver);
-    final files = await _media.resolveAsset(
-      asset,
-      plan,
-      p.join(batch, '$index'),
-      ctl,
-      onProgress,
-    );
+    final dir = p.join(batch, '$index');
+    final later = pipeline;
+    final planned = later == null
+        ? null
+        : await _media.planAsset(asset, plan, dir);
+    final files =
+        planned ?? await _media.resolveAsset(asset, plan, dir, ctl, onProgress);
+    if (planned != null && planned.isNotEmpty) {
+      later!.add(asset, plan, dir, planned);
+    }
     if (files.isEmpty) throw const MediaUnavailable('not_found');
     final group =
         files.any((f) => f.role == ResolvedRole.paired) && files.length > 1

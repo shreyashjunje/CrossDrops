@@ -15,6 +15,11 @@ import UniformTypeIdentifiers
 ///   converted}]}`. `role` is `still`, `video` or `paired`. Reads the
 ///   *current* version (edits applied) of the original resource, never a
 ///   resized copy, and downloads it from iCloud if needed.
+/// - `plan {id, dir, jpeg, pairedVideo}` -> the same map as `export`, with
+///   each file's size from the library and nothing written, or nil when a
+///   size is not known ahead: an edited item (its render), a HEIC to be
+///   converted, a resource without a size (D-072). Dart then offers the
+///   item before exporting it, and exports it during the send.
 /// - `cancel {token}`.
 /// - Native to Dart `progress {token, fraction}` while downloading.
 ///
@@ -74,6 +79,19 @@ final class ExportChannel {
           case .failure(let error): result(FlutterError(code: error.code, message: nil, details: nil))
           }
         }
+      }
+    case "plan":
+      guard let id = args["id"] as? String, let dir = args["dir"] as? String else {
+        result(FlutterError(code: "bad_args", message: nil, details: nil))
+        return
+      }
+      let jpeg = args["jpeg"] as? Bool ?? false
+      let pairedVideo = args["pairedVideo"] as? Bool ?? false
+      queue.async {
+        let plan = ExportJob.plan(
+          assetId: id, dir: URL(fileURLWithPath: dir, isDirectory: true), jpeg: jpeg,
+          pairedVideo: pairedVideo)
+        DispatchQueue.main.async { result(plan) }
       }
     case "cancel":
       lock.lock()
@@ -167,31 +185,11 @@ final class ExportJob {
         done(.failure(ExportError(code: "not_found")))
         return
       }
-      let resources = PHAssetResource.assetResources(for: asset)
-      func pick(_ types: [PHAssetResourceType]) -> PHAssetResource? {
-        for t in types { if let r = resources.first(where: { $0.type == t }) { return r } }
-        return nil
-      }
-      let isVideo = asset.mediaType == .video
-      // Edited items have a full-size render; send what the user sees.
-      guard let main = isVideo ? pick([.fullSizeVideo, .video]) : pick([.fullSizePhoto, .photo])
-      else {
+      guard let parts = Self.parts(of: asset, pairedVideo: self.pairedVideo) else {
         done(.failure(ExportError(code: "not_found")))
         return
       }
-      var parts: [(PHAssetResource, String)] = [(main, isVideo ? "video" : "still")]
-      if !isVideo && self.pairedVideo && asset.mediaSubtypes.contains(.photoLive),
-        let paired = pick([.fullSizePairedVideo, .pairedVideo])
-      {
-        parts.append((paired, "paired"))
-      }
-      var meta: [String: Any] = [:]
-      if let name = ExportChannel.originalResource(of: asset)?.originalFilename {
-        meta["originalName"] = name
-      }
-      if let date = asset.creationDate {
-        meta["createdMs"] = Int64(date.timeIntervalSince1970 * 1000)
-      }
+      var meta = Self.meta(of: asset)
       do {
         try FileManager.default.createDirectory(at: self.dir, withIntermediateDirectories: true)
       } catch {
@@ -210,6 +208,70 @@ final class ExportJob {
     }
   }
 
+  /// What gets exported, with its role. Edited items have a full-size
+  /// render; send what the user sees.
+  static func parts(of asset: PHAsset, pairedVideo: Bool) -> [(PHAssetResource, String)]? {
+    let resources = PHAssetResource.assetResources(for: asset)
+    func pick(_ types: [PHAssetResourceType]) -> PHAssetResource? {
+      for t in types { if let r = resources.first(where: { $0.type == t }) { return r } }
+      return nil
+    }
+    let isVideo = asset.mediaType == .video
+    guard let main = isVideo ? pick([.fullSizeVideo, .video]) : pick([.fullSizePhoto, .photo])
+    else { return nil }
+    var parts: [(PHAssetResource, String)] = [(main, isVideo ? "video" : "still")]
+    if !isVideo && pairedVideo && asset.mediaSubtypes.contains(.photoLive),
+      let paired = pick([.fullSizePairedVideo, .pairedVideo])
+    {
+      parts.append((paired, "paired"))
+    }
+    return parts
+  }
+
+  static func meta(of asset: PHAsset) -> [String: Any] {
+    var meta: [String: Any] = [:]
+    if let name = ExportChannel.originalResource(of: asset)?.originalFilename {
+      meta["originalName"] = name
+    }
+    if let date = asset.creationDate {
+      meta["createdMs"] = Int64(date.timeIntervalSince1970 * 1000)
+    }
+    return meta
+  }
+
+  static func file(for resource: PHAssetResource, role: String, in dir: URL) -> URL {
+    let ext = (resource.originalFilename as NSString).pathExtension
+    return dir.appendingPathComponent(ext.isEmpty ? role : "\(role).\(ext.lowercased())")
+  }
+
+  /// The `export` reply without exporting, or nil if a size is not known
+  /// ahead. `fileSize` is not public API: it is read by key, and only an
+  /// unedited original is trusted, whose bytes `requestData` returns
+  /// unchanged. Dart checks the size again after the export.
+  static func plan(assetId: String, dir: URL, jpeg: Bool, pairedVideo: Bool) -> [String: Any]? {
+    guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [assetId], options: nil).firstObject,
+      let parts = Self.parts(of: asset, pairedVideo: pairedVideo)
+    else { return nil }
+    var files: [[String: Any]] = []
+    for (resource, role) in parts {
+      switch resource.type {
+      case .photo, .video, .pairedVideo: break
+      default: return nil  // a render: its size is not settled ahead
+      }
+      let uti = resource.uniformTypeIdentifier
+      if role == "still" && jpeg && Self.isHeif(uti) { return nil }
+      guard let size = (resource.value(forKey: "fileSize") as? NSNumber)?.int64Value, size > 0
+      else { return nil }
+      files.append([
+        "role": role, "path": Self.file(for: resource, role: role, in: dir).path,
+        "resourceName": resource.originalFilename, "uti": uti, "size": size, "converted": false,
+      ])
+    }
+    var reply = Self.meta(of: asset)
+    reply["files"] = files
+    return reply
+  }
+
   private func exportParts(
     _ parts: [(PHAssetResource, String)], index: Int, files: [[String: Any]],
     done: @escaping (Result<[[String: Any]], ExportError>) -> Void
@@ -219,8 +281,7 @@ final class ExportJob {
       return
     }
     let (resource, role) = parts[index]
-    let ext = (resource.originalFilename as NSString).pathExtension
-    let file = dir.appendingPathComponent(ext.isEmpty ? role : "\(role).\(ext.lowercased())")
+    let file = Self.file(for: resource, role: role, in: dir)
     write(resource, to: file) { error in
       if let error {
         try? FileManager.default.removeItem(at: file)
@@ -360,7 +421,7 @@ final class ExportJob {
 
   // MARK: HEIC to JPEG
 
-  private static func isHeif(_ uti: String) -> Bool {
+  static func isHeif(_ uti: String) -> Bool {
     guard let t = UTType(uti) else { return false }
     return t.conforms(to: .heic) || t.conforms(to: .heif)
   }

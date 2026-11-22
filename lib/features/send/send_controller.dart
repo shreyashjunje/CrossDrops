@@ -10,6 +10,7 @@ import '../../core/client/upload_client.dart';
 import '../../core/discovery/peer_locator.dart';
 import '../../core/engine/send_session.dart';
 import '../../core/log.dart';
+import '../../core/media/export_pipeline.dart';
 import '../../core/media/format_plan.dart';
 import '../../core/media/prepare.dart';
 import '../../core/protocol/models.dart';
@@ -113,6 +114,9 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   StreamSubscription<SendSnapshot>? _sub;
   PrepareControl? _prepare;
 
+  /// Exports of the last send still running (D-072).
+  ExportPipeline? _pipeline;
+
   /// The receiver is being checked before preparing (typed address).
   bool _checking = false;
   final Object _keepAliveKey = Object();
@@ -126,6 +130,7 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     final keepAlive = ref.read(keepAliveProvider);
     ref.onDispose(() {
       _sub?.cancel();
+      unawaited(_pipeline?.cancel());
       unawaited(keepAlive.end(_keepAliveKey));
     });
     return const SendState();
@@ -298,7 +303,7 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
       receiverTrusted: checked.trust.isTrusted,
       repository: ref.read(transferRepositoryProvider),
       locate: deviceId == null ? null : _locator(deviceId, device.deviceId),
-      opener: ref.read(sourceOpenerProvider),
+      opener: _pipeline ?? ref.read(sourceOpenerProvider),
     );
     if (checked.trust.isTrusted) {
       await ref.read(trustRepositoryProvider).touch(checked.fingerprint!);
@@ -330,12 +335,17 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     final settings = await ref
         .read(settingsRepositoryProvider)
         .formatSettings();
+    final media = ref.read(mediaPlatformProvider);
+    final opener = ref.read(sourceOpenerProvider);
+    // Library items go out while later ones are still exported (D-072).
+    final pipeline = ExportPipeline(media, opener);
     final preparer = Preparer(
-      platform: ref.read(mediaPlatformProvider),
-      opener: ref.read(sourceOpenerProvider),
+      platform: media,
+      opener: opener,
       stagingRoot: dirs.outgoingStaging,
       settings: settings,
       receiver: DevicePlatform.tryParse(target.platform ?? ''),
+      pipeline: pipeline,
     );
     _prepare = control;
     final picked = state.picked;
@@ -372,6 +382,12 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     } finally {
       _prepare = null;
       await keepAlive.end(_keepAliveKey);
+    }
+    if (!ref.mounted || result.cancelled || result.items.isEmpty) {
+      await pipeline.cancel();
+    } else if (!pipeline.isEmpty) {
+      await _pipeline?.cancel();
+      _pipeline = pipeline..start();
     }
     if (!ref.mounted) return null;
     if (result.cancelled) {
@@ -443,7 +459,10 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
         credentials: credentials,
         repository: ref.read(transferRepositoryProvider),
         locate: _locator(stored.peer.id, device.deviceId),
-        opener: ref.read(sourceOpenerProvider),
+        // The last send's exports go on after a resumable failure.
+        // shortcut: after an app restart nothing re-exports what was left;
+        // those files are withdrawn. Upgrade if that shows up in use.
+        opener: _pipeline ?? ref.read(sourceOpenerProvider),
       );
     } on StateError {
       // Stored before Phase 4, without the receiver's fingerprint.
@@ -567,6 +586,10 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   }
 
   Future<void> _releaseLeftovers() async {
+    // Exports write into the staging folder: stop them before it goes.
+    final pipeline = _pipeline;
+    _pipeline = null;
+    await pipeline?.cancel();
     final l = _leftovers;
     _leftovers = null;
     if (l == null) return;

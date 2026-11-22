@@ -125,6 +125,13 @@ class _NamingMedia implements MediaPlatform {
   final List<List<String>> asked = [];
 
   @override
+  Future<List<ResolvedFile>?> planAsset(
+    LibraryAsset asset,
+    ExportPlan plan,
+    String dir,
+  ) async => null;
+
+  @override
   Future<Map<String, String>> originalNames(List<String> ids) async {
     asked.add(ids);
     return {
