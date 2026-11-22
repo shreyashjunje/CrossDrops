@@ -57,7 +57,7 @@ Future<void> _receive(List<String> args) async {
   var port = 8443;
   var dir = 'received';
   // As the app; 0 takes every upload on the main port, as before D-071.
-  var lanes = ReceiveServer.maxParallelUploads;
+  var lanes = ReceiveServer.dataLaneCount;
   for (var i = 0; i + 1 < args.length; i += 2) {
     if (args[i] == '--port') port = int.parse(args[i + 1]);
     if (args[i] == '--dir') dir = args[i + 1];

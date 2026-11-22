@@ -364,8 +364,8 @@ class SendSession {
   final int parallelUploads;
 
   /// Small photos gain the most: each file costs a few round trips
-  /// (status, upload, verify) that run side by side (D-068).
-  static const int defaultParallelUploads = 3;
+  /// (upload, verify and save) that run side by side (D-068, D-072).
+  static const int defaultParallelUploads = 6;
 
   String _host;
   int _port;
@@ -394,6 +394,7 @@ class SendSession {
   int? _neededBytes;
   Duration? _retryIn;
   DateTime _lastEmit = DateTime.fromMillisecondsSinceEpoch(0);
+  Timer? _trailing;
 
   Completer<SessionEvent>? _decision;
   final Completer<void> _stopSignal = Completer<void>();
@@ -417,6 +418,17 @@ class SendSession {
   /// connections; several side by side already use as many.
   int _largeUploads = 0;
   final List<_Lane> _lanes = [];
+
+  /// Files of [UploadClient.fastMinBytes] or more being sent; at most
+  /// [maxLargeAtOnce]. Each takes an upload worker and up to three hash
+  /// workers, so six side by side would load a phone for no gain (D-072).
+  int _largeActive = 0;
+  final List<Completer<void>> _largeWaiting = [];
+  static const int maxLargeAtOnce = 3;
+
+  /// The offer was made by this run: the receiver has no byte of any file
+  /// yet, so the first try of each file skips asking where it stands.
+  bool _freshOffer = false;
 
   /// The first outcome a lane reached; the other lanes stop with it.
   _Stop? _halt;
@@ -643,6 +655,7 @@ class SendSession {
       _offerCancel = null;
     }
     _sessionId = created.sessionId;
+    _freshOffer = true;
     if (_localCancel) {
       // Cancelled while the offer was on its way: withdraw it, or the
       // receiver keeps it and, if accepted, waits for bytes (review M5).
@@ -846,11 +859,33 @@ class SendSession {
   }
 
   Future<void> _sendFile(_File f, _Lane lane) async {
-    final opened = await _openFor(f);
-    if (opened == null) {
-      await _cancelRemote();
-      throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
+    final large = f.item.size >= UploadClient.fastMinBytes;
+    if (large) await _takeLargeSlot();
+    try {
+      await _sendFileIn(f, lane);
+    } finally {
+      if (large) _releaseLargeSlot();
     }
+  }
+
+  Future<void> _takeLargeSlot() async {
+    while (_largeActive >= maxLargeAtOnce) {
+      final freed = Completer<void>();
+      _largeWaiting.add(freed);
+      await Future.any([freed.future, _stopSignal.future]);
+      _checkStop();
+    }
+    _largeActive++;
+  }
+
+  void _releaseLargeSlot() {
+    _largeActive--;
+    if (_largeWaiting.isNotEmpty) _largeWaiting.removeAt(0).complete();
+  }
+
+  Future<void> _sendFileIn(_File f, _Lane lane) async {
+    final opened = await _openFor(f);
+    if (opened == null) return _unreadable(f, lane);
     final target = UploadTarget(
       sessionId: _sessionId!,
       fileId: f.fileId,
@@ -865,6 +900,9 @@ class SendSession {
     );
     final backoff = _newBackoff();
     var deadPortTries = 0;
+    // One round trip less per file (D-072). If the receiver did have
+    // bytes, the PUT gets offset_mismatch and the retry asks.
+    var assumeEmpty = _freshOffer && f.confirmed == 0;
     while (true) {
       await _waitWhilePaused();
       _checkStop();
@@ -876,7 +914,16 @@ class SendSession {
       // Fresh each round: a retry replaces the lane's client.
       final client = _clientOf(lane);
       try {
-        final status = await client.fileStatus(target);
+        final status = assumeEmpty
+            ? FileStatus(
+                fileId: f.fileId,
+                size: f.item.size,
+                receivedBytes: 0,
+                status: FileTransferStatus.pending.name,
+              )
+            : await client.fileStatus(target);
+        final skipped = assumeEmpty;
+        assumeEmpty = false;
         if (status.status == FileTransferStatus.saved.name) {
           return await _fileEnded(f, FileTransferStatus.saved);
         }
@@ -888,12 +935,12 @@ class SendSession {
           );
         }
         if (status.receivedBytes > f.confirmed) backoff.reset();
-        await _confirm(f, status.receivedBytes);
+        if (!skipped) await _confirm(f, status.receivedBytes);
         if (status.receivedBytes < f.item.size) {
           // Paused during the requests above: wait before sending a byte.
           if (_pauseGate != null) continue;
           f.status = FileTransferStatus.receiving;
-          _emit(SendPhase.sending, force: true);
+          _emit(SendPhase.sending);
           final uploading = lane.uploading = Completer<void>();
           final from = status.receivedBytes;
           // Large uploads go to the receiver's data ports, with the TLS
@@ -940,13 +987,12 @@ class SendSession {
           await _confirm(f, f.item.size);
         }
         f.status = FileTransferStatus.verifying;
-        _emit(SendPhase.sending, force: true);
+        _emit(SendPhase.sending);
         final String sha;
         try {
           sha = await hash.digest;
         } catch (_) {
-          await _cancelRemote();
-          throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
+          return await _unreadable(f, lane);
         }
         await client.complete(target, sha);
         return await _fileEnded(f, FileTransferStatus.saved);
@@ -979,8 +1025,7 @@ class SendSession {
           case ErrorCodes.noSpace:
             throw const _Stop(SendPhase.failed, ErrorCodes.noSpace);
           case 'source_unreadable':
-            await _cancelRemote();
-            throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
+            return await _unreadable(f, lane);
         }
         if (!_isTransient(e)) throw _Stop(SendPhase.failed, e.code);
         _log('file ${f.fileId}: ${e.code}, will retry');
@@ -989,6 +1034,27 @@ class SendSession {
         await _retryWait(backoff, lane: lane);
       }
     }
+  }
+
+  /// This phone cannot read [f] (gone, changed size, an export failed):
+  /// withdraw it so the other files go on (D-072). A receiver that cannot
+  /// withdraw a file (older version) ends the session as before.
+  Future<void> _unreadable(_File f, _Lane lane) async {
+    _checkStop();
+    try {
+      await _clientOf(lane).withdrawFile(_sessionId!, f.fileId);
+    } on UploadException catch (e) {
+      if (e.code != ErrorCodes.fileFailed) {
+        _log('file ${f.fileId}: withdraw refused (${e.code})');
+        await _cancelRemote();
+        throw const _Stop(SendPhase.failed, SendReasons.sourceUnreadable);
+      }
+    }
+    await _fileEnded(
+      f,
+      FileTransferStatus.failed,
+      SendReasons.sourceUnreadable,
+    );
   }
 
   /// Network trouble that a retry can fix.
@@ -1205,6 +1271,8 @@ class SendSession {
     await _opened.remove(f.fileId)?.close();
     _log('file ${f.fileId}: ${status.name}');
     final row = _rowId;
+    // Throttled like progress: 600 photos would otherwise redraw the
+    // whole list three times each (D-072). _finish shows the last state.
     if (row != null) {
       await _repo?.updateFile(
         row,
@@ -1216,7 +1284,7 @@ class SendSession {
             : null,
       );
     }
-    _emit(SendPhase.sending, force: true);
+    _emit(SendPhase.sending);
   }
 
   Future<void> _finish(SendPhase phase, String? reason, [int? needed]) async {
@@ -1236,6 +1304,7 @@ class SendSession {
     await _setStored(stored, reason);
     _log('session ${_sessionId ?? '-'}: ${phase.name} (${reason ?? 'ok'})');
     _emit(phase, force: true);
+    _trailing?.cancel();
     await _updates.close();
   }
 
@@ -1269,9 +1338,17 @@ class SendSession {
     final now = DateTime.now();
     final changed = phase != _phase;
     _phase = phase;
-    if (!force && !changed && now.difference(_lastEmit).inMilliseconds < 100) {
+    final since = now.difference(_lastEmit).inMilliseconds;
+    if (!force && !changed && since < 100) {
+      // A skipped update still shows, a little later.
+      _trailing ??= Timer(Duration(milliseconds: 100 - since), () {
+        _trailing = null;
+        _emit(_phase);
+      });
       return;
     }
+    _trailing?.cancel();
+    _trailing = null;
     _lastEmit = now;
     if (!_updates.isClosed) _updates.add(snapshot);
   }

@@ -29,7 +29,7 @@ void main() {
     sender = await testSenderCredentials();
   });
 
-  Future<void> start({int lanes = ReceiveServer.maxParallelUploads}) async {
+  Future<void> start({int lanes = ReceiveServer.dataLaneCount}) async {
     r = await TestReceiver.start(
       identity: identity,
       bodyIdleTimeout: const Duration(seconds: 2),
@@ -167,7 +167,7 @@ void main() {
     test('info lists the data ports, stripes and the tree hash', () async {
       final (_, body) = await send('GET', '/v1/info', authenticated: false);
       final info = DeviceInfo.fromJson(body);
-      expect(info.dataPorts, hasLength(ReceiveServer.maxParallelUploads));
+      expect(info.dataPorts, hasLength(ReceiveServer.dataLaneCount));
       expect(info.dataPorts.toSet(), isNot(contains(r.port)));
       expect(info.stripes, ReceiveServer.maxStripes);
       expect(info.treeHash, isTrue);

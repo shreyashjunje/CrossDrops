@@ -712,6 +712,53 @@ void main() {
     });
   });
 
+  group('withdraw a file (D-072)', () {
+    test('fails that file alone; the session finishes with the rest', () async {
+      final data = randomBytes(1000);
+      final sid = await createSession(
+        '',
+        0,
+        files: const [
+          FileOffer(fileId: 'f1', name: 'a.jpg', size: 1000),
+          FileOffer(fileId: 'f2', name: 'b.jpg', size: 2000),
+        ],
+      );
+      final f2 = '/v1/sessions/$sid/files/f2';
+      await send('PUT', '$f2?offset=0', bytes: randomBytes(500));
+
+      var (code, body) = await send('DELETE', f2);
+      expect(code, 200, reason: '$body');
+      expect(body['status'], 'failed');
+      expect(await statusOf(sid), isNot(SessionStatus.done));
+
+      (code, body) = await send('DELETE', f2);
+      expect(code, 410, reason: 'already failed');
+      (code, body) = await send('PUT', '$f2?offset=0', bytes: [1]);
+      expect(code, 410, reason: 'no bytes for a withdrawn file');
+
+      final f1 = '/v1/sessions/$sid/files/f1';
+      await send('PUT', '$f1?offset=0', bytes: data);
+      (code, body) = await send(
+        'POST',
+        '$f1/complete',
+        json: {'sha256': shaOf(data)},
+      );
+      expect(code, 200, reason: '$body');
+      expect(await statusOf(sid), SessionStatus.done);
+      final stored = await r.repo.find(sid, TransferDirection.receive);
+      final failed = stored!.files.firstWhere((f) => f.fileId == 'f2');
+      expect(failed.status, FileTransferStatus.failed);
+      expect(failed.errorCode, ErrorCodes.withdrawn);
+    });
+
+    test("another sender's file looks like it does not exist", () async {
+      final sid = await createSession('a.jpg', 10);
+      await actAs(await DeviceCredentials.generate());
+      final (code, _) = await send('DELETE', '/v1/sessions/$sid/files/f1');
+      expect(code, 404);
+    });
+  });
+
   group('hash mismatch', () {
     test('first mismatch restarts the file, second fails it', () async {
       final data = randomBytes(1000);

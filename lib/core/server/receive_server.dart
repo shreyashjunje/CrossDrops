@@ -420,7 +420,13 @@ class ReceiveServer {
 
   /// Files of one session received at the same time (D-068), advertised
   /// as `uploadSlots` in `/v1/info`. A PUT beyond it gets 503 `busy`.
-  static const int maxParallelUploads = 3;
+  /// Six, so the link keeps moving while other files wait on their
+  /// round trips and on the save (D-072).
+  static const int maxParallelUploads = 6;
+
+  /// Data lane isolates (D-071). Fewer than [maxParallelUploads]: lanes
+  /// share uploads, and each costs an isolate for the whole session.
+  static const int dataLaneCount = 3;
 
   /// Ended sessions kept in memory at most, however recent (review M1).
   static const int maxRetainedSessions = 32;
@@ -740,6 +746,7 @@ class ReceiveServer {
     ..get('/v1/sessions/<sid>/events', _eventSocket)
     ..get('/v1/sessions/<sid>/files/<fid>', _getFile)
     ..put('/v1/sessions/<sid>/files/<fid>', _putFile)
+    ..delete('/v1/sessions/<sid>/files/<fid>', _withdrawFile)
     ..post('/v1/sessions/<sid>/files/<fid>/complete', _complete);
 
   // ------------------------------------------------- authentication, limits
@@ -1332,6 +1339,22 @@ class ReceiveServer {
     final (s, f) = found;
     final gate = _sessionGate(s);
     if (gate != null) return gate;
+    return _json(200, _fileStatus(f));
+  }
+
+  /// The sender cannot read this file (an export failed, the photo was
+  /// deleted meanwhile): fail it alone, so the session goes on (D-072).
+  Future<Response> _withdrawFile(Request req, String sid, String fid) async {
+    final found = _lookup(req, sid, fid);
+    if (found == null) return _notFound();
+    final (s, f) = found;
+    final gate = _sessionGate(s) ?? _fileGate(f);
+    if (gate != null) return gate;
+    if (f.busy) {
+      return _error(409, ErrorCodes.busy, 'upload still in progress');
+    }
+    _log('file $fid: withdrawn by the sender');
+    await _failFile(s, f, ErrorCodes.withdrawn);
     return _json(200, _fileStatus(f));
   }
 

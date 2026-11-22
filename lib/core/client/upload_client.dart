@@ -406,6 +406,13 @@ class UploadClient {
   Future<FileStatus> fileStatus(UploadTarget t) async =>
       FileStatus.fromJson(await _requestJson('GET', _filePath(t)));
 
+  /// `DELETE .../files/{fileId}`: this phone cannot read the file; the
+  /// receiver fails it alone and the session goes on (D-072). Older
+  /// receivers answer `not_found`.
+  Future<void> withdrawFile(String sessionId, String fileId) async {
+    await _requestJson('DELETE', '/v1/sessions/$sessionId/files/$fileId');
+  }
+
   /// Sends the file from wherever the receiver stopped, then asks it to
   /// verify the SHA-256 and save. Use the same call to resume.
   ///

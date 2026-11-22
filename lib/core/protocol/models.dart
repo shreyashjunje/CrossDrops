@@ -665,4 +665,8 @@ abstract final class ErrorCodes {
 
   /// 413: a JSON body over the limit for its route.
   static const bodyTooLarge = 'body_too_large';
+
+  /// A file's `errorCode` after the sender withdrew it (`DELETE` on the
+  /// file, D-072): it could not read that file, the others go on.
+  static const withdrawn = 'withdrawn';
 }

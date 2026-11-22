@@ -454,20 +454,50 @@ void main() {
       );
     });
 
-    test('a permission revoked mid-session stops the send', () async {
+    test('a file unreadable mid-session is withdrawn alone', () async {
       final a = await makeFile('a.jpg', 1000, seed: 6);
       final b = await makeFile('b.jpg', 1000, seed: 7);
       final opener = _MappedOpener({
         'content://x/1': a.$1.path,
         'content://x/2': b.$1.path,
       }, failAfter: 3); // 2 checks before the offer, then file 1 only
-      final result = await session([
-        SendItem(path: 'content://x/1', name: 'a.jpg', size: 1000),
-        SendItem(path: 'content://x/2', name: 'b.jpg', size: 1000),
-      ], opener: opener).run();
+      final result = await session(
+        [
+          SendItem(path: 'content://x/1', name: 'a.jpg', size: 1000),
+          SendItem(path: 'content://x/2', name: 'b.jpg', size: 1000),
+        ],
+        opener: opener,
+        parallelUploads: 1,
+      ).run();
+
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      expect(result.savedCount, 1);
+      expect(result.files[1].status, FileTransferStatus.failed);
+      expect(result.files[1].error, SendReasons.sourceUnreadable);
+      await expectSavedMatches({'a.jpg': a.$2});
+      final received = r.server.sessions.single;
+      expect(received.status, SessionStatus.done);
+      expect(received.files[1].status, FileTransferStatus.failed);
+      expect(opener.openNow, 0);
+    });
+
+    test('an older receiver that cannot withdraw: the send stops', () async {
+      final a = await makeFile('a.jpg', 1000, seed: 6);
+      final opener = _MappedOpener({'content://x/1': a.$1.path}, failAfter: 1);
+      final result = await session(
+        [SendItem(path: 'content://x/1', name: 'a.jpg', size: 1000)],
+        opener: opener,
+        clientFactory: (h, port) => _NoWithdrawClient(
+          host: h,
+          port: port,
+          fingerprint: identity.fingerprint,
+          credentials: me,
+        ),
+      ).run();
 
       expect(result.phase, SendPhase.failed);
       expect(result.reason, SendReasons.sourceUnreadable);
+      expect(r.server.sessions.single.status, SessionStatus.cancelled);
       expect(opener.openNow, 0);
     });
   });
@@ -487,7 +517,7 @@ void main() {
       return (result, most);
     }
 
-    test('up to three at once; every file verified', () async {
+    test('several at once, up to the slots; every file verified', () async {
       final files = [
         for (var i = 0; i < 6; i++)
           await makeFile('f$i.jpg', 2 * mb + i, seed: 20 + i),
@@ -500,6 +530,39 @@ void main() {
       await expectSavedMatches({for (final f in files) f.$1.name: f.$2});
       expect(most, greaterThan(1));
       expect(most, lessThanOrEqualTo(ReceiveServerLimits.slots));
+    });
+
+    test('large files: at most three at once (D-072)', () async {
+      final files = [
+        for (var i = 0; i < 5; i++)
+          await makeFile('L$i.mov', UploadClient.fastMinBytes, seed: 50 + i),
+      ];
+      final (result, most) = await runCounting(
+        session([for (final f in files) f.$1]),
+      );
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      await expectSavedMatches({for (final f in files) f.$1.name: f.$2});
+      expect(most, lessThanOrEqualTo(SendSession.maxLargeAtOnce));
+    }, timeout: const Timeout(Duration(minutes: 2)));
+
+    test('a fresh send asks no file status before uploading', () async {
+      final files = [
+        for (var i = 0; i < 4; i++) await makeFile('q$i.jpg', 1000 + i),
+      ];
+      var asked = 0;
+      final result = await session(
+        [for (final f in files) f.$1],
+        clientFactory: (h, port) => _HookedClient(
+          host: h,
+          port: port,
+          fingerprint: identity.fingerprint,
+          credentials: me,
+          onFileStatus: () => asked++,
+        ),
+      ).run();
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      expect(result.savedCount, 4);
+      expect(asked, 0);
     });
 
     test('an older receiver without uploadSlots gets one at a time', () async {
@@ -754,24 +817,24 @@ void main() {
   }, timeout: const Timeout(Duration(minutes: 1)));
 
   group('pause between uploads (review M4)', () {
-    test('a pause while the file status is fetched is not lost', () async {
+    test('a pause while the file is opened is not lost', () async {
       final (item, sha) = await makeFile('v.mp4', 8 * mb);
       late SendSession s;
       var pausedOnce = false;
-      s = session(
-        [item],
-        clientFactory: (h, port) => _HookedClient(
-          host: h,
-          port: port,
-          fingerprint: identity.fingerprint,
-          credentials: me,
-          onFileStatus: () {
-            if (pausedOnce) return;
-            pausedOnce = true;
-            unawaited(s.pause());
-          },
-        ),
+      // Open 1 is the check before the offer, open 2 the one for the PUT:
+      // a fresh file asks no status first (D-072), so this is the last
+      // wait before bytes go.
+      final opener = _MappedOpener(
+        {'content://v': item.path},
+        onOpen: (n) {
+          if (n != 2 || pausedOnce) return;
+          pausedOnce = true;
+          unawaited(s.pause());
+        },
       );
+      s = session([
+        SendItem(path: 'content://v', name: 'v.mp4', size: item.size),
+      ], opener: opener);
       final run = s.run();
       await waitFor(() => pausedOnce && s.snapshot.phase == SendPhase.paused);
       await Future<void>.delayed(const Duration(milliseconds: 500));
@@ -884,10 +947,13 @@ class _CorruptingClient extends UploadClient {
 
 /// Maps fake content URIs to temp files and counts open descriptors.
 class _MappedOpener implements SourceOpener {
-  _MappedOpener(this.map, {this.failAfter});
+  _MappedOpener(this.map, {this.failAfter, this.onOpen});
 
   final Map<String, String> map;
   final int? failAfter;
+
+  /// Called with the open count, after a successful open.
+  final void Function(int opens)? onOpen;
   int opens = 0;
   int openNow = 0;
   int maxOpen = 0;
@@ -902,6 +968,7 @@ class _MappedOpener implements SourceOpener {
     final o = await const FileSourceOpener().open(path);
     openNow++;
     if (openNow > maxOpen) maxOpen = openNow;
+    onOpen?.call(opens);
     return OpenedSource(o.source, o.length, () async => openNow--);
   }
 }
@@ -928,6 +995,23 @@ class _HookedClient extends UploadClient {
     onFileStatus();
     return s;
   }
+}
+
+/// A receiver from before D-072: no `DELETE` on a file.
+class _NoWithdrawClient extends UploadClient {
+  _NoWithdrawClient({
+    required super.host,
+    required super.port,
+    required super.fingerprint,
+    required super.credentials,
+  }) : super(
+         connectTimeout: const Duration(seconds: 2),
+         stallTimeout: const Duration(seconds: 2),
+       );
+
+  @override
+  Future<void> withdrawFile(String sessionId, String fileId) async =>
+      throw const UploadException(ErrorCodes.notFound, 'no such route');
 }
 
 /// A receiver from before D-068: its info has no uploadSlots.
