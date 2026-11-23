@@ -125,6 +125,7 @@ class IncomingSession {
 class ReceiveState {
   const ReceiveState({
     this.port,
+    this.dataPorts = const [],
     this.deviceName,
     this.addresses = const [],
     this.qrPayload,
@@ -140,6 +141,9 @@ class ReceiveState {
 
   /// Null while the server is starting or stopped.
   final int? port;
+
+  /// The server's data lane ports (D-071); empty with [port] null.
+  final List<int> dataPorts;
 
   /// The "Receiving" switch is off: nothing listens and nothing is
   /// advertised once running transfers end (D-031).
@@ -172,6 +176,7 @@ class ReceiveState {
 
   ReceiveState copyWith({
     int? port,
+    List<int>? dataPorts,
     String? deviceName,
     List<LocalAddress>? addresses,
     String? Function()? qrPayload,
@@ -186,6 +191,7 @@ class ReceiveState {
     bool clearPort = false,
   }) => ReceiveState(
     port: clearPort ? null : (port ?? this.port),
+    dataPorts: clearPort ? const [] : (dataPorts ?? this.dataPorts),
     deviceName: deviceName ?? this.deviceName,
     addresses: addresses ?? this.addresses,
     qrPayload: qrPayload != null ? qrPayload() : this.qrPayload,
@@ -524,6 +530,7 @@ class ReceiveController extends Notifier<ReceiveState> {
       _lifecycle = AppLifecycleListener(onResume: _onResume);
       state = state.copyWith(
         port: server.port,
+        dataPorts: server.dataPorts,
         deviceName: device.deviceName,
         saveDir: dirs.received,
       );

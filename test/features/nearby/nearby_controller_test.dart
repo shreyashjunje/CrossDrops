@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:crossdrop/app/providers.dart';
+import 'package:crossdrop/core/cable/cable_link.dart';
+import 'package:crossdrop/core/cable/cable_route.dart';
 import 'package:crossdrop/core/client/peer_check.dart';
 import 'package:crossdrop/core/client/upload_client.dart';
 import 'package:crossdrop/core/discovery/mdns_backend.dart';
@@ -241,6 +243,21 @@ void main() {
     expect(checked.single.deviceId, isNull);
     expect(checked.single.port, 8443);
   });
+
+  test(
+    'connectToCable checks the cable host, expecting the hello id',
+    () async {
+      final c = makeContainer();
+      final controller = await open(c);
+      await controller.connectToCable(
+        const CablePeer(port: 6100, deviceId: _b, name: 'Pixel'),
+      );
+      final t = checked.single;
+      expect((t.host, t.port, t.deviceId), (cableHost, 6100, _b));
+      // Not pinned from the hello: first contact, code check.
+      expect(t.fingerprint, isNull);
+    },
+  );
 
   test('closing the screen stops browsing', () async {
     final c = makeContainer();

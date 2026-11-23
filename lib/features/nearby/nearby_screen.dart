@@ -8,11 +8,14 @@ import '../../app/navigation.dart';
 import '../../app/providers.dart';
 import '../../app/tokens.dart';
 import '../../app/ui/ui.dart';
+import '../../core/cable/cable_link.dart';
 import '../../core/client/peer_check.dart';
 import '../../core/client/upload_client.dart';
 import '../../core/discovery/peer_list.dart';
 import '../../core/protocol/connect_payload.dart';
+import '../../core/security/device_identity.dart';
 import '../../platform/haptics.dart';
+import '../cable/cable_controllers.dart';
 import '../hotspot/hotspot_screens.dart';
 import '../send/send_controller.dart';
 import '../send/send_screen.dart';
@@ -139,6 +142,15 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     );
   }
 
+  /// Lock id of the phone on the cable; device ids are UUIDs.
+  static const _cableId = 'cable';
+
+  void _tapCable(CablePeer peer) => _connect(
+    () => _controller.connectToCable(peer),
+    fromQr: false,
+    lockId: _cableId,
+  );
+
   void _tapPeer(Peer p) => _connect(
     () => _controller.connectToPeer(p),
     fromQr: false,
@@ -160,6 +172,7 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       }
     });
     final picked = ref.watch(sendControllerProvider.select((s) => s.picked));
+    final cable = ref.watch(cablePeerProvider);
 
     final Widget body;
     if (state.permissionDenied) {
@@ -206,7 +219,22 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
                   : 'Sending ${summarizePicked(picked)}',
               style: CdType.bodyM.copyWith(color: c.text2),
             ),
-            if (!state.hasNetwork) ...[
+            if (cable != null) ...[
+              const SizedBox(height: 16),
+              _PeerCard(
+                peer: RadarPeer(
+                  id: _cableId,
+                  name: cable.name,
+                  platform: DevicePlatform.android,
+                  hint: 'Connected by cable',
+                  enabled: !_connecting,
+                ),
+                locked: _lockedId == _cableId,
+                onTap: _connecting ? null : () => _tapCable(cable),
+              ),
+            ],
+            // With a phone on the cable, Wi-Fi is not needed.
+            if (!state.hasNetwork && cable == null) ...[
               const SizedBox(height: 16),
               const NoticeCard(
                 tone: NoticeTone.warning,

@@ -7,6 +7,7 @@ import '../../app/media_providers.dart';
 import '../../app/providers.dart';
 import '../../core/client/peer_check.dart';
 import '../../core/client/upload_client.dart';
+import '../../core/cable/cable_route.dart';
 import '../../core/discovery/peer_locator.dart';
 import '../../core/engine/send_session.dart';
 import '../../core/log.dart';
@@ -16,6 +17,7 @@ import '../../core/media/prepare.dart';
 import '../../core/protocol/models.dart';
 import '../../core/security/device_identity.dart';
 import '../../core/storage/transfer_repository.dart';
+import '../cable/cable_controllers.dart';
 import '../nearby/nearby_controller.dart';
 import '../transfer/transfer_format.dart';
 
@@ -609,12 +611,18 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     }
   }
 
-  PeerLocator _locator(String deviceId, String ownDeviceId) =>
-      () => locatePeer(
-        ref.read(mdnsBackendFactoryProvider)(),
-        deviceId: deviceId,
-        ownDeviceId: ownDeviceId,
-      );
+  /// The phone on the cable if it is the one (D-073), else discovery.
+  PeerLocator _locator(String deviceId, String ownDeviceId) => () async {
+    final cable = ref.read(cablePeerProvider);
+    if (cable != null && cable.deviceId == deviceId) {
+      return (host: cableHost, port: cable.port);
+    }
+    return locatePeer(
+      ref.read(mdnsBackendFactoryProvider)(),
+      deviceId: deviceId,
+      ownDeviceId: ownDeviceId,
+    );
+  };
 
   static SenderInfo _senderInfo(DeviceIdentity device) => SenderInfo(
     id: device.deviceId,

@@ -1,7 +1,10 @@
 import 'dart:async';
 
 import 'package:crossdrop/core/usb_import/camera_roll.dart';
+import 'package:crossdrop/features/receive/receive_controller.dart';
+import 'package:crossdrop/features/receive/receive_host.dart';
 import 'package:crossdrop/features/usb_import/usb_import_card.dart';
+import 'package:crossdrop/features/cable/cable_controllers.dart';
 import 'package:crossdrop/features/usb_import/usb_import_controller.dart';
 import 'package:crossdrop/features/usb_import/usb_import_screen.dart';
 import 'package:flutter/material.dart';
@@ -18,6 +21,7 @@ void main() {
           usbImportAvailableProvider.overrideWithValue(available),
           usbFreeBytesProvider.overrideWithValue(() async => null),
           usbKeepScreenOnProvider.overrideWithValue((_) async {}),
+          receiveStateProvider.overrideWithValue(const ReceiveState()),
         ],
         child: MaterialApp(home: Scaffold(body: child)),
       );
@@ -114,7 +118,32 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('iPhone connected by cable'), findsOneWidget);
-      expect(find.text('Import photos'), findsOneWidget);
+      expect(find.text('Import from camera roll'), findsOneWidget);
+      expect(
+        find.textContaining('Open CrossDrop on the iPhone'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('says when the iPhone can send over the cable', (tester) async {
+      final camera = FakeUsbCamera();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            usbCameraProvider.overrideWithValue(camera),
+            usbImportAvailableProvider.overrideWithValue(true),
+            receiveStateProvider.overrideWithValue(const ReceiveState()),
+            cableReceiveAvailableProvider.overrideWithValue(true),
+          ],
+          child: MaterialApp(
+            home: Scaffold(body: UsbImportCard(onOpen: () {})),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      camera.cableState('connected');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Connected by cable'), findsOneWidget);
     });
 
     testWidgets('a quiet row without one', (tester) async {

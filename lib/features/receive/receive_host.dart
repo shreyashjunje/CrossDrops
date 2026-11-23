@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/navigation.dart';
 import '../../app/providers.dart';
 import '../../core/server/receive_server.dart';
+import '../cable/cable_controllers.dart';
 import '../transfer/transfer_screen.dart';
 import 'incoming_request_screen.dart';
 import 'receive_controller.dart';
@@ -58,6 +59,9 @@ class _ReceiveHostState extends ConsumerState<ReceiveHost> {
         _sub = null;
       }
     }, fireImmediately: true);
+    // Send by cable (D-073): the iPhone's link, the Android's bridge.
+    ref.listenManual(cablePeerProvider, (_, _) {});
+    ref.listenManual(cableReceiveProvider, (_, _) {});
   }
 
   @override

@@ -5,6 +5,8 @@ import 'package:flutter/widgets.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
+import '../../core/cable/cable_link.dart';
+import '../../core/cable/cable_route.dart';
 import '../../core/client/peer_check.dart';
 import '../../core/client/upload_client.dart';
 import '../../core/discovery/discovery_service.dart';
@@ -261,6 +263,19 @@ class NearbyController extends Notifier<NearbyState> {
           deviceId: qr.deviceId,
           name: qr.name,
           fingerprint: qr.fingerprint,
+        ),
+      );
+
+  /// Checks the phone on the cable (D-073). Its hello is not trusted: the
+  /// check pins and compares like a first contact. Throws
+  /// [UploadException].
+  Future<ConnectTarget> connectToCable(CablePeer peer) =>
+      ref.read(peerCheckProvider)(
+        ConnectTarget(
+          host: cableHost,
+          port: peer.port,
+          deviceId: peer.deviceId,
+          name: peer.name,
         ),
       );
 
