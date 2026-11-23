@@ -350,6 +350,9 @@ class UploadClient {
       throw _pinMismatch
           ? _networkError(e)
           : UploadException('network', e.runtimeType.toString());
+    } on StateError {
+      // "Client is closed": a reconnect replaced the client meanwhile.
+      throw const UploadException('network', 'connection closed');
     }
   }
 
@@ -828,6 +831,9 @@ class UploadClient {
             : const UploadException('network', 'no response from receiver');
       } on Exception catch (e) {
         throw _networkError(e);
+      } on StateError {
+        // "Client is closed": a reconnect replaced the client meanwhile.
+        throw const UploadException('network', 'connection closed');
       }
     }
 

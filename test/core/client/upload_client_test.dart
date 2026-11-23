@@ -108,6 +108,24 @@ void main() {
     expect(watch.elapsed, lessThan(const Duration(seconds: 15)));
   });
 
+  test('a closed client fails as network, not with a StateError', () async {
+    // A reconnect on another lane can close the client a call is using.
+    final client = UploadClient(
+      host: '127.0.0.1',
+      port: 9,
+      fingerprint: identity.fingerprint,
+      credentials: sender,
+    )..close();
+    await expectLater(
+      client.info(),
+      throwsA(isA<UploadException>().having((e) => e.code, 'code', 'network')),
+    );
+    await expectLater(
+      client.openEvents('s1'),
+      throwsA(isA<UploadException>().having((e) => e.code, 'code', 'network')),
+    );
+  });
+
   test('control request to a silent peer times out as network', () async {
     final server = await SecureServerSocket.bind(
       InternetAddress.loopbackIPv4,
