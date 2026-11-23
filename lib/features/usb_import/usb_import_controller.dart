@@ -56,7 +56,7 @@ final usbDevicesProvider = StreamProvider<List<UsbCameraDevice>>((ref) {
         push();
       case UsbCameraDetached(:final id):
         if (devices.remove(id) != null) push();
-      case UsbCopyProgress():
+      case UsbCopyProgress() || UsbCableState():
         break;
     }
   });
@@ -271,6 +271,8 @@ class UsbImportController extends Notifier<UsbImportState> {
         }
       case UsbCopyProgress(:final handle, :final bytes):
         _runner?.reportBytes(handle, bytes);
+      case UsbCableState():
+        break;
     }
   }
 

@@ -58,9 +58,15 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   Closes the open device first.
  * - `cancelCurrent`: stops the copy in progress between chunks.
  * - `close`.
+ * - `cableStart {port, ports, id, name}`: starts the send-by-cable bridge
+ *   (D-073, [CableBridge]) to the plugged-in iPhone, or gives a running one
+ *   new ports. Waits while an import or the cable test holds the iPhone.
+ *   Errors: `disconnected`, `permission_denied`.
+ * - `cableStop`.
  *
  * Events on `crossdrop/usb_camera/events`: {type: attached, id, name},
- * {type: detached, id}, {type: progress, handle, bytes}.
+ * {type: detached, id}, {type: progress, handle, bytes},
+ * {type: cable, state, code}.
  *
  * Every MtpDevice call runs on one thread: the class is not thread-safe.
  * Names are never logged (hard rule 7).
@@ -86,6 +92,12 @@ class UsbCameraChannel(
     private var device: MtpDevice? = null
     private var openId: String? = null
     private var walk: Walk? = null
+
+    // Send by cable (D-073); main thread only. [cablePaused]: an import or
+    // the cable test has the iPhone; the bridge starts again after it.
+    private var bridge: CableBridge? = null
+    private var cableConfig: CableBridge.Config? = null
+    private var cablePaused = false
 
     /** False once the device refused a partial read; then whole files. */
     private var partialReads = true
@@ -138,6 +150,7 @@ class UsbCameraChannel(
         } catch (ignored: IllegalArgumentException) {
         }
         cancel.set(true)
+        stopBridge()
         mtp.execute { closeDevice() }
         mtp.shutdown()
         ticker.shutdownNow()
@@ -164,6 +177,7 @@ class UsbCameraChannel(
     private fun detached(d: UsbDevice) {
         if (d.vendorId != APPLE_VENDOR_ID) return
         val id = d.deviceName
+        if (bridge?.device?.deviceName == id) stopBridge()
         // Stops a copy between chunks; the next device call fails anyway.
         cancel.set(true)
         mtp.execute { if (openId == id) closeDevice() }
@@ -200,8 +214,23 @@ class UsbCameraChannel(
                 cancel.set(true)
                 onMtp(result) {
                     closeDevice()
+                    main.post(::resumeCable)
                     null
                 }
+            }
+            "cableStart" -> {
+                cableConfig = CableBridge.Config(
+                    port = call.argument<Number>("port")!!.toInt(),
+                    allowed = call.argument<List<Number>>("ports")!!.map { it.toInt() }.toSet(),
+                    deviceId = call.argument<String>("id")!!,
+                    name = call.argument<String>("name")!!,
+                )
+                if (cablePaused) result.success(null) else startBridge(result)
+            }
+            "cableStop" -> {
+                cableConfig = null
+                stopBridge()
+                result.success(null)
             }
             else -> result.notImplemented()
         }
@@ -235,7 +264,60 @@ class UsbCameraChannel(
             result.error("disconnected", null, null)
             return
         }
+        pauseCable()
         withPermission(d, result) { onMtp(result) { openOnMtp(d) } }
+    }
+
+    // --- Send by cable (D-073) ---
+
+    private fun startBridge(result: MethodChannel.Result) {
+        val config = cableConfig ?: return result.success(null)
+        val d = usb.deviceList.values.firstOrNull { it.vendorId == APPLE_VENDOR_ID }
+        if (d == null) {
+            result.error("disconnected", null, null)
+            return
+        }
+        val running = bridge
+        if (running != null && running.device.deviceName == d.deviceName) {
+            running.update(config)
+            result.success(null)
+            return
+        }
+        stopBridge()
+        withPermission(d, result) {
+            lateinit var b: CableBridge
+            b = CableBridge(usb, d, config) { state, code ->
+                emit(mapOf("type" to "cable", "state" to state, "code" to code))
+                if (state == "stopped") main.post { if (bridge === b) bridge = null }
+            }
+            bridge = b
+            b.start()
+            result.success(null)
+        }
+    }
+
+    private fun stopBridge() {
+        bridge?.stop()
+        bridge = null
+    }
+
+    /** An import or the cable test needs the iPhone: the bridge waits. */
+    private fun pauseCable() {
+        cablePaused = true
+        stopBridge()
+    }
+
+    private fun resumeCable() {
+        if (!cablePaused) return
+        cablePaused = false
+        if (cableConfig != null) startBridge(Quiet)
+    }
+
+    /** For starts nobody waits on. */
+    private object Quiet : MethodChannel.Result {
+        override fun success(result: Any?) {}
+        override fun error(code: String, message: String?, details: Any?) {}
+        override fun notImplemented() {}
     }
 
     /** Cable test: closes any open import first, then runs [UsbTunnelProbe]. */
@@ -245,10 +327,14 @@ class UsbCameraChannel(
             result.success("No iPhone found on the cable.")
             return
         }
+        pauseCable()
         withPermission(d, result) {
             onMtp(result) {
                 closeDevice()
-                UsbTunnelProbe(usb).run(d, port).joinToString("\n").also { log("probe:\n$it") }
+                UsbTunnelProbe(usb).run(d, port).joinToString("\n").also {
+                    log("probe:\n$it")
+                    main.post(::resumeCable)
+                }
             }
         }
     }

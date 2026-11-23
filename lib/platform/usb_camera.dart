@@ -39,6 +39,18 @@ class UsbCopyProgress extends UsbCameraEvent {
   final int bytes;
 }
 
+/// The send-by-cable bridge (D-073) changed state: `starting`, `waiting`
+/// (CrossDrop not answering on the iPhone yet), `connected` or `stopped`.
+/// A stop has a [code] (`open_failed`, `no_usbmux`, `handshake`,
+/// `unplugged`) unless it was asked for.
+class UsbCableState extends UsbCameraEvent {
+  const UsbCableState(this.state, [this.code]);
+  final String state;
+  final String? code;
+
+  bool get connected => state == 'connected';
+}
+
 /// Error codes of [UsbCamera] calls ([PlatformException.code]).
 abstract final class UsbCameraErrors {
   /// The user did not allow access to the device.
@@ -144,6 +156,21 @@ abstract interface class UsbCamera {
   /// port on the iPhone) if given. A plain-text report, one step per line,
   /// with no names or file data. Closes the open device first.
   Future<String> probeTunnel({int? port});
+
+  /// Starts the send-by-cable bridge (D-073) to the plugged-in iPhone, or
+  /// gives the running one new ports: [port] is this phone's receive port,
+  /// [ports] every port the bridge may join (receive and data lanes).
+  /// [deviceId] and [name] go into the hello. Waits while an import or the
+  /// cable test has the iPhone. Throws [PlatformException]
+  /// (`disconnected`, `permission_denied`).
+  Future<void> startCableBridge({
+    required int port,
+    required List<int> ports,
+    required String deviceId,
+    required String name,
+  });
+
+  Future<void> stopCableBridge();
 }
 
 /// [UsbCamera] over `crossdrop/usb_camera`.
@@ -218,6 +245,22 @@ class ChannelUsbCamera implements UsbCamera {
   @override
   Future<String> probeTunnel({int? port}) async =>
       await _channel.invokeMethod<String>('probe', {'port': port}) ?? '';
+
+  @override
+  Future<void> startCableBridge({
+    required int port,
+    required List<int> ports,
+    required String deviceId,
+    required String name,
+  }) => _channel.invokeMethod<void>('cableStart', {
+    'port': port,
+    'ports': ports,
+    'id': deviceId,
+    'name': name,
+  });
+
+  @override
+  Future<void> stopCableBridge() => _channel.invokeMethod<void>('cableStop');
 }
 
 UsbCameraDevice _device(Map<Object?, Object?> m) =>
@@ -232,6 +275,7 @@ UsbCameraEvent? parseUsbCameraEvent(Map<Object?, Object?> m) =>
         (m['handle']! as num).toInt(),
         (m['bytes']! as num).toInt(),
       ),
+      'cable' => UsbCableState(m['state']! as String, m['code'] as String?),
       _ => null,
     };
 
@@ -300,4 +344,15 @@ class NoUsbCamera implements UsbCamera {
 
   @override
   Future<String> probeTunnel({int? port}) async => 'Cable test needs Android.';
+
+  @override
+  Future<void> startCableBridge({
+    required int port,
+    required List<int> ports,
+    required String deviceId,
+    required String name,
+  }) async {}
+
+  @override
+  Future<void> stopCableBridge() async {}
 }

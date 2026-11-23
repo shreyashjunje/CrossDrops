@@ -122,4 +122,30 @@ class FakeUsbCamera implements UsbCamera {
     probedPort = port;
     return probeReport;
   }
+
+  /// Each start of the cable bridge, newest last; null after a stop.
+  final List<({int port, List<int> ports, String deviceId, String name})?>
+  cableCalls = [];
+
+  /// Codes `startCableBridge` throws, one per call.
+  final List<String> cableErrors = [];
+
+  void cableState(String state, [String? code]) =>
+      _events.add(UsbCableState(state, code));
+
+  @override
+  Future<void> startCableBridge({
+    required int port,
+    required List<int> ports,
+    required String deviceId,
+    required String name,
+  }) async {
+    if (cableErrors.isNotEmpty) {
+      throw PlatformException(code: cableErrors.removeAt(0));
+    }
+    cableCalls.add((port: port, ports: ports, deviceId: deviceId, name: name));
+  }
+
+  @override
+  Future<void> stopCableBridge() async => cableCalls.add(null);
 }
