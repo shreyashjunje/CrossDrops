@@ -394,6 +394,29 @@ An Android phone can import from an iPhone plugged in with a USB-C or Lightning-
 
 Not covered: Android → iPhone and files outside the camera roll (iOS gives a USB host only the camera roll). Use the network modes for those.
 
+## Send by cable (iPhone app → Android, D-073)
+
+The iPhone app sends over a USB cable with the normal protocol. Android is the USB host and speaks Apple's USB multiplexing protocol (usbmux), which carries TCP-like connections to ports on the iPhone. Every transfer rule, the security model and the speed work apply unchanged: only how a socket is opened differs.
+
+```text
+ iPhone (sender, Dart only)                          Android (receiver)
+ pinnedHttpClient ── host cable.crossdrop.invalid    ReceiveServer 127.0.0.1:main, data lanes
+        │ dial(port X)                                        ▲
+        ▼                                                     │ local socket
+ CableLink: control on 127.0.0.1:47913 ◄═ usbmux ═╗   CableBridge (Kotlin)
+ dial socket on 127.0.0.1:P            ◄═ usbmux ═╩═ UsbMux over the USB bulk endpoints
+```
+
+| Step | How |
+| --- | --- |
+| Link | Android opens a control connection to 127.0.0.1:47913 (47914, 47915) on the iPhone and sends `hello` with its receive port, device id and name. |
+| Dial | Any isolate on the iPhone binds 127.0.0.1:P, asks the main isolate, which sends `dial {listen: P, port: X}`. Android checks that X is one of its receive ports, connects to 127.0.0.1:X, opens usbmux to P and joins them. `fail {listen: P}` if it cannot. |
+| Connect | TLS 1.3 on the dialed socket, pinned exactly as on Wi-Fi; first contact uses the fingerprint probe and the 6-digit code. |
+| Flow | usbmux windows: 512 KB per connection from Android, acknowledged as bytes reach the local socket; the iPhone's window is respected. |
+| End | Unplugging resets every usbmux connection; transfers resume like after a Wi-Fi drop, over the cable or any other path to the same fingerprint. |
+
+Feature details: [features/cable-send.md](features/cable-send.md).
+
 ## Screens
 
 Home is also the receive screen: while CrossDrop is open and Receiving is on, the phone can be found, and an offer opens the Incoming request on top of any screen (D-046). Sending goes files first, then the phone (D-052). The same Progress, Done and Failed screens serve both directions (D-048). A first-launch introduction comes before any network use (D-050). Screen flow and details: [features/ui-navigation.md](features/ui-navigation.md), [features/onboarding.md](features/onboarding.md), [features/settings.md](features/settings.md).

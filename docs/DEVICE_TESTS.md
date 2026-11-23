@@ -1510,7 +1510,7 @@ Covered by tests on the PC: pairing of Live and edited files, AAE skipping, day 
 | U-8 another app holds the iPhone | | | | | | |
 | U-9 Lightning iPhone | | | | | | |
 | U-10 photos while copying | | | | | | |
-| U-11 cable test (Android to iPhone) | | | | | | |
+| U-11 cable test (Android to iPhone) | 2026-11-24 | iPhone 17 Pro, USB-C to USB-C | Samsung S20 FE (SM-G781B), Android 13 | | Pass | usbmux claimed without a config switch, handshake v2, port 62078 and CrossDrop port reachable. Trust tapped once. The QR screen hides the port without Wi-Fi. |
 
 ## Send screen fixes (D-068)
 
