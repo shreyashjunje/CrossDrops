@@ -554,7 +554,7 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 
 ## D-067: Import from an iPhone by cable through its camera interface, on Android
 - Date: 2026-11-08
-- Status: Accepted
+- Status: Superseded by D-074 (removed)
 - Context: The owner asked for USB-C cable transfers, with photos shown the way a gallery shows them. Plugging an iPhone into an Android phone already works in Android's file manager, but it shows `DCIM/100APPLE`-style folders of HEIC, AAE and Live Photo MOV files, often without thumbnails, so choosing is hard. The options were: (a) the iPhone's camera interface (PTP) with Android as USB host, through the public `android.mtp.MtpDevice` API; (b) Apple's private USB multiplexing protocol (usbmux) implemented in Kotlin, which would allow both directions and any file through our own protocol, but is undocumented, large and could break with an iOS update; (c) Android USB tethering seen by the iPhone as Ethernet, which depends on the brand and works only on USB-C iPhones; (d) the iPhone 15+ as host reading the Android as a camera, which only covers photos Android → iPhone; (e) Apple's External Accessory framework, which needs MFi hardware.
 - Decision:
   - Build (a): iPhone → Android only, camera roll only, no iPhone app. It uses only public Android API, works with USB-C and Lightning iPhones, and solves the problem the owner reported. Out of v1 scope in CLAUDE.md; added at the owner's request (2026-11-08).
@@ -677,10 +677,21 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - **Bytes stay native on Android.** The usbmux engine (`UsbMux.kt`) and the bridge (`CableBridge.kt`) move every byte between USB and local sockets in Kotlin; only start, stop and state cross the platform channel (hard rule 2). usbmux framing follows the open-source usbmuxd (libimobiledevice): protocol version 2, TCP-like headers, 16 KB reads, the device's window respected. Received bytes are acknowledged at once; our window is the free room of that connection's 512 KB buffer, so a slow connection never stalls the others.
   - **iPhone side is Dart only:** loopback sockets; no Swift, no private Apple API. iOS needs no Local Network permission for loopback.
   - **When it runs.** Android: an Apple device with the usbmux interface is attached, USB access was given, Receiving is on and the cable import screen is closed (they share the cable). iPhone: whenever the app is in the foreground. The iPhone's Nearby screen shows "<name> connected by cable" while the control connection is up.
-  - **Camera import stays** as the second choice on the Android card, until cable send has passed its device checks. Then it is reconsidered.
+  - **Camera import stays** as the second choice on the Android card, until cable send has passed its device checks. Then it is reconsidered. (The owner removed it earlier: D-074.)
   - iPhone → Android first. Android → iPhone over the same tunnel later (the Android connects to the iPhone's server directly).
 - Consequences:
   - The usbmux engine runs only on a phone; the PC tests cover the Dart side (dialer, control messages, the link, pinning over a dialed socket) and the cable path end to end with a fake bridge on loopback.
   - Speed over the cable depends on the cable and the ports: USB 2 cables (480 Mbit/s, about 35-40 MB/s in practice) cap it. A USB 3 cable is needed for more, on a USB 3 iPhone (the 17 Pro is one). Measured in C-4.
   - usbmux is undocumented. A future iOS could change it; the Wi-Fi and hotspot modes stay, and a failed handshake is reported plainly.
   - Whether the iPhone accepts usbmux connections to a socket bound to 127.0.0.1 only is checked in C-1 (U-11 reached a socket bound to all addresses).
+
+## D-074: Remove the camera import; send both ways by cable
+- Date: 2026-11-24
+- Status: Accepted (being built)
+- Context: After D-073 the owner asked to remove the cable import of D-067 and to add Android → iPhone by cable. They asked for the removal before the cable send had run on phones.
+- Decision:
+  - **Removed:** the import screen and controller, the camera-roll grouping, the copy queue, and every MtpDevice part of the Kotlin channel. Kept, under new names (`UsbCable`, `UsbCableChannel.kt`, `lib/features/cable/`): plug-in detection, USB access, the bridge, the cable test (U-11) and the home card, which now only says what the cable can do. The attach intent filter stays, so plugging in still offers CrossDrop.
+  - **Android → iPhone:** see below, same tunnel.
+- Consequences:
+  - Until C-1 passes on the owner's phones there is no proven way to move files by cable. If usbmux fails on a phone, the import can be brought back from git history.
+  - The Android app no longer reads the iPhone's camera roll without the iPhone app.

@@ -20,7 +20,7 @@ class MainActivity : FlutterActivity() {
     private var share: ShareChannel? = null
     private var hotspot: HotspotChannel? = null
     private var network: NetworkChannel? = null
-    private var usbCamera: UsbCameraChannel? = null
+    private var usbCable: UsbCableChannel? = null
     private var thumbnails: ThumbnailChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -30,7 +30,7 @@ class MainActivity : FlutterActivity() {
         share = ShareChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         hotspot = HotspotChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         network = NetworkChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
-        usbCamera = UsbCameraChannel(this, flutterEngine.dartExecutor.binaryMessenger, save!!)
+        usbCable = UsbCableChannel(this, flutterEngine.dartExecutor.binaryMessenger)
         thumbnails = ThumbnailChannel(applicationContext, flutterEngine.dartExecutor.binaryMessenger)
         // Dart side: lib/platform/local_network.dart. Android has no Local
         // Network permission, so `probe` always answers "granted".
@@ -125,14 +125,14 @@ class MainActivity : FlutterActivity() {
         // A recreated activity (rotation, process restore) already had it.
         if (savedInstanceState == null) share?.handle(intent)
         // Started by plugging in an iPhone (D-067).
-        usbCamera?.onIntent(intent)
+        usbCable?.onIntent(intent)
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
         share?.handle(intent)
-        usbCamera?.onIntent(intent)
+        usbCable?.onIntent(intent)
     }
 
     override fun onRequestPermissionsResult(
@@ -148,7 +148,7 @@ class MainActivity : FlutterActivity() {
         // The hotspot and the network binding belong to this engine.
         hotspot?.stop()
         network?.dispose()
-        usbCamera?.dispose()
+        usbCable?.dispose()
         thumbnails?.dispose()
         super.cleanUpFlutterEngine(flutterEngine)
     }

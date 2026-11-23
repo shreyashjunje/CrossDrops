@@ -6,14 +6,13 @@ import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/features/cable/cable_controllers.dart';
 import 'package:crossdrop/features/receive/receive_controller.dart';
 import 'package:crossdrop/features/receive/receive_host.dart';
-import 'package:crossdrop/features/usb_import/usb_import_controller.dart';
-import 'package:crossdrop/platform/usb_camera.dart';
+import 'package:crossdrop/platform/usb_cable.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../support/fake_cable_bridge.dart';
-import '../../support/fake_usb_camera.dart';
+import '../../support/fake_usb_cable.dart';
 
 /// The receive state a test sets.
 class _Receive extends Notifier<ReceiveState> {
@@ -33,19 +32,19 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
   group('Android bridge', () {
-    late FakeUsbCamera camera;
+    late FakeUsbCable camera;
     late AppDatabase db;
     late ProviderContainer c;
     late String deviceId;
     late String name;
 
     setUp(() async {
-      camera = FakeUsbCamera();
+      camera = FakeUsbCable();
       db = AppDatabase(NativeDatabase.memory());
       c = ProviderContainer(
         overrides: [
           databaseProvider.overrideWithValue(db),
-          usbCameraProvider.overrideWithValue(camera),
+          usbCableProvider.overrideWithValue(camera),
           cableReceiveAvailableProvider.overrideWithValue(true),
           receiveStateProvider.overrideWith((ref) => ref.watch(_receive)),
         ],
@@ -93,11 +92,11 @@ void main() {
     });
 
     test('unplugged: it stops; plugged in again: it starts', () async {
-      camera.unplug(FakeUsbCamera.iphone.id);
+      camera.unplug(FakeUsbCable.iphone.id);
       await _settle();
       expect(camera.cableCalls.last, isNull);
       expect(c.read(cableReceiveProvider), isNull);
-      camera.plug(FakeUsbCamera.iphone);
+      camera.plug(FakeUsbCable.iphone);
       await _settle();
       expect(camera.cableCalls.last, isNotNull);
     });
@@ -107,10 +106,10 @@ void main() {
       await _settle();
       expect(c.read(cableReceiveProvider)?.connected, isTrue);
 
-      camera.unplug(FakeUsbCamera.iphone.id);
+      camera.unplug(FakeUsbCable.iphone.id);
       await _settle();
-      camera.cableErrors.add(UsbCameraErrors.permissionDenied);
-      camera.plug(FakeUsbCamera.iphone);
+      camera.cableErrors.add(UsbCableErrors.permissionDenied);
+      camera.plug(FakeUsbCable.iphone);
       await _settle();
       expect(c.read(cableReceiveProvider)?.code, 'permission_denied');
       final calls = camera.cableCalls.length;

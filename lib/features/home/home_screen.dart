@@ -14,8 +14,7 @@ import '../send/send_controller.dart';
 import '../send/send_screen.dart';
 import '../transfer/transfer_screen.dart';
 import '../transfer/unfinished_transfers.dart';
-import '../usb_import/usb_import_card.dart';
-import '../usb_import/usb_import_screen.dart';
+import '../cable/cable_card.dart';
 import 'active_transfers.dart';
 import 'receive_status_card.dart';
 
@@ -115,13 +114,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 onDone: () => setState(() => _handled.add(s.sessionId)),
               ),
             ],
-            UsbImportCard(
-              onOpen: () => pushScreen<void>(
-                context,
-                Routes.usbImport,
-                const UsbImportScreen(),
-              ),
-            ),
+            const CableCard(),
             if (recent != null && recent.isNotEmpty) ...[
               const SizedBox(height: 24),
               Row(

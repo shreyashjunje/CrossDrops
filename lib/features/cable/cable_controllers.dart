@@ -8,11 +8,53 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../app/providers.dart';
 import '../../core/cable/cable_link.dart';
 import '../../core/log.dart';
-import '../../platform/usb_camera.dart';
+import '../../platform/usb_cable.dart';
 import '../receive/receive_host.dart';
-import '../usb_import/usb_import_controller.dart';
 
 // Send by cable (D-073). Both controllers are kept alive by `ReceiveHost`.
+
+/// Android: the iPhone on the USB cable.
+final usbCableProvider = Provider<UsbCable>(
+  (ref) => Platform.isAndroid ? ChannelUsbCable() : const NoUsbCable(),
+);
+
+/// Android: the iPhones plugged in now.
+final usbDevicesProvider = StreamProvider<List<UsbCableDevice>>((ref) {
+  final cable = ref.watch(usbCableProvider);
+  final devices = <String, UsbCableDevice>{};
+  final out = StreamController<List<UsbCableDevice>>();
+  void push() => out.add(List.unmodifiable(devices.values));
+  final sub = cable.events.listen((e) {
+    switch (e) {
+      case UsbCableAttached(:final device):
+        devices[device.id] = device;
+        push();
+      case UsbCableDetached(:final id):
+        if (devices.remove(id) != null) push();
+      case UsbCableState():
+        break;
+    }
+  });
+  unawaited(
+    cable.devices().then(
+      (list) {
+        for (final d in list) {
+          devices[d.id] = d;
+        }
+        push();
+      },
+      onError: (Object e) {
+        logEvent('cable', 'devices failed (${e.runtimeType})');
+        push();
+      },
+    ),
+  );
+  ref.onDispose(() async {
+    await sub.cancel();
+    await out.close();
+  });
+  return out.stream;
+});
 
 /// iPhone: sends over the cable.
 final cableSendAvailableProvider = Provider<bool>((ref) => Platform.isIOS);
@@ -62,7 +104,7 @@ final cableReceiveProvider =
     );
 
 class CableReceiveController extends Notifier<UsbCableState?> {
-  late UsbCamera _camera;
+  late UsbCable _camera;
   bool _plugged = false;
 
   /// What the bridge was last started with; null while stopped. Kept after
@@ -73,7 +115,7 @@ class CableReceiveController extends Notifier<UsbCableState?> {
   @override
   UsbCableState? build() {
     if (!ref.watch(cableReceiveAvailableProvider)) return null;
-    final camera = _camera = ref.watch(usbCameraProvider);
+    final camera = _camera = ref.watch(usbCableProvider);
     final sub = camera.events.listen((e) {
       if (e is UsbCableState) state = e;
     });

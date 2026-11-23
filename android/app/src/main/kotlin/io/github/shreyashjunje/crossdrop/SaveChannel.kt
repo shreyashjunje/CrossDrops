@@ -107,8 +107,7 @@ class SaveChannel(private val context: Context, messenger: BinaryMessenger) {
     }
 
     /**
-     * A new pending item. Also used by [UsbCameraChannel], which copies
-     * into it itself. Throws [ChannelError] `unsupported` when the
+     * A new pending item. Throws [ChannelError] `unsupported` when the
      * collection refuses the MIME type, `io` when the insert fails.
      */
     internal fun insertPending(name: String, mime: String, collection: String, takenMs: Long?): Uri {

@@ -1,8 +1,8 @@
 # Feature: Import from iPhone by cable
 
 - Phase: 8 (after v1 scope)
-- Status: Built, awaiting device tests
-- Last updated: 2026-11-08
+- Status: **Removed** (D-074, 2026-11-24). Kept as a record; the code is in git history before that date.
+- Last updated: 2026-11-24
 
 ## Summary
 

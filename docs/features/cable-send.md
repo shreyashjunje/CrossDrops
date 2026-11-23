@@ -27,9 +27,9 @@ The iPhone user picks photos, videos or files in CrossDrop (Photos with albums, 
 - **Host name:** the receiver is `cable.crossdrop.invalid`. `pinnedHttpClient` and `probeFingerprint` open those sockets through the isolate's `cableDialer` and run TLS on them with the same pin checks (`lib/core/cable/cable_route.dart`).
 - **Control:** the iPhone's `CableLink` listens on 127.0.0.1:47913 (47914, 47915). The Android bridge connects, sends `hello {port, id, name}`; the iPhone asks `dial {listen, port}`; the Android answers with a joined connection or `fail {listen}`. JSON lines, at most 4 KB (`cable_messages.dart`).
 - **Dials:** a dial binds a new 127.0.0.1 port in the isolate that dials, so upload workers get their own sockets and no bytes pass through the main isolate. The Android only joins its receive server's ports.
-- **Android:** `UsbMux.kt` (usbmux v2, 16 KB reads like usbmuxd, a 512 KB window per connection, the iPhone's window respected) and `CableBridge.kt` (control, dials, a pipe per connection). Bytes stay in Kotlin. `UsbCameraChannel` starts it (`cableStart`, `cableStop`, `cable` events) and pauses it while the camera import or the cable test holds the iPhone.
+- **Android:** `UsbMux.kt` (usbmux v2, 16 KB reads like usbmuxd, a 512 KB window per connection, the iPhone's window respected) and `CableBridge.kt` (control, dials, a pipe per connection). Bytes stay in Kotlin. `UsbCableChannel` starts it (`cableStart`, `cableStop`, `cable` events) and pauses it while the cable test holds the iPhone.
 - **When:** Android runs the bridge while an iPhone is plugged in, the receive server is up and Receiving is on (`CableReceiveController`). The iPhone runs the link while the app is in the foreground (`CableSendController`).
-- **Screens:** iPhone Nearby lists "<name> · Connected by cable" at the top; tapping it checks the phone like a first contact (fingerprint probe, then the code). The Android home card says when the iPhone can send; the camera import is its second button.
+- **Screens:** iPhone Nearby lists "<name> · Connected by cable" at the top; tapping it checks the phone like a first contact (fingerprint probe, then the code). The Android home card says what the cable can do (`cable_card.dart`).
 - **Resume:** the send's locator returns the cable host when the phone on the cable has the receiver's device id.
 
 ## Code

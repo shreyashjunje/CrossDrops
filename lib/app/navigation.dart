@@ -17,7 +17,6 @@ abstract final class Routes {
   static const settings = 'settings';
   static const findHelp = 'find-help';
   static const hotspot = 'hotspot';
-  static const usbImport = 'usb-import';
 }
 
 /// Tracks the names of the routes on the stack.

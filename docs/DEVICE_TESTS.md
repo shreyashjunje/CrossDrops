@@ -1380,7 +1380,7 @@ Covered by tests on the PC: the commitment and its man-in-the-middle refusal, si
 
 ## Cable import (D-067)
 
-Android imports from an iPhone plugged in by cable ([features/usb-import.md](features/usb-import.md)). Everything below needs the two real phones; the logic is unit-tested on the PC. Only the Android phone needs the new build; the iPhone needs no app.
+**Removed (D-074).** The camera import is gone; U-1 to U-10 no longer apply and are kept only as a record. U-11, the cable test, is still in Settings > About on Android. Cable sends: section "Send by cable (D-073)".
 
 ### Preparation (once)
 
@@ -1481,7 +1481,7 @@ Android imports from an iPhone plugged in by cable ([features/usb-import.md](fea
 
 Checks whether Android can reach the CrossDrop app on the iPhone over the cable. Nothing is copied.
 
-1. Close the cable import screen. Plug in the iPhone and unlock it.
+1. Plug in the iPhone and unlock it.
 2. iPhone: open CrossDrop > **My QR code**. Note the port it shows. Keep that screen open.
 3. Android: Settings > About > **Cable test**. Type the port. Tap **Run test**.
 4. If the iPhone asks to trust this device, tap **Trust**, enter the passcode, and tap **Run test** again.
@@ -1489,7 +1489,7 @@ Checks whether Android can reach the CrossDrop app on the iPhone over the cable.
 
 What the lines mean (for reference): `Camera interface: held by another app` explains a `busy` import (U-8). `Switch to config ...: refused` or `Claim usbmux interface: FAIL` means this Android phone cannot use the cable tunnel. `Handshake: ok` and `Built-in service ...: reachable` mean the tunnel works. `CrossDrop (port ...): reachable` means Android to iPhone by cable can be built on it.
 
-6. Afterwards, run U-2 and U-3 once more to check that cable import still works after the test.
+6. Afterwards, check that the Android home card shows **Ready** again within a few seconds (the bridge pauses during the test).
 
 ### Not checked on devices
 
@@ -1666,10 +1666,9 @@ The Night Signal redesign: every screen, light and dark, haptics and reduced mot
 2. History: tap Sent, Received, Unfinished, All. Expected: the list filters; an empty filter says "Nothing here yet."
 3. Settings: sections as cards. Trusted devices: Forget shows a red Forget and a grey Cancel.
 
-### R-11: Cable import (Android)
+### R-11: Cable card (Android)
 
-1. Plug in an iPhone. Expected: a lime-bordered card on Home.
-2. Import photos, pick a few, Copy to this phone. Expected: the large percentage while copying, then a lime check and where the files went.
+1. Plug in an iPhone. Expected: a lime-bordered card on Home saying whether the iPhone can send over the cable. (Was: cable import, removed in D-074.)
 
 ### R-12: Reduced motion
 
@@ -1853,7 +1852,7 @@ The iPhone app sends to the Android over the USB cable only. Same build on both 
 
 - Cable: note which one (the iPhone's own USB-C cable is USB 2; a USB 3 / 10 Gbit/s cable is faster).
 - iPhone: about 200 photos, 3 videos of 1 GB or more, a few edited and Live Photos, one PDF in Files.
-- Android: CrossDrop open, Receiving on. Close the cable import screen if it is open.
+- Android: CrossDrop open, Receiving on.
 
 ### C-1: Plug in and see each other
 
@@ -1895,10 +1894,10 @@ The iPhone app sends to the Android over the USB cable only. Same build on both 
 1. While nothing is sending, switch the iPhone to another app for 10 s, then back.
 2. Expected: the Android card goes to "Open CrossDrop on the iPhone…" and back to **Ready** within a few seconds of returning; sending works again.
 
-### C-8: Cable import still works
+### C-8: Cable test still works
 
-1. On the Android card tap **Import from camera roll**, copy 2 photos, go back.
-2. Expected: the import works as before (U-3); after going back the card shows **Ready** again within a few seconds.
+1. Android: Settings > About > **Cable test**, with the iPhone's port typed in (U-11). Expected: every line ok, `CrossDrop (port ...): reachable`.
+2. Back on Home, the card shows **Ready** again within a few seconds.
 
 ### Not checked on devices
 

@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/tokens.dart';
-import 'usb_import_controller.dart';
+import 'cable_controllers.dart';
 
 /// Cable test (Android): checks whether this phone can reach the CrossDrop
 /// app on a plugged-in iPhone over the cable, before Android-to-iPhone by
@@ -35,7 +35,7 @@ class _CableProbeScreenState extends ConsumerState<CableProbeScreen> {
     String report;
     try {
       report = await ref
-          .read(usbCameraProvider)
+          .read(usbCableProvider)
           .probeTunnel(
             port: port != null && port > 0 && port < 65536 ? port : null,
           );

@@ -1,21 +1,21 @@
-import 'package:crossdrop/features/usb_import/cable_probe_screen.dart';
-import 'package:crossdrop/features/usb_import/usb_import_controller.dart';
+import 'package:crossdrop/features/cable/cable_probe_screen.dart';
+import 'package:crossdrop/features/cable/cable_controllers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import '../../support/fake_usb_camera.dart';
+import '../../support/fake_usb_cable.dart';
 
 void main() {
   testWidgets('runs the cable test with the typed port and shows the report', (
     tester,
   ) async {
-    final camera = FakeUsbCamera()
+    final camera = FakeUsbCable()
       ..probeReport =
           'Handshake: ok, version 2\nCrossDrop (port 4321): reachable';
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [usbCameraProvider.overrideWithValue(camera)],
+        overrides: [usbCableProvider.overrideWithValue(camera)],
         child: const MaterialApp(home: CableProbeScreen()),
       ),
     );
@@ -30,10 +30,10 @@ void main() {
   });
 
   testWidgets('an empty or invalid port tests only the tunnel', (tester) async {
-    final camera = FakeUsbCamera();
+    final camera = FakeUsbCable();
     await tester.pumpWidget(
       ProviderScope(
-        overrides: [usbCameraProvider.overrideWithValue(camera)],
+        overrides: [usbCableProvider.overrideWithValue(camera)],
         child: const MaterialApp(home: CableProbeScreen()),
       ),
     );
