@@ -1844,3 +1844,75 @@ Everything in this section. On the PC: the six lanes, the skipped status call, w
 | M-4 | | | | | | | |
 | M-5 | | | | | | | |
 | M-6 | | | | | | | |
+
+## Send by cable (D-073)
+
+The iPhone app sends to the Android over the USB cable only. Same build on both phones (APK and IPA from the same commit). Wi-Fi **off on both phones** for C-1 to C-6, so nothing can go over the network by mistake. Android: `adb logcat -v time -s flutter crossdrop.cable crossdrop.usb > cable.txt` running when the PC is connected to the Android; otherwise skip the logs.
+
+### Preparation (once)
+
+- Cable: note which one (the iPhone's own USB-C cable is USB 2; a USB 3 / 10 Gbit/s cable is faster).
+- iPhone: about 200 photos, 3 videos of 1 GB or more, a few edited and Live Photos, one PDF in Files.
+- Android: CrossDrop open, Receiving on. Close the cable import screen if it is open.
+
+### C-1: Plug in and see each other
+
+1. Open CrossDrop on the iPhone and keep it in front. Plug the cable into both phones.
+2. Android: if asked "Open CrossDrop?" or for USB access, allow it. If nothing happens: USB notification > **USB controlled by: This device**.
+3. Expected within about 3 s: the Android home card says **Ready. On the iPhone, open CrossDrop, tap Send…**. On the iPhone: Send > pick one photo > the Android appears at the top as **"<name> · Connected by cable"**.
+4. If the iPhone asks "Trust This Computer?", tap Trust and note it.
+5. Paste back: screenshots of both screens, `cable.txt` lines with `crossdrop.cable` (`usbmux ready`, `iPhone app connected`).
+
+### C-2: First send, one photo
+
+1. Tap the Android on the iPhone. Expected: both phones show the same 6-digit code; Accept on the Android; the photo arrives in the Android gallery under CrossDrop.
+2. Compare the size on both phones: iPhone Photos > (i) shows the size; Android Gallery > details. Expected: identical bytes (it is the original HEIC unless JPEG is set in Settings).
+
+### C-3: 200 photos at once
+
+1. Select the 200 photos, send to the Android over the cable. Time it from tapping the Android to Done.
+2. Expected: all 200 arrive, Done says verified, nothing twice.
+3. Paste back: total time, MB/s on the Done screen, the cable, `cable.txt`.
+
+### C-4: Large videos and speed
+
+1. Send the 3 large videos. Note MB/s during the send and on Done.
+2. Afterwards, with Wi-Fi on and both on the same router, send the same 3 videos over Wi-Fi and note MB/s (same build).
+3. Expected: over the cable at least about 30 MB/s on a USB 2 cable. Paste back both numbers and the cable.
+
+### C-5: Unplug in the middle
+
+1. Start C-4. At about 30 %, unplug the cable for 5 s, plug it in again.
+2. Expected: "Connection lost. Trying again…", then it continues from where it was (not from 0) and all videos verify.
+
+### C-6: Files and other things
+
+1. On the iPhone: Send > Files > pick the PDF; send over the cable. Expected: it arrives in Android Downloads.
+2. Send 5 edited photos and 5 Live Photos. Expected: like over Wi-Fi (the edited version; Live Photos as set in Settings).
+
+### C-7: iPhone app in the background
+
+1. While nothing is sending, switch the iPhone to another app for 10 s, then back.
+2. Expected: the Android card goes to "Open CrossDrop on the iPhone…" and back to **Ready** within a few seconds of returning; sending works again.
+
+### C-8: Cable import still works
+
+1. On the Android card tap **Import from camera roll**, copy 2 photos, go back.
+2. Expected: the import works as before (U-3); after going back the card shows **Ready** again within a few seconds.
+
+### Not checked on devices
+
+Everything in this section. On the PC: the cable host and dialer (pinning, refused and silent dials, workers in other isolates), the iPhone link (hello, takeover, oversized lines, loopback only), 122 files and an unplug with resume through a fake bridge, and the Android controller (start, update, stop, refused permission). Not on the PC at all: `UsbMux.kt` and `CableBridge.kt` (usbmux over real USB), and whether the iPhone takes usbmux connections to sockets bound to 127.0.0.1 only.
+
+### Results
+
+| Check | Date | iPhone (model, iOS) | Android (model, version) | Cable | Commit | Time / MB/s | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| C-1 | | | | | | | |
+| C-2 | | | | | | | |
+| C-3 | | | | | | | |
+| C-4 | | | | | | | |
+| C-5 | | | | | | | |
+| C-6 | | | | | | | |
+| C-7 | | | | | | | |
+| C-8 | | | | | | | |

@@ -412,7 +412,7 @@ The iPhone app sends over a USB cable with the normal protocol. Android is the U
 | Link | Android opens a control connection to 127.0.0.1:47913 (47914, 47915) on the iPhone and sends `hello` with its receive port, device id and name. |
 | Dial | Any isolate on the iPhone binds 127.0.0.1:P, asks the main isolate, which sends `dial {listen: P, port: X}`. Android checks that X is one of its receive ports, connects to 127.0.0.1:X, opens usbmux to P and joins them. `fail {listen: P}` if it cannot. |
 | Connect | TLS 1.3 on the dialed socket, pinned exactly as on Wi-Fi; first contact uses the fingerprint probe and the 6-digit code. |
-| Flow | usbmux windows: 512 KB per connection from Android, acknowledged as bytes reach the local socket; the iPhone's window is respected. |
+| Flow | usbmux windows: bytes are acknowledged at once, with the free room of the connection's 512 KB buffer as the window; the iPhone's window is respected. |
 | End | Unplugging resets every usbmux connection; transfers resume like after a Wi-Fi drop, over the cable or any other path to the same fingerprint. |
 
 Feature details: [features/cable-send.md](features/cable-send.md).
