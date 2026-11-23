@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 
+import 'package:crossdrop/core/cable/cable_link.dart';
 import 'package:crossdrop/platform/usb_cable.dart';
 import 'package:flutter/services.dart';
 
@@ -43,18 +45,18 @@ class FakeUsbCable implements UsbCable {
   }
 
   /// Each start of the cable bridge, newest last; null after a stop.
-  final List<({int port, List<int> ports, String deviceId, String name})?>
+  final List<({int? port, List<int> ports, String deviceId, String name})?>
   cableCalls = [];
 
   /// Codes `startCableBridge` throws, one per call.
   final List<String> cableErrors = [];
 
-  void cableState(String state, [String? code]) =>
-      _events.add(UsbCableState(state, code));
+  void cableState(String state, [String? code, CablePeer? peer]) =>
+      _events.add(UsbCableState(state, code, peer));
 
   @override
   Future<void> startCableBridge({
-    required int port,
+    required int? port,
     required List<int> ports,
     required String deviceId,
     required String name,
@@ -67,4 +69,24 @@ class FakeUsbCable implements UsbCable {
 
   @override
   Future<void> stopCableBridge() async => cableCalls.add(null);
+
+  /// Dials made, as (listen, port).
+  final List<(int, int)> dials = [];
+
+  /// Ports on "the iPhone" (here: loopback) that answer a dial.
+  Set<int>? reachable;
+
+  /// Like Kotlin's `dialOut`: joins [port] (the iPhone, here on loopback)
+  /// to [listen].
+  @override
+  Future<void> dialCable({required int listen, required int port}) async {
+    dials.add((listen, port));
+    if (!(reachable?.contains(port) ?? false)) {
+      throw PlatformException(code: 'refused');
+    }
+    final target = await Socket.connect(InternetAddress.loopbackIPv4, port);
+    final back = await Socket.connect(InternetAddress.loopbackIPv4, listen);
+    unawaited(target.cast<List<int>>().pipe(back).catchError((_) {}));
+    unawaited(back.cast<List<int>>().pipe(target).catchError((_) {}));
+  }
 }

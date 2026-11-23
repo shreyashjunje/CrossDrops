@@ -266,14 +266,14 @@ class NearbyController extends Notifier<NearbyState> {
         ),
       );
 
-  /// Checks the phone on the cable (D-073). Its hello is not trusted: the
-  /// check pins and compares like a first contact. Throws
-  /// [UploadException].
+  /// Checks the phone on the cable (D-073, D-074); [peer] must receive.
+  /// Its hello is not trusted: the check pins and compares like a first
+  /// contact. Throws [UploadException].
   Future<ConnectTarget> connectToCable(CablePeer peer) =>
       ref.read(peerCheckProvider)(
         ConnectTarget(
           host: cableHost,
-          port: peer.port,
+          port: peer.port!,
           deviceId: peer.deviceId,
           name: peer.name,
         ),

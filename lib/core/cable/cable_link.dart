@@ -14,8 +14,11 @@ class CablePeer {
     required this.name,
   });
 
-  /// Its receive server port.
-  final int port;
+  /// Its receive server port; null while it does not receive.
+  final int? port;
+
+  /// It receives now: there is something to send to.
+  bool get receives => port != null;
   final String deviceId;
   final String name;
 
@@ -30,12 +33,14 @@ class CablePeer {
   int get hashCode => Object.hash(port, deviceId, name);
 }
 
-/// The sending iPhone's end of the cable (D-073).
+/// The iPhone's end of the cable (D-073, D-074).
 ///
 /// Listens on 127.0.0.1 at the first free port of [ports] for the Android
 /// bridge's control connection, and sets this isolate's [cableDialer]:
-/// each dial is sent to the Android as a `dial` line. Only the newest
-/// control connection is used, so a bridge that reconnects takes over.
+/// each dial is sent to the Android as a `dial` line. After the Android's
+/// hello it answers with [hello], so the Android can send here too. Only
+/// the newest control connection is used, so a bridge that reconnects
+/// takes over.
 class CableLink {
   CableLink({
     this.ports = cableControlPorts,
@@ -53,6 +58,15 @@ class CableLink {
   CableDialer? _dialer;
   Socket? _control;
   CablePeer? _peer;
+  CableHello? _hello;
+
+  /// This phone's hello for the Android; sent again when it changes.
+  CableHello? get hello => _hello;
+  set hello(CableHello? h) {
+    if (h?.encode() == _hello?.encode()) return;
+    _hello = h;
+    if (h != null && _peer != null) _control?.write(h.encode());
+  }
 
   /// Dial replies by listen port, until the Android fails them or they
   /// expire (the dialer has its own timeout).
@@ -141,7 +155,11 @@ class CableLink {
               socket.destroy();
               return;
             }
-            greeted = true;
+            if (!greeted) {
+              greeted = true;
+              final mine = _hello;
+              if (mine != null) socket.write(mine.encode());
+            }
             _setPeer(CablePeer(port: port, deviceId: deviceId, name: name));
           case CableFail(:final listen):
             _pending.remove(listen)?.send('refused');

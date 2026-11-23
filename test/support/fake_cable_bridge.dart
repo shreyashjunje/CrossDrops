@@ -14,6 +14,9 @@ class FakeCableBridge {
   /// Ports it agrees to dial; others get a `fail`.
   final Set<int> allowedPorts;
   final List<CableDial> dials = [];
+
+  /// The iPhone's hellos, newest last.
+  final List<CableHello> hellos = [];
   final List<Socket> _joined = [];
   final _closed = Completer<void>();
 
@@ -50,6 +53,7 @@ class FakeCableBridge {
 
   Future<void> _onLine(String line) async {
     final m = decodeCableMessage(line);
+    if (m is CableHello) hellos.add(m);
     if (m is! CableDial) return;
     dials.add(m);
     if (!allowedPorts.contains(m.port)) {

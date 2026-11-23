@@ -1899,9 +1899,15 @@ The iPhone app sends to the Android over the USB cable only. Same build on both 
 1. Android: Settings > About > **Cable test**, with the iPhone's port typed in (U-11). Expected: every line ok, `CrossDrop (port ...): reachable`.
 2. Back on Home, the card shows **Ready** again within a few seconds.
 
+### C-9: Android to iPhone (D-074)
+
+1. Both apps open, Receiving on on the iPhone. On the Android: Send > pick 50 photos and 1 large video > the iPhone appears as **"<name> · Connected by cable"**. Tap it.
+2. Expected: the code on both phones the first time, Accept on the iPhone, everything arrives in Photos, Done says verified. Note MB/s.
+3. Turn Receiving off on the iPhone. Expected: within a few seconds the iPhone disappears from the Android's list; the Android card says "Ready. On the iPhone, open CrossDrop…".
+
 ### Not checked on devices
 
-Everything in this section. On the PC: the cable host and dialer (pinning, refused and silent dials, workers in other isolates), the iPhone link (hello, takeover, oversized lines, loopback only), 122 files and an unplug with resume through a fake bridge, and the Android controller (start, update, stop, refused permission). Not on the PC at all: `UsbMux.kt` and `CableBridge.kt` (usbmux over real USB), and whether the iPhone takes usbmux connections to sockets bound to 127.0.0.1 only.
+Everything in this section. On the PC: the Android sending through its bridge dialer to a real receiver (82 files, striped videos, byte for byte), the cable host and dialer (pinning, refused and silent dials, workers in other isolates), the iPhone link (hello, takeover, oversized lines, loopback only), 122 files and an unplug with resume through a fake bridge, and the Android controller (start, update, stop, refused permission). Not on the PC at all: `UsbMux.kt` and `CableBridge.kt` (usbmux over real USB), and whether the iPhone takes usbmux connections to sockets bound to 127.0.0.1 only.
 
 ### Results
 
@@ -1915,3 +1921,4 @@ Everything in this section. On the PC: the cable host and dialer (pinning, refus
 | C-6 | | | | | | | |
 | C-7 | | | | | | | |
 | C-8 | | | | | | | |
+| C-9 | | | | | | | |

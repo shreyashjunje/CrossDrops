@@ -27,15 +27,17 @@ import java.util.concurrent.Executors
  * report cross the channel; file bytes stay in [CableBridge] (hard rule 2).
  *
  * - `devices` -> [{id, name}]: attached iPhones.
- * - `cableStart {port, ports, id, name}`: starts the bridge to the
+ * - `cableStart {port?, ports, id, name}`: starts the bridge to the
  *   plugged-in iPhone, or gives a running one new ports. Errors:
  *   `disconnected`, `permission_denied`.
  * - `cableStop`.
+ * - `cableDial {listen, port}`: joins [port] on the iPhone to
+ *   127.0.0.1:[listen] here (D-074). Errors: `not_connected`, `refused`.
  * - `probe {port?}` -> text report of the cable test. The bridge pauses
  *   meanwhile.
  *
  * Events on `crossdrop/usb_cable/events`: {type: attached, id, name},
- * {type: detached, id}, {type: cable, state, code}.
+ * {type: detached, id}, {type: cable, state, code, peer?: {port?, id, name}}.
  *
  * Names are never logged (hard rule 7).
  */
@@ -138,7 +140,7 @@ class UsbCableChannel(
             "probe" -> probe(call.argument<Number>("port")?.toInt(), result)
             "cableStart" -> {
                 cableConfig = CableBridge.Config(
-                    port = call.argument<Number>("port")!!.toInt(),
+                    port = call.argument<Number>("port")?.toInt(),
                     allowed = call.argument<List<Number>>("ports")!!.map { it.toInt() }.toSet(),
                     deviceId = call.argument<String>("id")!!,
                     name = call.argument<String>("name")!!,
@@ -149,6 +151,16 @@ class UsbCableChannel(
                 cableConfig = null
                 stopBridge()
                 result.success(null)
+            }
+            "cableDial" -> {
+                val b = bridge
+                if (b == null) {
+                    result.error("not_connected", null, null)
+                } else {
+                    b.dialOut(call.argument<Number>("port")!!.toInt(), call.argument<Number>("listen")!!.toInt()) { ok ->
+                        main.post { if (ok) result.success(null) else result.error("refused", null, null) }
+                    }
+                }
             }
             else -> result.notImplemented()
         }
@@ -217,8 +229,13 @@ class UsbCableChannel(
         stopBridge()
         withPermission(d, result) {
             lateinit var b: CableBridge
-            b = CableBridge(usb, d, config) { state, code ->
-                emit(mapOf("type" to "cable", "state" to state, "code" to code))
+            b = CableBridge(usb, d, config) { state, code, peer ->
+                emit(
+                    mapOf(
+                        "type" to "cable", "state" to state, "code" to code,
+                        "peer" to peer?.let { mapOf("port" to it.port, "id" to it.id, "name" to it.name) },
+                    ),
+                )
                 if (state == "stopped") main.post { if (bridge === b) bridge = null }
             }
             bridge = b

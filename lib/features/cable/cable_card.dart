@@ -13,13 +13,13 @@ class CableCard extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    if (!ref.watch(cableReceiveAvailableProvider)) {
+    if (!ref.watch(cableBridgeAvailableProvider)) {
       return const SizedBox.shrink();
     }
     final devices = ref.watch(usbDevicesProvider).value ?? const [];
     if (devices.isEmpty) return const SizedBox.shrink();
     final c = context.cd;
-    final cable = ref.watch(cableReceiveProvider);
+    final cable = ref.watch(cableBridgeProvider);
     final receivingOff = ref.watch(
       receiveStateProvider.select((s) => s.receivingOff),
     );
@@ -67,22 +67,34 @@ class CableCard extends ConsumerWidget {
   }
 }
 
-/// What the cable can do right now.
+/// What the cable can do right now, in both directions (D-074).
 String cableCardText(UsbCableState? cable, {required bool receivingOff}) {
-  if (receivingOff) return 'Turn on Receiving to get files over this cable.';
   if (cable?.connected ?? false) {
-    return 'Ready. On the iPhone, open CrossDrop, tap Send and choose this '
-        'phone: "Connected by cable". No Wi-Fi needed.';
+    final canGet = !receivingOff;
+    final canSend = cable?.peer?.receives ?? false;
+    if (canGet && canSend) {
+      return 'Ready both ways. On either phone tap Send and choose the other '
+          'one: "Connected by cable". No Wi-Fi needed.';
+    }
+    if (canSend) {
+      return 'Ready to send: tap Send and choose the iPhone, "Connected by '
+          'cable". Turn on Receiving to get files from it too.';
+    }
+    if (canGet) {
+      return 'Ready. On the iPhone, open CrossDrop, tap Send and choose this '
+          'phone: "Connected by cable". No Wi-Fi needed.';
+    }
+    return 'Turn on Receiving on a phone to send to it over this cable.';
   }
   return switch (cable?.code) {
     UsbCableErrors.permissionDenied =>
-      'Allow CrossDrop to use the iPhone (USB access) to receive by cable. '
+      'Allow CrossDrop to use the iPhone (USB access) to send by cable. '
           'Unplug it and plug it in again to be asked again.',
     'no_usbmux' || 'handshake' || 'open_failed' =>
       'The cable link did not start. Unlock the iPhone, unplug it and plug '
           'it in again.',
     _ =>
       'Open CrossDrop on the iPhone to send photos, videos and files over '
-          'this cable. No Wi-Fi needed.',
+          'this cable, either way. No Wi-Fi needed.',
   };
 }

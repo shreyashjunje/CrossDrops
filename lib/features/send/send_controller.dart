@@ -614,8 +614,9 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   /// The phone on the cable if it is the one (D-073), else discovery.
   PeerLocator _locator(String deviceId, String ownDeviceId) => () async {
     final cable = ref.read(cablePeerProvider);
-    if (cable != null && cable.deviceId == deviceId) {
-      return (host: cableHost, port: cable.port);
+    final port = cable?.port;
+    if (port != null && cable?.deviceId == deviceId) {
+      return (host: cableHost, port: port);
     }
     return locatePeer(
       ref.read(mdnsBackendFactoryProvider)(),

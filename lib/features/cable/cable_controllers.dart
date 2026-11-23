@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -7,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app/providers.dart';
 import '../../core/cable/cable_link.dart';
+import '../../core/cable/cable_messages.dart';
+import '../../core/cable/cable_route.dart';
 import '../../core/log.dart';
 import '../../platform/usb_cable.dart';
 import '../receive/receive_host.dart';
@@ -56,11 +59,11 @@ final usbDevicesProvider = StreamProvider<List<UsbCableDevice>>((ref) {
   return out.stream;
 });
 
-/// iPhone: sends over the cable.
-final cableSendAvailableProvider = Provider<bool>((ref) => Platform.isIOS);
+/// iPhone: runs the cable link.
+final cableLinkAvailableProvider = Provider<bool>((ref) => Platform.isIOS);
 
-/// Android: receives over the cable.
-final cableReceiveAvailableProvider = Provider<bool>(
+/// Android: runs the cable bridge.
+final cableBridgeAvailableProvider = Provider<bool>(
   (ref) => Platform.isAndroid,
 );
 
@@ -69,18 +72,41 @@ final cableLinkFactoryProvider = Provider<CableLink Function()>(
   (ref) => CableLink.new,
 );
 
-/// iPhone: the phone on the cable, or null. Runs the cable link while the
-/// app is in the foreground; iOS closes its sockets in the background.
-final cablePeerProvider = NotifierProvider<CableSendController, CablePeer?>(
-  CableSendController.new,
+/// The other phone on the cable, on either platform; null while there is
+/// none. Use [CablePeer.receives] before sending to it.
+final cablePeerProvider = Provider<CablePeer?>(
+  (ref) => ref.watch(cableLinkAvailableProvider)
+      ? ref.watch(cableLinkProvider)
+      : ref.watch(cableBridgeProvider)?.peer,
 );
 
-class CableSendController extends Notifier<CablePeer?> {
+/// This phone's hello: its receive port while it receives (D-074).
+CableHello? _ownHello(Ref ref) {
+  final me = ref.read(identityProvider).value;
+  if (me == null) return null;
+  final receive = ref.read(receiveStateProvider);
+  return CableHello(
+    port: receive.receivingOff ? null : receive.port,
+    deviceId: me.deviceId,
+    name: me.deviceName,
+  );
+}
+
+/// iPhone: the Android on the cable, or null. Runs the cable link while the
+/// app is in the foreground; iOS closes its sockets in the background.
+final cableLinkProvider = NotifierProvider<CableLinkController, CablePeer?>(
+  CableLinkController.new,
+);
+
+class CableLinkController extends Notifier<CablePeer?> {
   @override
   CablePeer? build() {
-    if (!ref.watch(cableSendAvailableProvider)) return null;
+    if (!ref.watch(cableLinkAvailableProvider)) return null;
     final link = ref.watch(cableLinkFactoryProvider)();
     final sub = link.changes.listen((p) => state = p);
+    void hello() => link.hello = _ownHello(ref);
+    ref.listen(receiveStateProvider, (_, _) => hello());
+    ref.listen(identityProvider, (_, _) => hello(), fireImmediately: true);
     final lifecycle = AppLifecycleListener(
       onPause: () => unawaited(link.stop()),
       onResume: () => unawaited(link.start()),
@@ -96,16 +122,17 @@ class CableSendController extends Notifier<CablePeer?> {
 }
 
 /// Android: the cable bridge's state while it runs; null while it does
-/// not. It runs while an iPhone is plugged in, the receive server is up
-/// and Receiving is on.
-final cableReceiveProvider =
-    NotifierProvider<CableReceiveController, UsbCableState?>(
-      CableReceiveController.new,
+/// not. It runs while an iPhone is plugged in. While the iPhone's hello
+/// says it receives, this isolate's [cableDialer] dials it (D-074).
+final cableBridgeProvider =
+    NotifierProvider<CableBridgeController, UsbCableState?>(
+      CableBridgeController.new,
     );
 
-class CableReceiveController extends Notifier<UsbCableState?> {
-  late UsbCable _camera;
+class CableBridgeController extends Notifier<UsbCableState?> {
+  late UsbCable _cable;
   bool _plugged = false;
+  CableDialer? _dialer;
 
   /// What the bridge was last started with; null while stopped. Kept after
   /// a failed start, so a refused permission is not asked again until the
@@ -114,10 +141,13 @@ class CableReceiveController extends Notifier<UsbCableState?> {
 
   @override
   UsbCableState? build() {
-    if (!ref.watch(cableReceiveAvailableProvider)) return null;
-    final camera = _camera = ref.watch(usbCableProvider);
-    final sub = camera.events.listen((e) {
-      if (e is UsbCableState) state = e;
+    if (!ref.watch(cableBridgeAvailableProvider)) return null;
+    final cable = _cable = ref.watch(usbCableProvider);
+    final dials = ReceivePort()..listen(_onDial);
+    final sub = cable.events.listen((e) {
+      if (e is! UsbCableState) return;
+      state = e;
+      _setDialer(e.connected && (e.peer?.receives ?? false), dials);
     });
     ref.listen(usbDevicesProvider, (_, next) {
       _plugged = (next.value ?? const []).isNotEmpty;
@@ -127,38 +157,60 @@ class CableReceiveController extends Notifier<UsbCableState?> {
     ref.listen(identityProvider, (_, _) => _sync());
     ref.onDispose(() {
       unawaited(sub.cancel());
-      if (_running != null) unawaited(camera.stopCableBridge());
+      _setDialer(false, dials);
+      dials.close();
+      if (_running != null) unawaited(cable.stopCableBridge());
     });
     return null;
   }
 
+  void _setDialer(bool on, ReceivePort dials) {
+    if (on) {
+      cableDialer = _dialer ??= CableDialer(dials.sendPort);
+    } else if (_dialer != null) {
+      if (identical(cableDialer, _dialer)) cableDialer = null;
+      _dialer = null;
+    }
+  }
+
+  /// A dial from any isolate: Kotlin joins the iPhone port to its socket.
+  Future<void> _onDial(Object? m) async {
+    if (m is! List || m.length != 3) return;
+    final [listen as int, port as int, reply as SendPort] = m;
+    try {
+      await _cable.dialCable(listen: listen, port: port);
+    } on PlatformException catch (e) {
+      reply.send(e.code);
+    }
+  }
+
   void _sync() {
-    final receive = ref.read(receiveStateProvider);
-    final port = receive.port;
-    final wanted = _plugged && port != null && !receive.receivingOff;
-    final me = wanted ? ref.read(identityProvider).value : null;
-    if (port == null || me == null) {
+    final hello = _plugged ? _ownHello(ref) : null;
+    if (hello == null) {
       if (_running == null) return;
       _running = null;
-      unawaited(_camera.stopCableBridge());
+      unawaited(_cable.stopCableBridge());
       state = null;
       return;
     }
-    final ports = [port, ...receive.dataPorts];
-    final key = '$port ${ports.join(',')} ${me.deviceId} ${me.deviceName}';
+    final port = hello.port;
+    final ports = [
+      if (port != null) ...[port, ...ref.read(receiveStateProvider).dataPorts],
+    ];
+    final key = '${ports.join(',')} ${hello.deviceId} ${hello.name}';
     if (key == _running) return;
     _running = key;
-    unawaited(_start(port, ports, me.deviceId, me.deviceName));
+    unawaited(_start(port, ports, hello.deviceId, hello.name));
   }
 
   Future<void> _start(
-    int port,
+    int? port,
     List<int> ports,
     String deviceId,
     String name,
   ) async {
     try {
-      await _camera.startCableBridge(
+      await _cable.startCableBridge(
         port: port,
         ports: ports,
         deviceId: deviceId,

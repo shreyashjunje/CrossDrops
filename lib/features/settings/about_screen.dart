@@ -124,7 +124,7 @@ class AboutScreen extends ConsumerWidget {
               ),
             ),
           const SizedBox(height: 24),
-          if (ref.watch(cableReceiveAvailableProvider)) ...[
+          if (ref.watch(cableBridgeAvailableProvider)) ...[
             OutlinedButton(
               style: const ButtonStyle(
                 minimumSize: WidgetStatePropertyAll(

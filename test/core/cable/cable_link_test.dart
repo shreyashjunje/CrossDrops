@@ -44,6 +44,13 @@ void main() {
       expect(fail.listen, 6000);
     });
 
+    test('a hello without a port: that phone does not receive', () {
+      const hello = CableHello(deviceId: 'a1', name: 'iPhone');
+      expect(hello.encode(), isNot(contains('port')));
+      final back = decodeCableMessage(hello.encode().trim())! as CableHello;
+      expect(back.port, isNull);
+    });
+
     test('invalid or unknown lines are skipped', () {
       for (final line in [
         'not json',
@@ -54,6 +61,7 @@ void main() {
         '{"t":"dial","listen":"1","port":5}',
         '{"t":"hello","v":1,"port":5,"id":"","name":"x"}',
         '{"t":"hello","v":1,"port":5,"name":"x"}',
+        '{"t":"hello","v":1,"port":0,"id":"a","name":"x"}',
       ]) {
         expect(decodeCableMessage(line), isNull, reason: line);
       }
@@ -137,6 +145,23 @@ void main() {
       final s = await dialCable(echo.port, const Duration(seconds: 5));
       expect(await _roundTrip(s, 'hi'), 'hi');
       expect(bridge.dials.single.port, echo.port);
+    });
+
+    test('answers the Android hello with its own, and updates it', () async {
+      link.hello = const CableHello(port: 6000, deviceId: 'ios', name: 'Me');
+      final bridge = await FakeCableBridge.connect(
+        link.port!,
+        receivePort: echo.port,
+      );
+      addTearDown(bridge.unplug);
+      await nextChange();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(bridge.hellos.single.port, 6000);
+      link.hello = const CableHello(deviceId: 'ios', name: 'Me');
+      // The same hello again is not sent twice.
+      link.hello = const CableHello(deviceId: 'ios', name: 'Me');
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(bridge.hellos.map((h) => h.port), [6000, null]);
     });
 
     test('a port the phone refuses fails the dial at once', () async {

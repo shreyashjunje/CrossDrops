@@ -691,7 +691,10 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: After D-073 the owner asked to remove the cable import of D-067 and to add Android → iPhone by cable. They asked for the removal before the cable send had run on phones.
 - Decision:
   - **Removed:** the import screen and controller, the camera-roll grouping, the copy queue, and every MtpDevice part of the Kotlin channel. Kept, under new names (`UsbCable`, `UsbCableChannel.kt`, `lib/features/cable/`): plug-in detection, USB access, the bridge, the cable test (U-11) and the home card, which now only says what the cable can do. The attach intent filter stays, so plugging in still offers CrossDrop.
-  - **Android → iPhone:** see below, same tunnel.
+  - **Android → iPhone, same tunnel.** Both phones send `hello`; `port` is optional (absent: that phone does not receive now). The iPhone answers the Android's hello with its own and sends it again when its receive port changes. The Android is the USB host, so it dials the iPhone directly: its Dart dialer binds 127.0.0.1:P and calls `cableDial {listen: P, port: X}` (ports only, hard rule 2); `CableBridge.dialOut` opens usbmux to iPhone port X and joins it to P. The iPhone's receive server binds all addresses, which U-11 reached. Everything above the socket is the normal protocol, so both directions get the same lanes, hashes and resume.
+  - The Android bridge now runs whenever an iPhone is plugged in, even with Receiving off (it can still send); it offers its receive ports only while it receives.
+  - `cablePeerProvider` gives the phone on the cable on either platform; Nearby lists it only while it receives.
 - Consequences:
   - Until C-1 passes on the owner's phones there is no proven way to move files by cable. If usbmux fails on a phone, the import can be brought back from git history.
   - The Android app no longer reads the iPhone's camera roll without the iPhone app.
+  - Found while testing: two lanes reconnecting at once could close the client the other was opening its event socket with; `StateError` escaped. Both control requests and the event socket now report it as `network` (also on Wi-Fi).

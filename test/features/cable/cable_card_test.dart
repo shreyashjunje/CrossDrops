@@ -1,3 +1,4 @@
+import 'package:crossdrop/core/cable/cable_link.dart';
 import 'package:crossdrop/features/cable/cable_card.dart';
 import 'package:crossdrop/features/cable/cable_controllers.dart';
 import 'package:crossdrop/features/receive/receive_controller.dart';
@@ -13,7 +14,7 @@ void main() {
   Widget app(FakeUsbCable cable, {bool android = true}) => ProviderScope(
     overrides: [
       usbCableProvider.overrideWithValue(cable),
-      cableReceiveAvailableProvider.overrideWithValue(android),
+      cableBridgeAvailableProvider.overrideWithValue(android),
       // No receive server: the bridge stays off, the card still shows.
       receiveStateProvider.overrideWithValue(const ReceiveState()),
     ],
@@ -46,8 +47,23 @@ void main() {
 
   test('texts for the bridge states', () {
     expect(
-      cableCardText(null, receivingOff: true),
+      cableCardText(const UsbCableState('connected'), receivingOff: true),
       contains('Turn on Receiving'),
+    );
+    const iphone = CablePeer(port: 1, deviceId: 'i', name: 'iPhone');
+    expect(
+      cableCardText(
+        const UsbCableState('connected', null, iphone),
+        receivingOff: false,
+      ),
+      contains('both ways'),
+    );
+    expect(
+      cableCardText(
+        const UsbCableState('connected', null, iphone),
+        receivingOff: true,
+      ),
+      contains('Ready to send'),
     );
     expect(
       cableCardText(

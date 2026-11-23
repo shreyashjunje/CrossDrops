@@ -172,7 +172,9 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
       }
     });
     final picked = ref.watch(sendControllerProvider.select((s) => s.picked));
-    final cable = ref.watch(cablePeerProvider);
+    final cable = ref.watch(
+      cablePeerProvider.select((p) => p != null && p.receives ? p : null),
+    );
 
     final Widget body;
     if (state.permissionDenied) {
@@ -225,7 +227,10 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
                 peer: RadarPeer(
                   id: _cableId,
                   name: cable.name,
-                  platform: DevicePlatform.android,
+                  // The phone on the cable is the other kind.
+                  platform: DevicePlatform.current == DevicePlatform.ios
+                      ? DevicePlatform.android
+                      : DevicePlatform.ios,
                   hint: 'Connected by cable',
                   enabled: !_connecting,
                 ),

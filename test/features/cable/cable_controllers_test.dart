@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:crossdrop/app/providers.dart';
 import 'package:crossdrop/core/cable/cable_link.dart';
+import 'package:crossdrop/core/cable/cable_route.dart';
 import 'package:crossdrop/core/storage/database.dart';
 import 'package:crossdrop/features/cable/cable_controllers.dart';
 import 'package:crossdrop/features/receive/receive_controller.dart';
@@ -45,14 +46,14 @@ void main() {
         overrides: [
           databaseProvider.overrideWithValue(db),
           usbCableProvider.overrideWithValue(camera),
-          cableReceiveAvailableProvider.overrideWithValue(true),
+          cableBridgeAvailableProvider.overrideWithValue(true),
           receiveStateProvider.overrideWith((ref) => ref.watch(_receive)),
         ],
       );
       final me = await c.read(identityProvider.future);
       deviceId = me.deviceId;
       name = me.deviceName;
-      c.listen(cableReceiveProvider, (_, _) {});
+      c.listen(cableBridgeProvider, (_, _) {});
       await _settle();
     });
 
@@ -77,25 +78,67 @@ void main() {
       expect(camera.cableCalls.last!.ports, [6000]);
     });
 
-    test('Receiving off or the server stopped: it stops', () async {
-      c
-          .read(_receive.notifier)
-          .set(const ReceiveState(port: 5000, receivingOff: true));
+    test(
+      'Receiving off: it keeps running for sending, with no ports',
+      () async {
+        c
+            .read(_receive.notifier)
+            .set(const ReceiveState(port: 5000, receivingOff: true));
+        await _settle();
+        final off = camera.cableCalls.last!;
+        expect(off.port, isNull);
+        expect(off.ports, isEmpty);
+        c.read(_receive.notifier).set(const ReceiveState(port: 5000));
+        await _settle();
+        expect(camera.cableCalls.last!.port, 5000);
+        // Server stopped: still running, nothing to dial here.
+        c.read(_receive.notifier).set(const ReceiveState());
+        await _settle();
+        expect(camera.cableCalls.last!.ports, isEmpty);
+      },
+    );
+
+    test('the iPhone receives: this phone dials it; then it stops', () async {
+      final echo = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(echo.close);
+      echo.listen((s) => s.cast<List<int>>().pipe(s).catchError((_) {}));
+      camera.reachable = {echo.port};
+      const iphone = CablePeer(port: 1, deviceId: 'ios-1', name: 'iPhone');
+      camera.cableState('connected', null, iphone);
       await _settle();
-      expect(camera.cableCalls.last, isNull);
-      c.read(_receive.notifier).set(const ReceiveState(port: 5000));
+      expect(c.read(cablePeerProvider), iphone);
+      final s = await dialCable(echo.port, const Duration(seconds: 5));
+      s.write('hi');
+      expect(String.fromCharCodes(await s.first), 'hi');
+      s.destroy();
+      expect(camera.dials.single.$2, echo.port);
+      // A refused port fails at once.
+      await expectLater(
+        dialCable(2, const Duration(seconds: 5)),
+        throwsA(isA<SocketException>()),
+      );
+      // The iPhone stops receiving: nothing to dial.
+      camera.cableState(
+        'connected',
+        null,
+        const CablePeer(port: null, deviceId: 'ios-1', name: 'iPhone'),
+      );
       await _settle();
-      expect(camera.cableCalls.last, isNotNull);
-      c.read(_receive.notifier).set(const ReceiveState());
+      expect(cableDialer, isNull);
+      camera.cableState('connected', null, iphone);
       await _settle();
-      expect(camera.cableCalls.last, isNull);
+      expect(cableDialer, isNotNull);
+      camera.unplug(FakeUsbCable.iphone.id);
+      camera.cableState('stopped', 'unplugged');
+      await _settle();
+      expect(cableDialer, isNull);
     });
 
     test('unplugged: it stops; plugged in again: it starts', () async {
       camera.unplug(FakeUsbCable.iphone.id);
       await _settle();
       expect(camera.cableCalls.last, isNull);
-      expect(c.read(cableReceiveProvider), isNull);
+      expect(c.read(cableBridgeProvider), isNull);
       camera.plug(FakeUsbCable.iphone);
       await _settle();
       expect(camera.cableCalls.last, isNotNull);
@@ -104,14 +147,14 @@ void main() {
     test('bridge states show; a refused start is not asked again', () async {
       camera.cableState('connected');
       await _settle();
-      expect(c.read(cableReceiveProvider)?.connected, isTrue);
+      expect(c.read(cableBridgeProvider)?.connected, isTrue);
 
       camera.unplug(FakeUsbCable.iphone.id);
       await _settle();
       camera.cableErrors.add(UsbCableErrors.permissionDenied);
       camera.plug(FakeUsbCable.iphone);
       await _settle();
-      expect(c.read(cableReceiveProvider)?.code, 'permission_denied');
+      expect(c.read(cableBridgeProvider)?.code, 'permission_denied');
       final calls = camera.cableCalls.length;
       // The same state again (a receive update): no new prompt.
       c
@@ -127,15 +170,20 @@ void main() {
       'shows the phone on the cable while its bridge is connected',
       () async {
         late CableLink link;
+        final db = AppDatabase(NativeDatabase.memory());
+        addTearDown(db.close);
         final c = ProviderContainer(
           overrides: [
-            cableSendAvailableProvider.overrideWithValue(true),
+            databaseProvider.overrideWithValue(db),
+            receiveStateProvider.overrideWith((ref) => ref.watch(_receive)),
+            cableLinkAvailableProvider.overrideWithValue(true),
             cableLinkFactoryProvider.overrideWithValue(
               () => link = CableLink(ports: const [0]),
             ),
           ],
         );
         addTearDown(c.dispose);
+        final me = await c.read(identityProvider.future);
         final changes = <CablePeer?>[];
         c.listen(cablePeerProvider, (_, next) => changes.add(next));
         await _settle();
@@ -145,6 +193,15 @@ void main() {
         );
         await _settle();
         expect(c.read(cablePeerProvider)?.port, 7000);
+        // The iPhone answered with its own hello: it receives on 5000.
+        expect(bridge.hellos.single.port, 5000);
+        expect(bridge.hellos.single.deviceId, me.deviceId);
+        // Receiving turned off: a new hello without a port.
+        c
+            .read(_receive.notifier)
+            .set(const ReceiveState(port: 5000, receivingOff: true));
+        await _settle();
+        expect(bridge.hellos.last.port, isNull);
         bridge.unplug();
         await _settle();
         expect(c.read(cablePeerProvider), isNull);
@@ -154,7 +211,7 @@ void main() {
 
     test('off on Android', () {
       final c = ProviderContainer(
-        overrides: [cableSendAvailableProvider.overrideWithValue(false)],
+        overrides: [cableLinkAvailableProvider.overrideWithValue(false)],
       );
       addTearDown(c.dispose);
       expect(c.read(cablePeerProvider), isNull);

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 
+import '../core/cable/cable_link.dart';
+
 /// An iPhone plugged into this phone by USB cable.
 class UsbCableDevice {
   const UsbCableDevice({required this.id, required this.name});
@@ -32,11 +34,13 @@ class UsbCableDetached extends UsbCableEvent {
 /// The send-by-cable bridge (D-073) changed state: `starting`, `waiting`
 /// (CrossDrop not answering on the iPhone yet), `connected` or `stopped`.
 /// A stop has a [code] (`open_failed`, `no_usbmux`, `handshake`,
-/// `unplugged`) unless it was asked for.
+/// `unplugged`) unless it was asked for. While connected, [peer] is the
+/// iPhone from its hello (D-074), once it has sent one.
 class UsbCableState extends UsbCableEvent {
-  const UsbCableState(this.state, [this.code]);
+  const UsbCableState(this.state, [this.code, this.peer]);
   final String state;
   final String? code;
+  final CablePeer? peer;
 
   bool get connected => state == 'connected';
 }
@@ -68,18 +72,23 @@ abstract interface class UsbCable {
   Future<String> probeTunnel({int? port});
 
   /// Starts the send-by-cable bridge to the plugged-in iPhone, or gives the
-  /// running one new ports: [port] is this phone's receive port, [ports]
-  /// every port the bridge may join (receive and data lanes). [deviceId]
-  /// and [name] go into the hello. Throws [PlatformException]
-  /// ([UsbCableErrors]).
+  /// running one new ports: [port] is this phone's receive port (null while
+  /// it does not receive), [ports] every port the bridge may join for the
+  /// iPhone (receive and data lanes). [deviceId] and [name] go into the
+  /// hello. Throws [PlatformException] ([UsbCableErrors]).
   Future<void> startCableBridge({
-    required int port,
+    required int? port,
     required List<int> ports,
     required String deviceId,
     required String name,
   });
 
   Future<void> stopCableBridge();
+
+  /// Android sends (D-074): joins [port] on the iPhone to [listen] on this
+  /// phone's 127.0.0.1. Throws [PlatformException] (`not_connected`,
+  /// `refused`).
+  Future<void> dialCable({required int listen, required int port});
 }
 
 /// [UsbCable] over `crossdrop/usb_cable`.
@@ -111,7 +120,7 @@ class ChannelUsbCable implements UsbCable {
 
   @override
   Future<void> startCableBridge({
-    required int port,
+    required int? port,
     required List<int> ports,
     required String deviceId,
     required String name,
@@ -124,17 +133,37 @@ class ChannelUsbCable implements UsbCable {
 
   @override
   Future<void> stopCableBridge() => _channel.invokeMethod<void>('cableStop');
+
+  @override
+  Future<void> dialCable({required int listen, required int port}) => _channel
+      .invokeMethod<void>('cableDial', {'listen': listen, 'port': port});
 }
 
 UsbCableDevice _device(Map<Object?, Object?> m) =>
     UsbCableDevice(id: m['id']! as String, name: m['name'] as String? ?? '');
+
+CablePeer? _peer(Object? raw) {
+  if (raw is! Map<Object?, Object?>) return null;
+  final id = raw['id'];
+  final name = raw['name'];
+  if (id is! String || name is! String) return null;
+  return CablePeer(
+    port: (raw['port'] as num?)?.toInt(),
+    deviceId: id,
+    name: name,
+  );
+}
 
 /// Parses one event; null for an unknown type.
 UsbCableEvent? parseUsbCableEvent(Map<Object?, Object?> m) =>
     switch (m['type']) {
       'attached' => UsbCableAttached(_device(m)),
       'detached' => UsbCableDetached(m['id']! as String),
-      'cable' => UsbCableState(m['state']! as String, m['code'] as String?),
+      'cable' => UsbCableState(
+        m['state']! as String,
+        m['code'] as String?,
+        _peer(m['peer']),
+      ),
       _ => null,
     };
 
@@ -153,7 +182,7 @@ class NoUsbCable implements UsbCable {
 
   @override
   Future<void> startCableBridge({
-    required int port,
+    required int? port,
     required List<int> ports,
     required String deviceId,
     required String name,
@@ -161,4 +190,8 @@ class NoUsbCable implements UsbCable {
 
   @override
   Future<void> stopCableBridge() async {}
+
+  @override
+  Future<void> dialCable({required int listen, required int port}) async =>
+      throw PlatformException(code: 'not_connected');
 }

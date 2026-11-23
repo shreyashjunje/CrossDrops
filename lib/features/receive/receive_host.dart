@@ -59,9 +59,9 @@ class _ReceiveHostState extends ConsumerState<ReceiveHost> {
         _sub = null;
       }
     }, fireImmediately: true);
-    // Send by cable (D-073): the iPhone's link, the Android's bridge.
-    ref.listenManual(cablePeerProvider, (_, _) {});
-    ref.listenManual(cableReceiveProvider, (_, _) {});
+    // Send by cable (D-073, D-074): the iPhone link, the Android bridge.
+    ref.listenManual(cableLinkProvider, (_, _) {});
+    ref.listenManual(cableBridgeProvider, (_, _) {});
   }
 
   @override

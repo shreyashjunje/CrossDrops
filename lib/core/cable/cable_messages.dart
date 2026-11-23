@@ -24,12 +24,13 @@ sealed class CableMessage {
   String encode() => '${jsonEncode(toJson())}\n';
 }
 
-/// Android → iPhone, first on the control connection and again when its
-/// receive port changes. Unauthenticated: used to route and to show a
-/// name; the pinned TLS connection proves who answers.
+/// Each side's introduction (D-073, D-074): Android sends it first on the
+/// control connection, the iPhone answers with its own, and either sends
+/// it again when its receive port changes. Unauthenticated: used to route
+/// and to show a name; the pinned TLS connection proves who answers.
 final class CableHello extends CableMessage {
   const CableHello({
-    required this.port,
+    this.port,
     required this.deviceId,
     required this.name,
     this.version = cableProtocolVersion,
@@ -37,8 +38,8 @@ final class CableHello extends CableMessage {
 
   final int version;
 
-  /// The Android's receive server port.
-  final int port;
+  /// The sender's receive server port; null while it does not receive.
+  final int? port;
   final String deviceId;
   final String name;
 
@@ -46,7 +47,7 @@ final class CableHello extends CableMessage {
   Map<String, Object?> toJson() => {
     't': 'hello',
     'v': version,
-    'port': port,
+    'port': ?port,
     'id': deviceId,
     'name': name,
   };
@@ -96,13 +97,12 @@ CableMessage? decodeCableMessage(String line) {
       final port = m['port'];
       final id = m['id'];
       final name = m['name'];
-      if (v is! int || !_isPort(port) || id is! String || name is! String) {
-        return null;
-      }
+      if (v is! int || id is! String || name is! String) return null;
+      if (port != null && !_isPort(port)) return null;
       if (id.isEmpty || id.length > 64) return null;
       return CableHello(
         version: v,
-        port: port! as int,
+        port: port as int?,
         deviceId: id,
         name: name.length > maxCableNameChars
             ? name.substring(0, maxCableNameChars)
