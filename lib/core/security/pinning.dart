@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 
+import '../cable/cable_route.dart';
 import 'fingerprint.dart';
 
 /// The receiver's certificate did not have the expected fingerprint. The
@@ -46,15 +47,38 @@ HttpClient pinnedHttpClient({
       if (uri.scheme != 'https' && uri.scheme != 'wss') {
         throw ArgumentError('only https is allowed');
       }
+      bool onCertificate(X509Certificate cert) {
+        final ok = matches(cert);
+        if (!ok) onMismatch?.call();
+        return ok;
+      }
+
+      Socket checked(SecureSocket s) {
+        if (!matches(s.peerCertificate)) {
+          s.destroy();
+          onMismatch?.call();
+          throw const PinMismatchException();
+        }
+        return s;
+      }
+
+      if (isCableHost(uri.host)) {
+        var cancelled = false;
+        final socket = _secureOverCable(uri.port, connectTimeout, onCertificate)
+            .then((s) {
+              if (cancelled) {
+                s.destroy();
+                throw const SocketException('connect cancelled');
+              }
+              return checked(s);
+            });
+        return ConnectionTask.fromSocket(socket, () => cancelled = true);
+      }
       final task = await SecureSocket.startConnect(
         uri.host,
         uri.port,
         context: _clientContext(),
-        onBadCertificate: (cert) {
-          final ok = matches(cert);
-          if (!ok) onMismatch?.call();
-          return ok;
-        },
+        onBadCertificate: onCertificate,
       );
       final socket = task.socket
           .timeout(
@@ -64,16 +88,29 @@ HttpClient pinnedHttpClient({
               throw const SocketException('connect timed out');
             },
           )
-          .then((s) {
-            if (!matches(s.peerCertificate)) {
-              s.destroy();
-              onMismatch?.call();
-              throw const PinMismatchException();
-            }
-            return s as Socket;
-          });
+          .then(checked);
       return ConnectionTask.fromSocket(socket, task.cancel);
     };
+}
+
+/// TLS over a socket dialed through the cable (D-073), with the same
+/// context and certificate check as a network connection.
+Future<SecureSocket> _secureOverCable(
+  int port,
+  Duration timeout,
+  bool Function(X509Certificate) onBadCertificate,
+) async {
+  final raw = await dialCable(port, timeout);
+  try {
+    return await SecureSocket.secure(
+      raw,
+      context: _clientContext(),
+      onBadCertificate: onBadCertificate,
+    ).timeout(timeout);
+  } catch (_) {
+    raw.destroy();
+    rethrow;
+  }
 }
 
 /// Connects once, reads the server's certificate fingerprint and closes,
@@ -87,13 +124,15 @@ Future<String> probeFingerprint(
   int port, {
   Duration timeout = const Duration(seconds: 5),
 }) async {
-  final socket = await SecureSocket.connect(
-    host,
-    port,
-    context: _clientContext(),
-    onBadCertificate: (_) => true,
-    timeout: timeout,
-  );
+  final socket = isCableHost(host)
+      ? await _secureOverCable(port, timeout, (_) => true)
+      : await SecureSocket.connect(
+          host,
+          port,
+          context: _clientContext(),
+          onBadCertificate: (_) => true,
+          timeout: timeout,
+        );
   try {
     final cert = socket.peerCertificate;
     if (cert == null) {

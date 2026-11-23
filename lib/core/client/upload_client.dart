@@ -6,6 +6,7 @@ import 'dart:typed_data';
 
 import 'package:path/path.dart' as p;
 
+import '../cable/cable_route.dart';
 import '../engine/chunked_reader.dart';
 import '../log.dart';
 import '../engine/sha256_isolate.dart';
@@ -932,6 +933,8 @@ class _WorkerUpload {
         stripe?.count,
         stripe?.block,
         t.treeHash,
+        // A worker dials its own cable sockets (D-073).
+        isCableHost(client.host) ? cableDialer : null,
       ],
       debugName: 'upload',
       onExit: exit.sendPort,
@@ -1001,6 +1004,7 @@ class _WorkerUpload {
 
 Future<void> _uploadWorker(List<Object?> a) async {
   final toMain = a[0]! as SendPort;
+  cableDialer = a[17] as CableDialer?;
   final client = UploadClient._worker(
     a[4]! as String,
     host: a[1]! as String,
