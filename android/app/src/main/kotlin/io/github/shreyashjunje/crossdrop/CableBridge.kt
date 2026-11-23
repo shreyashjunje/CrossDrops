@@ -35,7 +35,7 @@ class CableBridge(
     private val usb: UsbManager,
     val device: UsbDevice,
     @Volatile private var config: Config,
-    private val onState: (String, String?) -> Unit,
+    private val report: (String, String?) -> Unit,
 ) {
     data class Config(val port: Int, val allowed: Set<Int>, val deviceId: String, val name: String)
 
@@ -44,6 +44,15 @@ class CableBridge(
     @Volatile private var mux: UsbMux? = null
     @Volatile private var control: UsbMux.MuxConnection? = null
     private val thread = Thread(::run, "cable-bridge").apply { isDaemon = true }
+    private var last: Pair<String, String?>? = null
+
+    /** Reports a state once, not again while it stays the same. */
+    @Synchronized
+    private fun onState(state: String, code: String?) {
+        if (last == state to code) return
+        last = state to code
+        report(state, code)
+    }
 
     fun start() = thread.start()
 

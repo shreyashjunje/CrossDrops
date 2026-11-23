@@ -153,11 +153,14 @@ class UsbMux private constructor(
         var filled = 0
         try {
             while (!dead.get()) {
-                // Whole USB packets only, or a long one overflows. Timeout
-                // 0: blocks until data; -1 means the device is gone.
-                val room = (buf.size - filled) / bulkIn.maxPacketSize * bulkIn.maxPacketSize
-                val n = conn.bulkTransfer(bulkIn, buf, filled, room, 0)
+                // 16 KB reads like usbmuxd's (USB_MRU): a long usbmux packet
+                // spans several, and none waits half full for more. A -1
+                // before the timeout means the device is gone; at the
+                // timeout, nothing was in flight.
+                val started = System.currentTimeMillis()
+                val n = conn.bulkTransfer(bulkIn, buf, filled, USB_MRU, READ_TIMEOUT_MS)
                 if (n < 0) {
+                    if (System.currentTimeMillis() - started >= READ_TIMEOUT_MS - 100) continue
                     close("unplugged")
                     return
                 }
@@ -347,7 +350,9 @@ class UsbMux private constructor(
         /** Receive window per connection. */
         const val WINDOW = 512 * 1024
         const val MAX_PACKET = 256 * 1024
-        const val READ_BUFFER = 2 * MAX_PACKET
+        const val USB_MRU = 16384
+        const val READ_BUFFER = MAX_PACKET + USB_MRU
+        const val READ_TIMEOUT_MS = 1000
         const val USB_TIMEOUT_MS = 5000
         const val HANDSHAKE_TIMEOUT_MS = 3000L
 
@@ -377,7 +382,7 @@ class UsbMux private constructor(
             val req = ByteBuffer.allocate(20).putInt(PROTO_VERSION).putInt(20)
                 .putInt(2).putInt(0).putInt(0).array()
             if (conn.bulkTransfer(bulkOut, req, req.size, USB_TIMEOUT_MS) != req.size) throw IOException("handshake send")
-            val buf = ByteArray(READ_BUFFER)
+            val buf = ByteArray(USB_MRU)
             val deadline = System.currentTimeMillis() + HANDSHAKE_TIMEOUT_MS
             while (true) {
                 val left = deadline - System.currentTimeMillis()
