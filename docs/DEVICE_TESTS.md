@@ -1930,12 +1930,12 @@ Same build on both phones. Any connection works (Wi-Fi, hotspot or cable).
 ### D-1: Folder iPhone to Android
 
 1. iPhone: Files app, make a folder "Trip" with a subfolder "Day 1"; put 3 photos in Trip, and 2 photos and a PDF in Day 1.
-2. CrossDrop > Send > **Folder** > pick Trip > send to the Android.
+2. CrossDrop > Send > **Folder** > **From Files** > pick Trip > send to the Android.
 3. Expected: Android Files app > Download > CrossDrop > Trip holds the 3 photos and Day 1 with its 3 files; the photos also show in the gallery.
 
 ### D-2: Folder Android to iPhone
 
-1. Android: a folder with subfolders (for example Download/Test with 20 files in 2 subfolders). Send > **Folder** > pick it.
+1. Android: a folder with subfolders (for example Download/Test with 20 files in 2 subfolders). Send > **Folder** > **From Files** > pick it.
 2. Expected: iPhone Files > On My iPhone > CrossDrop > Test, same structure; every file opens.
 
 ### D-3: Big folder
@@ -1957,8 +1957,15 @@ Same build on both phones. Any connection works (Wi-Fi, hotspot or cable).
 
 ### D-7: Folder on a USB drive (iPhone, D-077)
 
-1. Plug a USB-C drive into the iPhone with a folder bigger than the iPhone's free space. Send > Folder > pick it. Expected: after a while, "Not enough free space to copy that folder from the drive"; nothing selected; free space unchanged in Settings > General > iPhone Storage.
+1. Plug a USB-C drive into the iPhone with a folder bigger than the iPhone's free space. Send > Folder > From Files > pick it. Expected: after a while, "Not enough free space to copy that folder from the drive"; nothing selected; free space unchanged in Settings > General > iPhone Storage.
 2. Pick a small folder on the same drive. Expected: its files are selected and the send completes, byte for byte.
+
+### D-8: Photo album as a folder (D-079)
+
+1. iPhone: Send > **Folder** > **Photo album**. Pick an album with at least 10 photos, a video and a Live Photo from the menu at the top. Expected: the whole album gets selected; untap one photo; **Add N**. Send to the Android.
+2. Expected: Android Files app > Download > CrossDrop > *album name* holds the photos, the video and the Live Photo's still; the photos also show in the gallery.
+3. Android: the same with one of its albums (for example Camera), sent to the iPhone. Expected: iPhone Files > On My iPhone > CrossDrop > *album name* holds them. They are **not** in the Photos app (a folder always goes to Files).
+4. Pick a few loose photos, then an album that holds one of them. Expected: that photo is sent twice, once loose and once in the folder.
 
 ### Results
 
@@ -1971,3 +1978,4 @@ Same build on both phones. Any connection works (Wi-Fi, hotspot or cable).
 | D-5 | | | | | | | |
 | D-6 | | | | | | | |
 | D-7 | | | | | | | |
+| D-8 | | | | | | | |

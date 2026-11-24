@@ -120,6 +120,31 @@ void main() {
     ], reason: 'one call, only for picks without a name');
   });
 
+  test('an album keeps its folder through the name lookup (D-079)', () async {
+    final media = _NamingMedia({'a': 'IMG_0001.HEIC'});
+    final c = ProviderContainer(
+      overrides: [
+        keepAliveProvider.overrideWithValue(
+          KeepAliveCoordinator(_NoKeepAlive(), pauseInBackground: false),
+        ),
+        mediaPlatformProvider.overrideWithValue(media),
+      ],
+    );
+    addTearDown(c.dispose);
+    final ctrl = c.read(sendControllerProvider.notifier);
+    const a = LibraryAsset(id: 'a', kind: FileKind.photo);
+    ctrl.addMedia(const [a]);
+    ctrl.addMedia(const [a], folder: 'Trip');
+    ctrl.addMedia(const [a], folder: 'Trip');
+    await pumpEventQueue();
+
+    final picked = c.read(sendControllerProvider).picked.cast<PickedAsset>();
+    expect(picked.map((p) => (p.label, p.folder)), [
+      ('IMG_0001.HEIC', null),
+      ('IMG_0001.HEIC', 'Trip'),
+    ], reason: 'loose and in the album both go; the same album once');
+  });
+
   group('a whole folder and big selections (D-075)', () {
     test('a folder joins the selection; left-out files are counted', () async {
       final picker = _FolderPicker((

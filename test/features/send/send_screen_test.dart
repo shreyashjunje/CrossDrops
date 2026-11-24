@@ -36,6 +36,14 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('Folder offers Files or a photo album (D-079)', (tester) async {
+    await pump(tester);
+    await tester.tap(find.text('Folder'));
+    await tester.pumpAndSettle();
+    expect(find.text('From Files'), findsOneWidget);
+    expect(find.text('Photo album'), findsOneWidget);
+  });
+
   testWidgets('picked: summary, grid, remove, and one Send', (tester) async {
     final semantics = tester.ensureSemantics();
     final container = await pump(tester);

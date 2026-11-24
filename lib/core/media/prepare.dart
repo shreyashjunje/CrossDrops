@@ -27,8 +27,11 @@ sealed class PickedItem {
 
 /// A photo-library item (photo_manager asset).
 final class PickedAsset extends PickedItem {
-  const PickedAsset(this.asset);
+  const PickedAsset(this.asset, {this.folder});
   final LibraryAsset asset;
+
+  /// Picked as a whole album sent as a folder (D-079): the album's name.
+  final String? folder;
 
   @override
   ThumbRef get thumb => LibraryThumb(asset.id, kind: asset.kind);
@@ -47,6 +50,16 @@ final class PickedAsset extends PickedItem {
     return '$kind ${local.year}-${two(local.month)}-${two(local.day)} '
         '${two(local.hour)}:${two(local.minute)}';
   }
+}
+
+/// An album's name as the one-level folder its items are sent in (D-079):
+/// a `/` or `\` would nest it, and the receiver refuses a folder path
+/// over [maxFolderPathLength].
+String albumFolderName(String album) {
+  final name = String.fromCharCodes(
+    album.replaceAll(RegExp(r'[/\\]'), '-').trim().runes.take(255),
+  );
+  return name.isEmpty ? 'Album' : name;
 }
 
 /// A document, a shared file, or an Android content URI.
@@ -386,11 +399,21 @@ class Preparer {
         : null;
     return [
       for (final f in files)
-        _item(asset, f, group: f.role == ResolvedRole.video ? null : group),
+        _item(
+          asset,
+          f,
+          group: f.role == ResolvedRole.video ? null : group,
+          folder: picked.folder,
+        ),
     ];
   }
 
-  SendItem _item(LibraryAsset asset, ResolvedFile f, {String? group}) {
+  SendItem _item(
+    LibraryAsset asset,
+    ResolvedFile f, {
+    String? group,
+    String? folder,
+  }) {
     final original = f.originalName ?? asset.originalName;
     final resource = f.resourceName ?? original ?? '';
     final name = f.role == ResolvedRole.paired
@@ -414,6 +437,7 @@ class Preparer {
       kind: type.kind,
       created: f.created,
       livePhotoGroup: group,
+      folder: folder,
       thumb: LibraryThumb(asset.id, kind: type.kind),
     );
   }

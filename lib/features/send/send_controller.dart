@@ -139,17 +139,19 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   }
 
   /// Adds photos and videos from the gallery picker, without duplicates.
+  /// With [folder] (a whole album, D-079) they are sent in that folder; a
+  /// photo also picked loose or in another album goes in each.
   /// Returns how many were left out over [maxFilesPerOffer].
-  int addMedia(List<LibraryAsset> assets) {
+  int addMedia(List<LibraryAsset> assets, {String? folder}) {
     if (state.isRunning || assets.isEmpty) return 0;
     final have = {
       for (final p in state.picked)
-        if (p is PickedAsset) p.asset.id,
+        if (p is PickedAsset) (p.asset.id, p.folder),
     };
     final dropped = _setPicked([
       ...state.picked,
       for (final a in assets)
-        if (have.add(a.id)) PickedAsset(a),
+        if (have.add((a.id, folder))) PickedAsset(a, folder: folder),
     ]);
     unawaited(_nameAssets());
     return dropped;
@@ -172,7 +174,7 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
       picked: [
         for (final p in state.picked)
           if (p is PickedAsset && names.containsKey(p.asset.id))
-            PickedAsset(p.asset.withName(names[p.asset.id]))
+            PickedAsset(p.asset.withName(names[p.asset.id]), folder: p.folder)
           else
             p,
       ],
@@ -211,7 +213,10 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     var bytes = 0;
     for (final p in all) {
       if (keep == maxFilesPerOffer) break;
-      bytes += offerEntryBytes(p.label, p is PickedFile ? p.folder : null);
+      bytes += offerEntryBytes(p.label, switch (p) {
+        PickedFile() => p.folder,
+        PickedAsset() => p.folder,
+      });
       if (bytes > offerFilesBudget) break;
       keep++;
     }

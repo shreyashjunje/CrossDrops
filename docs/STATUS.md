@@ -18,6 +18,7 @@ All v1 features in CLAUDE.md are in the code: transfer engine with resume, disco
 | D-076 | An offer is kept inside the 4 MB a receiver reads | (unit test) |
 | D-077 | iPhone: a folder on another drive is checked for space before copying | D-7 |
 | D-078 | Android: an empty folder pick gives its grant back | (none visible) |
+| D-079 | Send a photo album as a folder | D-8 |
 
 The Swift parts of D-068, D-072, D-075 and D-077 compile only in CI (no Mac here).
 

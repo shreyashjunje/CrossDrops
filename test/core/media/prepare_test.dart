@@ -185,6 +185,40 @@ void main() {
     expect(r.items[1].livePhotoGroup, r.items[0].livePhotoGroup);
   });
 
+  test(
+    'an album sends its items, Live Photo pair too, in its folder',
+    () async {
+      final r =
+          await preparer(
+            settings: const FormatSettings(sendLivePhotoVideo: true),
+          ).prepare([
+            PickedAsset(
+              const LibraryAsset(
+                id: 'l',
+                kind: FileKind.photo,
+                originalName: 'IMG_0007.HEIC',
+                isLivePhoto: true,
+              ),
+              folder: 'Trip',
+            ),
+            asset('b', name: 'IMG_0008.HEIC'),
+          ]);
+      expect(r.items.map((i) => (i.name, i.folder)), [
+        ('IMG_0007.HEIC', 'Trip'),
+        ('IMG_0007.MOV', 'Trip'),
+        ('IMG_0008.HEIC', null),
+      ]);
+    },
+  );
+
+  test('albumFolderName keeps an album one folder deep', () {
+    expect(albumFolderName('Trip'), 'Trip');
+    expect(albumFolderName(' A/B\\C '), 'A-B-C');
+    expect(albumFolderName('  '), 'Album');
+    expect(albumFolderName('x' * 2000).length, 255);
+    expect(albumFolderName('😀' * 300).runes.length, 255);
+  });
+
   test('iCloud and deleted items are skipped; the rest go', () async {
     media.failures['cloud'] = 'icloud';
     media.failures['gone'] = 'not_found';

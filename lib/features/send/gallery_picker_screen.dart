@@ -14,11 +14,20 @@ import '../../core/media/thumbnail_queue.dart';
 import '../../core/protocol/models.dart';
 import '../transfer/transfer_format.dart';
 
-/// Picks photos and videos from the library (photo_manager). Returns the
-/// chosen items, or null if the user backed out. Only ids and names leave
+/// What the gallery picker returns: the chosen items, and with
+/// [GalleryPickerScreen.wholeAlbum] the album they all came from.
+typedef GalleryPick = ({List<LibraryAsset> assets, String? album});
+
+/// Picks photos and videos from the library (photo_manager). Returns a
+/// [GalleryPick], or null if the user backed out. Only ids and names leave
 /// this screen; files are read later, as originals (D-038).
 class GalleryPickerScreen extends StatefulWidget {
-  const GalleryPickerScreen({super.key});
+  const GalleryPickerScreen({super.key, this.wholeAlbum = false});
+
+  /// An album to send as a folder (D-079): choosing an album selects all
+  /// of it and drops what was selected in another, so the pick is always
+  /// from one album. Photos can still be deselected.
+  final bool wholeAlbum;
 
   @override
   State<GalleryPickerScreen> createState() => _GalleryPickerScreenState();
@@ -291,21 +300,25 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
   }
 
   void _done() {
-    Navigator.of(context).pop([
-      for (final a in _selected.values)
-        LibraryAsset(
-          id: a.id,
-          kind: a.type == AssetType.video ? FileKind.video : FileKind.photo,
-          // Android: the display name. iOS: looked up for the selection by
-          // the Send screen (SendController.addMedia), not per tile.
-          originalName: Platform.isAndroid && (a.title ?? '').isNotEmpty
-              ? a.title
-              : null,
-          mime: a.mimeType,
-          isLivePhoto: a.isLivePhoto,
-          created: a.createDateTime.year > 1970 ? a.createDateTime : null,
-        ),
-    ]);
+    final GalleryPick pick = (
+      album: widget.wholeAlbum ? _album?.name : null,
+      assets: [
+        for (final a in _selected.values)
+          LibraryAsset(
+            id: a.id,
+            kind: a.type == AssetType.video ? FileKind.video : FileKind.photo,
+            // Android: the display name. iOS: looked up for the selection by
+            // the Send screen (SendController.addMedia), not per tile.
+            originalName: Platform.isAndroid && (a.title ?? '').isNotEmpty
+                ? a.title
+                : null,
+            mime: a.mimeType,
+            isLivePhoto: a.isLivePhoto,
+            created: a.createDateTime.year > 1970 ? a.createDateTime : null,
+          ),
+      ],
+    );
+    Navigator.of(context).pop(pick);
   }
 
   @override
@@ -332,12 +345,17 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
                     setState(() {
                       _album = a;
                       _selectedAll = null;
+                      if (widget.wholeAlbum) _selected.clear();
                     });
-                    unawaited(_loadFirstPage());
+                    unawaited(
+                      _loadFirstPage().then((_) {
+                        if (widget.wholeAlbum && mounted) _selectAll();
+                      }),
+                    );
                   },
                 ),
               )
-            : const Text('Photos and videos'),
+            : Text(widget.wholeAlbum ? 'Album' : 'Photos and videos'),
         leading: IconButton(
           tooltip: 'Close',
           onPressed: () => Navigator.of(context).pop(),
@@ -363,7 +381,13 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
       ),
       bottomNavigationBar: _access == _Access.denied
           ? null
-          : _AddBar(count: n, onAdd: n == 0 ? null : _done),
+          : _AddBar(
+              count: n,
+              hint: widget.wholeAlbum
+                  ? 'Choose an album above'
+                  : 'Tap photos to choose them',
+              onAdd: n == 0 ? null : _done,
+            ),
       body: switch (_access) {
         _Access.checking => const Center(child: CircularProgressIndicator()),
         _Access.denied => const _DeniedView(),
@@ -600,9 +624,12 @@ class _Badge extends StatelessWidget {
 
 /// How many are picked, and Add.
 class _AddBar extends StatelessWidget {
-  const _AddBar({required this.count, required this.onAdd});
+  const _AddBar({required this.count, required this.hint, required this.onAdd});
 
   final int count;
+
+  /// Shown while nothing is selected.
+  final String hint;
   final VoidCallback? onAdd;
 
   @override
@@ -628,9 +655,7 @@ class _AddBar extends StatelessWidget {
                 child: Semantics(
                   liveRegion: true,
                   child: Text(
-                    count == 0
-                        ? 'Tap photos to choose them'
-                        : '$count selected',
+                    count == 0 ? hint : '$count selected',
                     style: CdType.titleS.copyWith(
                       fontSize: 15,
                       color: count == 0 ? c.text2 : c.text,

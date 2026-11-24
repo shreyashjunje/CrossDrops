@@ -4,6 +4,9 @@ All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Ke
 
 ## 2026-11-25
 
+### Added
+- **Send a photo album as a folder (D-079):** Send > Folder > Photo album, choose an album, and it arrives as a folder with the album's name.
+
 ### Fixed
 - **Very large folders with deep paths no longer fail as a whole (D-076):** what would not fit in one send is left out and counted ("N files left out"), and can be sent next.
 - **iPhone: picking a folder from a USB drive or a file server can no longer fill the phone (D-077):** if it would not fit, nothing is copied and the Send screen says so.

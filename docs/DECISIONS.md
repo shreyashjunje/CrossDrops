@@ -737,3 +737,16 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: Picking a folder takes a persistable read grant on its tree (D-075); the grant is released when the folder's files are sent or cleared. A folder with nothing to send (empty, only hidden files) or a walk that failed left no file to release it, so the grant stayed for good. Android keeps 128 to 512 such grants per app and then drops the oldest, which could be one a resumable folder send still needs.
 - Decision: after the walk, a pick with no files, or a walk that threw, releases the tree's grant at once.
 - Consequences: none for normal picks.
+
+## D-079: Send a photo album as a folder
+- Date: 2026-11-25
+- Status: Accepted (unit-tested; not yet run on phones)
+- Context: The owner wants Folder to offer the Photos app as well as Files: sending an album should be as easy as sending a folder.
+- Decision:
+  - **Send screen:** the Folder tile asks **From Files** (D-075 as before) or **Photo album**.
+  - **Picker:** the gallery picker in a whole-album mode. Choosing an album from its menu selects all of it (Select all, up to 10,000) and drops what was selected in another album, so one pick is one album; photos can still be deselected. It returns the album's name with the items.
+  - **Sending:** `PickedAsset.folder` carries the album name as a one-level folder path (`albumFolderName`: `/` and `\` become `-`, at most 255 characters, `Album` if blank). Items are exported exactly as from the photo picker (originals, Live Photo pairs, HEIC setting) and offered with `FileOffer.folder`. No protocol, receiver or native change.
+  - **Duplicates:** a pick is keyed by asset and folder, so a photo picked loose and in an album, or in two albums, is sent in each.
+- Consequences:
+  - Like any folder (D-075), an album lands in Files on the iPhone (On My iPhone > CrossDrop > album) and in Download/CrossDrop/album on Android, not in the iPhone's Photos app. To put photos into Photos, use Photos & videos.
+  - Device check D-8 in DEVICE_TESTS.md.

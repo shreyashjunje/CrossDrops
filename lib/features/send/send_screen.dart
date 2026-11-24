@@ -7,7 +7,6 @@ import '../../app/navigation.dart';
 import '../../app/tokens.dart';
 import '../../app/ui/ui.dart';
 import '../../core/client/peer_check.dart';
-import '../../core/media/format_plan.dart';
 import '../../core/media/prepare.dart';
 import '../../core/protocol/models.dart';
 import '../../platform/document_picker.dart';
@@ -55,6 +54,9 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     final busy = state.isRunning;
     void addMedia() => _pickMedia(context, ref);
     Future<void> addFolder() async {
+      final fromPhotos = await _chooseFolderSource(context);
+      if (fromPhotos == null || !context.mounted) return;
+      if (fromPhotos) return _pickMedia(context, ref, wholeAlbum: true);
       try {
         final leftOut = await controller.pickFolder();
         if (context.mounted) _sayLeftOut(context, leftOut);
@@ -188,14 +190,52 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     ),
   );
 
-  Future<void> _pickMedia(BuildContext context, WidgetRef ref) async {
-    final assets = await Navigator.of(context).push<List<LibraryAsset>>(
-      MaterialPageRoute(builder: (_) => const GalleryPickerScreen()),
+  /// A folder from Files, or a whole Photos album as a folder (D-079).
+  /// True for the album; null if the user backed out.
+  Future<bool?> _chooseFolderSource(BuildContext context) =>
+      showModalBottomSheet<bool>(
+        context: context,
+        builder: (sheet) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.folder_outlined),
+                title: const Text('From Files'),
+                subtitle: const Text('A folder and everything inside'),
+                onTap: () => Navigator.of(sheet).pop(false),
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_album_outlined),
+                title: const Text('Photo album'),
+                subtitle: const Text('A whole album, sent as a folder'),
+                onTap: () => Navigator.of(sheet).pop(true),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Future<void> _pickMedia(
+    BuildContext context,
+    WidgetRef ref, {
+    bool wholeAlbum = false,
+  }) async {
+    final pick = await Navigator.of(context).push<GalleryPick>(
+      MaterialPageRoute(
+        builder: (_) => GalleryPickerScreen(wholeAlbum: wholeAlbum),
+      ),
     );
-    if (assets != null && context.mounted) {
+    if (pick != null && context.mounted) {
+      final album = pick.album;
       _sayLeftOut(
         context,
-        ref.read(sendControllerProvider.notifier).addMedia(assets),
+        ref
+            .read(sendControllerProvider.notifier)
+            .addMedia(
+              pick.assets,
+              folder: album == null ? null : albumFolderName(album),
+            ),
       );
     }
   }
@@ -326,7 +366,7 @@ class _SourceTiles extends StatelessWidget {
       _SourceTile(
         icon: Icons.folder_outlined,
         title: 'Folder',
-        subtitle: 'Everything inside, as a folder',
+        subtitle: 'From Files or a photo album, as a folder',
         onTap: onFolder,
       ),
     ],
