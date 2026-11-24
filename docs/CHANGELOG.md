@@ -2,6 +2,16 @@
 
 All notable changes to CrossDrop and its docs. Newest first. Loosely follows [Keep a Changelog](https://keepachangelog.com): group entries under Added, Changed, Fixed or Removed, under a heading of the date (`## YYYY-MM-DD`) or version once releases exist.
 
+## 2026-11-25
+
+### Fixed
+- **Very large folders with deep paths no longer fail as a whole (D-076):** what would not fit in one send is left out and counted ("N files left out"), and can be sent next.
+- **iPhone: picking a folder from a USB drive or a file server can no longer fill the phone (D-077):** if it would not fit, nothing is copied and the Send screen says so.
+- **Android: picking an empty folder no longer keeps access to it (D-078).**
+
+### Removed
+- The unused desktop and web project folders (the app is iPhone and Android only).
+
 ## 2026-11-10
 
 ### Changed
