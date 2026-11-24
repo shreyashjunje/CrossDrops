@@ -698,3 +698,21 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
   - Until C-1 passes on the owner's phones there is no proven way to move files by cable. If usbmux fails on a phone, the import can be brought back from git history.
   - The Android app no longer reads the iPhone's camera roll without the iPhone app.
   - Found while testing: two lanes reconnecting at once could close the client the other was opening its event socket with; `StateError` escaped. Both control requests and the event socket now report it as `network` (also on Wi-Fi).
+
+## D-075: Send a whole folder; Select all in an album
+- Date: 2026-11-24
+- Status: Accepted (built and unit-tested; not yet run on phones)
+- Context: The owner wants to send a folder in one go, without picking its photos one by one, and a Select all button in the photo picker for a whole album.
+- Decision:
+  - **Protocol:** `FileOffer.folder`, optional: the file's folder path, `/`-separated, starting with the sent folder's own name (`Trip/Day 1`), at most 1,024 characters. Older receivers ignore it and save the files flat. The receiver sanitizes it at the trust boundary: each part like a file name (hard rule 5), empty, `.` and `..` parts dropped, at most 16 levels.
+  - **Saving:** a file that came in a folder stays with its folder, never split into the gallery: Android `Download/CrossDrop/<folder>` (MediaStore Downloads, so galleries still list the photos), iOS `Documents/<folder>` (Files > On My iPhone > CrossDrop). Kotlin drops `.` and `..` parts again before building `RELATIVE_PATH`.
+  - **Storage:** `session_files.folder` (schema 6), so a resume and a receiver restart keep the structure.
+  - **Android picking:** `ACTION_OPEN_DOCUMENT_TREE`, a persistable grant on the tree, a breadth-first walk with `DocumentsContract`; files are read in place (no copy). Releasing a folder file releases its tree's grant.
+  - **iOS picking:** file_picker's folder picker hands back a path without opening its security scope, so `OpenFileChannel.swift` gained `pickFolder`: `UIDocumentPickerViewController` for folders, the security scope opened, `NSFileCoordinator`, and each file cloned into a staging batch with `copyItem` (a clone on APFS: instant, no extra space), so a resume after a restart can still read it. It went into an existing Swift file to leave the Xcode project file untouched.
+  - **Limits:** hidden files are left out; iCloud files not on the phone, unreadable files and files past 10,000 (`maxFilesPerOffer`) are left out and counted, and the Send screen says "N files left out". The whole selection is capped at 10,000.
+  - **Send screen:** a Folder source next to Files. The picked grid builds only its first 60 tiles plus a "+N" tile: a folder or an album can hold thousands, and every tile loads a preview. The Add sheet scrolls on small phones.
+  - **Select all:** per album, in pages of 1,000, up to 10,000; Deselect all while that selection stands.
+  - Not done: empty folders (nothing to offer), removing a folder as one item, folders shared in from another app.
+- Consequences:
+  - The Swift `pickFolder` compiles only in CI (no Mac here). Folder picking and Select all need the phones (D-1 to D-6).
+  - Photos sent inside a folder are not in the iPhone's Photos app; they are in Files. Sending photos into Photos stays the photo picker's job.

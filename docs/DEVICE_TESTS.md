@@ -1922,3 +1922,46 @@ Everything in this section. On the PC: the Android sending through its bridge di
 | C-7 | | | | | | | |
 | C-8 | | | | | | | |
 | C-9 | | | | | | | |
+
+## Folders and Select all (D-075)
+
+Same build on both phones. Any connection works (Wi-Fi, hotspot or cable).
+
+### D-1: Folder iPhone to Android
+
+1. iPhone: Files app, make a folder "Trip" with a subfolder "Day 1"; put 3 photos in Trip, and 2 photos and a PDF in Day 1.
+2. CrossDrop > Send > **Folder** > pick Trip > send to the Android.
+3. Expected: Android Files app > Download > CrossDrop > Trip holds the 3 photos and Day 1 with its 3 files; the photos also show in the gallery.
+
+### D-2: Folder Android to iPhone
+
+1. Android: a folder with subfolders (for example Download/Test with 20 files in 2 subfolders). Send > **Folder** > pick it.
+2. Expected: iPhone Files > On My iPhone > CrossDrop > Test, same structure; every file opens.
+
+### D-3: Big folder
+
+1. A folder with 1,000 or more photos. Expected: the Send screen shows 60 tiles and "+N"; the send completes. Note the time and MB/s.
+
+### D-4: iCloud folder (iPhone)
+
+1. Pick an iCloud Drive folder where some files are not downloaded. Expected: "N files left out" for those; the rest is sent.
+
+### D-5: Select all
+
+1. Send > Photos & videos > pick an album > **Select all**. Expected: every item of the album selected and "Add N"; the button reads **Deselect all** and clears them.
+2. An album over 10,000 items, if you have one: "First 10,000 selected".
+
+### D-6: Interrupt a folder send
+
+1. During D-3, turn Wi-Fi off on the receiver for 10 s (or unplug the cable). Expected: it resumes and the folder structure is kept.
+
+### Results
+
+| Check | Date | iPhone (model, iOS) | Android (model, version) | Connection | Commit | Result | Notes |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| D-1 | | | | | | | |
+| D-2 | | | | | | | |
+| D-3 | | | | | | | |
+| D-4 | | | | | | | |
+| D-5 | | | | | | | |
+| D-6 | | | | | | | |
