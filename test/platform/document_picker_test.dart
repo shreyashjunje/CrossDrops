@@ -1,5 +1,9 @@
+import 'dart:io';
+
+import 'package:crossdrop/core/media/prepare.dart';
 import 'package:crossdrop/platform/document_picker.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 
 void main() {
   test('a folder pick keeps each file with its folder (D-075)', () {
@@ -41,5 +45,24 @@ void main() {
     final pick = parseFolderPick(null, refKey: 'path');
     expect(pick.files, isEmpty);
     expect(pick.skipped, 0);
+  });
+
+  test('iOS: releasing one pick keeps the rest of its batch', () async {
+    final root = await Directory.systemTemp.createTemp('staging');
+    addTearDown(() => root.delete(recursive: true));
+    final a = File(p.join(root.path, 'doc-1', '0', 'a.jpg'));
+    final b = File(p.join(root.path, 'doc-1', '1', 'b.jpg'));
+    for (final f in [a, b]) {
+      await f.create(recursive: true);
+    }
+    final picker = IosDocumentPicker(root.path);
+
+    await picker.release([PickedFile(ref: a.path, name: 'a.jpg')]);
+    expect(a.existsSync(), isFalse);
+    expect(b.existsSync(), isTrue, reason: 'still in the selection');
+
+    await picker.release([PickedFile(ref: b.path, name: 'b.jpg')]);
+    expect(Directory(p.join(root.path, 'doc-1')).existsSync(), isFalse);
+    expect(root.existsSync(), isTrue);
   });
 }

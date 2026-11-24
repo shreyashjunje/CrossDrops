@@ -232,7 +232,9 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     ];
     if (left.length == state.picked.length) return;
     state = state.copyWith(picked: left);
-    if (item is PickedFile) await _releaseDocs([item]);
+    // A folder's files share one Android grant: it goes with the whole
+    // selection, not with one file.
+    if (item is PickedFile && item.folder == null) await _releaseDocs([item]);
   }
 
   Future<void> clearFiles() async {

@@ -163,11 +163,26 @@ class IosDocumentPicker implements DocumentPicker {
 
   @override
   Future<void> release(List<PickedFile> files) async {
-    final batches = {
-      for (final f in files) ?stagingBatchOf(f.ref, stagingRoot),
-    };
-    for (final b in batches) {
-      await deleteStaging(b);
+    for (final f in files) {
+      if (stagingBatchOf(f.ref, stagingRoot) == null) continue;
+      try {
+        await File(f.ref).delete();
+      } on FileSystemException {
+        // Already gone.
+      }
+      // A batch holds a whole pick or folder, and its other files may still
+      // be in the selection: only folders left empty go.
+      for (
+        var dir = p.dirname(f.ref);
+        p.isWithin(stagingRoot, dir);
+        dir = p.dirname(dir)
+      ) {
+        try {
+          await Directory(dir).delete();
+        } on FileSystemException {
+          break;
+        }
+      }
     }
   }
 

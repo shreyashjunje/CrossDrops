@@ -143,6 +143,30 @@ void main() {
       expect(picked.map((f) => f.folder), ['Trip', 'Trip/Day 1']);
     });
 
+    test('removing one folder file keeps the grant of the folder', () async {
+      final picker = _FolderPicker((
+        files: [
+          const PickedFile(ref: '/s/1', name: 'a.jpg', folder: 'Trip'),
+          const PickedFile(ref: '/s/2', name: 'b.jpg', folder: 'Trip'),
+        ],
+        skipped: 0,
+      ));
+      final c = ProviderContainer(
+        overrides: [
+          keepAliveProvider.overrideWithValue(
+            KeepAliveCoordinator(_NoKeepAlive(), pauseInBackground: false),
+          ),
+          documentPickerProvider.overrideWith((ref) async => picker),
+        ],
+      );
+      addTearDown(c.dispose);
+      final ctrl = c.read(sendControllerProvider.notifier);
+      await ctrl.pickFolder();
+      await ctrl.removePicked(c.read(sendControllerProvider).picked.first);
+      expect(c.read(sendControllerProvider).picked, hasLength(1));
+      expect(picker.released, isEmpty);
+    });
+
     test('one send holds at most maxFilesPerOffer items', () {
       final c = ProviderContainer(
         overrides: [
@@ -208,9 +232,11 @@ class _FolderPicker implements DocumentPicker {
   @override
   Future<List<PickedFile>> pick() async => const [];
 
+  final List<PickedFile> released = [];
+
   @override
   Future<FolderPick> pickFolder() async => result;
 
   @override
-  Future<void> release(List<PickedFile> files) async {}
+  Future<void> release(List<PickedFile> files) async => released.addAll(files);
 }
