@@ -86,16 +86,7 @@ class SourceChannel(private val activity: Activity, messenger: BinaryMessenger) 
             "pickFolder" -> pickFolder(result)
             "release" -> background(result) {
                 val grants = call.argument<List<String>>("uris")!!.map { grantOf(Uri.parse(it)) }.distinct()
-                for (u in grants) {
-                    try {
-                        resolver.releasePersistableUriPermission(
-                            u,
-                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                        )
-                    } catch (e: SecurityException) {
-                        // Not persisted (a share or a MediaStore item).
-                    }
-                }
+                for (u in grants) releaseGrant(u)
                 null
             }
             "copy" -> {
@@ -258,7 +249,25 @@ class SourceChannel(private val activity: Activity, messenger: BinaryMessenger) 
         } catch (e: SecurityException) {
             // Still readable while the app runs.
         }
-        background(result) { walk(tree) }
+        background(result) {
+            // No picked file would ever hand the grant back: release it now (D-078).
+            val picked = try {
+                walk(tree)
+            } catch (e: Exception) {
+                releaseGrant(tree)
+                throw e
+            }
+            if ((picked["files"] as List<*>).isEmpty()) releaseGrant(tree)
+            picked
+        }
+    }
+
+    private fun releaseGrant(u: Uri) {
+        try {
+            resolver.releasePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (e: SecurityException) {
+            // Not persisted (a share or a MediaStore item).
+        }
     }
 
     /** Every file under [tree], breadth first, with its folder path. */

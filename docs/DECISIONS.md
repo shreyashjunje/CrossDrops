@@ -730,3 +730,10 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Context: D-075 clones a picked folder into staging, which is instant and free on the phone's own volume. A folder on a USB drive or a file server cannot be cloned: `copyItem` copies every byte, with no progress and no space check. A 10 GB folder filled the phone, and once space ran out each failed copy was only counted as "left out".
 - Decision: `cloneFolder` lists the folder first. When the folder's volume is not the staging volume (or either is unknown) and the free space is known, the total size plus 256 MB must fit, or nothing is copied and the pick fails with `no_space`. The Send screen then says there is not enough free space to copy that folder from the drive. A copy that still runs out of space stops, and the rest is counted as left out. The empty staging batch is deleted after any picker error, and an error other than `no_space` is an empty pick, no longer an uncaught exception. Not chosen: reading such a folder in place through a security-scoped bookmark (a bigger change to the source and resume path, for a rare source).
 - Consequences: picking a large folder from a drive stays slow (every byte is copied), but it can no longer fill the phone. Device check D-7 in DEVICE_TESTS.md.
+
+## D-078: Android gives back a folder grant nobody will release
+- Date: 2026-11-25
+- Status: Accepted (Kotlin; needs an Android phone)
+- Context: Picking a folder takes a persistable read grant on its tree (D-075); the grant is released when the folder's files are sent or cleared. A folder with nothing to send (empty, only hidden files) or a walk that failed left no file to release it, so the grant stayed for good. Android keeps 128 to 512 such grants per app and then drops the oldest, which could be one a resumable folder send still needs.
+- Decision: after the walk, a pick with no files, or a walk that threw, releases the tree's grant at once.
+- Consequences: none for normal picks.
