@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:collection';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -42,6 +43,17 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
 
   /// Selected ids, in the order tapped.
   final LinkedHashMap<String, AssetEntity> _selected = LinkedHashMap();
+
+  /// What the last "Select all" added in the album shown; null after an
+  /// album change. While all of them are still selected, the button
+  /// deselects them instead.
+  Set<String>? _selectedAll;
+  bool _selectingAll = false;
+
+  bool get _allStillSelected {
+    final all = _selectedAll;
+    return all != null && all.isNotEmpty && all.every(_selected.containsKey);
+  }
 
   /// Grid previews: six at a time, the newest request first (the tiles on
   /// screen), tiles scrolled past dropped before they start (D-068).
@@ -216,6 +228,61 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
     if (_scroll.position.extentAfter < 1500) unawaited(_loadMore());
   }
 
+  /// Selects every item of the album shown, in pages, up to the most one
+  /// send can hold ([maxFilesPerOffer]).
+  Future<void> _selectAll() async {
+    final album = _album;
+    if (album == null || _selectingAll) return;
+    setState(() => _selectingAll = true);
+    final added = <String>{};
+    try {
+      final count = min(_total, maxFilesPerOffer);
+      for (var start = 0; start < count; start += _selectAllPage) {
+        final page = await album.getAssetListRange(
+          start: start,
+          end: min(start + _selectAllPage, count),
+        );
+        if (!mounted || album != _album) return;
+        for (final a in page) {
+          _byId[a.id] = a;
+          if (!_selected.containsKey(a.id)) {
+            _selected[a.id] = a;
+            added.add(a.id);
+          }
+        }
+      }
+      if (_total > maxFilesPerOffer && mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('First 10,000 selected')));
+      }
+    } on PlatformException {
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Could not select all')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _selectingAll = false;
+          _selectedAll = added;
+        });
+      }
+    }
+  }
+
+  void _deselectAll() {
+    final all = _selectedAll;
+    if (all == null) return;
+    setState(() {
+      all.forEach(_selected.remove);
+      _selectedAll = null;
+    });
+  }
+
+  static const _selectAllPage = 1000;
+
   void _toggle(AssetEntity a) {
     setState(() {
       if (_selected.remove(a.id) == null) _selected[a.id] = a;
@@ -261,7 +328,10 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
                       ),
                   ],
                   onChanged: (a) {
-                    setState(() => _album = a);
+                    setState(() {
+                      _album = a;
+                      _selectedAll = null;
+                    });
                     unawaited(_loadFirstPage());
                   },
                 ),
@@ -272,6 +342,23 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
           onPressed: () => Navigator.of(context).pop(),
           icon: const Icon(Icons.close_rounded),
         ),
+        actions: [
+          if (_access != _Access.denied && _total > 0)
+            _selectingAll
+                ? const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16),
+                    child: SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  )
+                : TextButton(
+                    onPressed: _allStillSelected ? _deselectAll : _selectAll,
+                    child: Text(
+                      _allStillSelected ? 'Deselect all' : 'Select all',
+                    ),
+                  ),
+        ],
       ),
       bottomNavigationBar: _access == _Access.denied
           ? null
