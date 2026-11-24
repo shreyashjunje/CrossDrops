@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:crossdrop/app/keep_alive.dart';
 import 'package:crossdrop/app/media_providers.dart';
@@ -165,6 +166,53 @@ void main() {
       await ctrl.removePicked(c.read(sendControllerProvider).picked.first);
       expect(c.read(sendControllerProvider).picked, hasLength(1));
       expect(picker.released, isEmpty);
+    });
+
+    test('a folder with long paths is cut to fit the offer (D-076)', () async {
+      // 10,000 files in a ~400-character folder: about 5.5 MB of offer,
+      // more than a receiver reads.
+      final folder = 'Backup/${'Long folder name ' * 24}';
+      final picker = _FolderPicker((
+        files: [
+          for (var i = 0; i < maxFilesPerOffer; i++)
+            PickedFile(ref: '/s/$i', name: 'IMG_$i.jpg', folder: folder),
+        ],
+        skipped: 0,
+      ));
+      final c = ProviderContainer(
+        overrides: [
+          keepAliveProvider.overrideWithValue(
+            KeepAliveCoordinator(_NoKeepAlive(), pauseInBackground: false),
+          ),
+          documentPickerProvider.overrideWith((ref) async => picker),
+        ],
+      );
+      addTearDown(c.dispose);
+      final ctrl = c.read(sendControllerProvider.notifier);
+      final leftOut = await ctrl.pickFolder();
+      final picked = c.read(sendControllerProvider).picked.cast<PickedFile>();
+      expect(leftOut, greaterThan(0));
+      expect(picked.length + leftOut, maxFilesPerOffer);
+      // The real offer of what was kept, every optional field filled.
+      final json = jsonEncode({
+        'protocol': protocolVersion,
+        'sender': {'id': 'x' * 64, 'name': 'n' * 100, 'platform': 'android'},
+        'files': [
+          for (final (i, f) in picked.indexed)
+            FileOffer(
+              fileId: 'f$i',
+              name: f.name,
+              size: maxFileBytes,
+              mime:
+                  'application/vnd.openxmlformats-officedocument'
+                  '.wordprocessingml.document',
+              created: DateTime.utc(2026),
+              livePhotoGroup: 'g' * 36,
+              folder: f.folder,
+            ).toJson(),
+        ],
+      });
+      expect(utf8.encode(json).length, lessThanOrEqualTo(maxOfferJsonBytes));
     });
 
     test('one send holds at most maxFilesPerOffer items', () {

@@ -4,6 +4,8 @@
 /// `GET /v1/info`, the TXT record and the QR code carry.
 library;
 
+import 'dart:convert';
+
 /// The newest protocol version this app speaks. 2: the auth commitment
 /// covers both fingerprints (D-061).
 const int protocolVersion = 2;
@@ -42,6 +44,24 @@ const int maxFileBytes = 1 << 40;
 
 /// Largest total an offer may declare: 4 TiB.
 const int maxOfferBytes = 4 << 40;
+
+/// Largest offer body a receiver reads, as JSON. 10,000 files with long
+/// folder paths can pass it, so the sender keeps a selection inside
+/// [offerFilesBudget] (D-076).
+const int maxOfferJsonBytes = 4 * 1024 * 1024;
+
+/// What the files of one offer may take: [maxOfferJsonBytes] less room
+/// for the rest of the offer (protocol, sender).
+const int offerFilesBudget = maxOfferJsonBytes - 16 * 1024;
+
+/// An upper estimate of the JSON bytes one [FileOffer] takes with [name]
+/// and [folder]: both encoded as JSON strings, plus room for every other
+/// field at its longest (id, size, a long mime, kind, date, Live Photo
+/// group).
+int offerEntryBytes(String name, String? folder) =>
+    utf8.encode(jsonEncode(name)).length +
+    (folder == null ? 0 : utf8.encode(jsonEncode(folder)).length) +
+    400;
 
 /// Allowed characters for ids that end up in URL paths and temp file names.
 final RegExp _idPattern = RegExp(r'^[A-Za-z0-9_-]{1,64}$');

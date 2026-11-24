@@ -150,7 +150,7 @@ class ServerLimits {
     this.authRefill = const Duration(seconds: 3),
     this.maxHeaderBytes = 16 * 1024,
     this.maxControlBodyBytes = 16 * 1024,
-    this.maxOfferBodyBytes = 4 * 1024 * 1024,
+    this.maxOfferBodyBytes = maxOfferJsonBytes,
   });
 
   /// `POST /v1/sessions` per IP address: [offerBurst] at once, then one
@@ -168,7 +168,7 @@ class ServerLimits {
   /// Auth and `complete` bodies: small JSON.
   final int maxControlBodyBytes;
 
-  /// An offer of 10,000 files with long names fits.
+  /// Senders keep their offers inside it ([offerFilesBudget]).
   final int maxOfferBodyBytes;
 }
 

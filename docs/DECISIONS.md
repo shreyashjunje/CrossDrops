@@ -716,3 +716,10 @@ Details of each decision live in [ARCHITECTURE.md](ARCHITECTURE.md). This file r
 - Consequences:
   - The Swift `pickFolder` compiles only in CI (no Mac here). Folder picking and Select all need the phones (D-1 to D-6).
   - Photos sent inside a folder are not in the iPhone's Photos app; they are in Files. Sending photos into Photos stays the photo picker's job.
+
+## D-076: The sender keeps an offer inside what the receiver reads
+- Date: 2026-11-25
+- Status: Accepted
+- Context: A receiver reads at most 4 MB of offer JSON. That limit came before folder paths (D-075). Each file may now carry a folder path of up to 1,024 characters, so 10,000 files in a folder about 400 characters deep make about 5.5 MB, and the receiver refused the whole send with `body_too_large`, shown to the user as a general failure.
+- Decision: the selection is cut where its offer would pass the limit, like the 10,000-file cap: `_setPicked` adds an upper estimate per file (`offerEntryBytes`: name and folder as JSON strings plus 400 bytes for the other fields at their longest) and stops at `offerFilesBudget` (4 MB less 16 KB for the rest of the offer). What does not fit is counted in "N files left out". Both sides read the limit from `maxOfferJsonBytes`. Not chosen: a larger receiver limit (older receivers keep 4 MB, and the worst legal offer would be over 30 MB); splitting one selection into several offers (more code for a rare case).
+- Consequences: deep folders of many thousands of files send in parts: the user sends what was left out afterwards. Unit test in `send_controller_test.dart`.

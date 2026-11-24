@@ -204,11 +204,18 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   }
 
   /// Returns how many were left out: one offer holds at most
-  /// [maxFilesPerOffer] files.
+  /// [maxFilesPerOffer] files, and its JSON must fit what a receiver reads
+  /// ([offerFilesBudget]), which long folder paths can pass (D-076).
   int _setPicked(List<PickedItem> all) {
-    final picked = all.length > maxFilesPerOffer
-        ? all.sublist(0, maxFilesPerOffer)
-        : all;
+    var keep = 0;
+    var bytes = 0;
+    for (final p in all) {
+      if (keep == maxFilesPerOffer) break;
+      bytes += offerEntryBytes(p.label, p is PickedFile ? p.folder : null);
+      if (bytes > offerFilesBudget) break;
+      keep++;
+    }
+    final picked = keep == all.length ? all : all.sublist(0, keep);
     // A new selection starts a new send; the last one's files go. A send
     // that could still resume cannot without them, so it is given up
     // rather than left offering a Resume that fails (review L5).
