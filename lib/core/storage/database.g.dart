@@ -1293,6 +1293,15 @@ class $SessionFilesTable extends SessionFiles
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _folderMeta = const VerificationMeta('folder');
+  @override
+  late final GeneratedColumn<String> folder = GeneratedColumn<String>(
+    'folder',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
   static const VerificationMeta _sha256Meta = const VerificationMeta('sha256');
   @override
   late final GeneratedColumn<String> sha256 = GeneratedColumn<String>(
@@ -1390,6 +1399,7 @@ class $SessionFilesTable extends SessionFiles
     kind,
     created,
     livePhotoGroup,
+    folder,
     sha256,
     transferredBytes,
     tempPath,
@@ -1481,6 +1491,12 @@ class $SessionFilesTable extends SessionFiles
           data['live_photo_group']!,
           _livePhotoGroupMeta,
         ),
+      );
+    }
+    if (data.containsKey('folder')) {
+      context.handle(
+        _folderMeta,
+        folder.isAcceptableOrUnknown(data['folder']!, _folderMeta),
       );
     }
     if (data.containsKey('sha256')) {
@@ -1587,6 +1603,10 @@ class $SessionFilesTable extends SessionFiles
         DriftSqlType.string,
         data['${effectivePrefix}live_photo_group'],
       ),
+      folder: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}folder'],
+      ),
       sha256: attachedDatabase.typeMapping.read(
         DriftSqlType.string,
         data['${effectivePrefix}sha256'],
@@ -1640,6 +1660,9 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
   final String kind;
   final DateTime? created;
   final String? livePhotoGroup;
+
+  /// Sent inside a folder: its path there (D-075).
+  final String? folder;
   final String? sha256;
 
   /// Receive: bytes known to be on disk (checkpoint). Send: bytes the
@@ -1667,6 +1690,7 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
     required this.kind,
     this.created,
     this.livePhotoGroup,
+    this.folder,
     this.sha256,
     required this.transferredBytes,
     this.tempPath,
@@ -1693,6 +1717,9 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
     }
     if (!nullToAbsent || livePhotoGroup != null) {
       map['live_photo_group'] = Variable<String>(livePhotoGroup);
+    }
+    if (!nullToAbsent || folder != null) {
+      map['folder'] = Variable<String>(folder);
     }
     if (!nullToAbsent || sha256 != null) {
       map['sha256'] = Variable<String>(sha256);
@@ -1730,6 +1757,9 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
       livePhotoGroup: livePhotoGroup == null && nullToAbsent
           ? const Value.absent()
           : Value(livePhotoGroup),
+      folder: folder == null && nullToAbsent
+          ? const Value.absent()
+          : Value(folder),
       sha256: sha256 == null && nullToAbsent
           ? const Value.absent()
           : Value(sha256),
@@ -1766,6 +1796,7 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
       kind: serializer.fromJson<String>(json['kind']),
       created: serializer.fromJson<DateTime?>(json['created']),
       livePhotoGroup: serializer.fromJson<String?>(json['livePhotoGroup']),
+      folder: serializer.fromJson<String?>(json['folder']),
       sha256: serializer.fromJson<String?>(json['sha256']),
       transferredBytes: serializer.fromJson<int>(json['transferredBytes']),
       tempPath: serializer.fromJson<String?>(json['tempPath']),
@@ -1789,6 +1820,7 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
       'kind': serializer.toJson<String>(kind),
       'created': serializer.toJson<DateTime?>(created),
       'livePhotoGroup': serializer.toJson<String?>(livePhotoGroup),
+      'folder': serializer.toJson<String?>(folder),
       'sha256': serializer.toJson<String?>(sha256),
       'transferredBytes': serializer.toJson<int>(transferredBytes),
       'tempPath': serializer.toJson<String?>(tempPath),
@@ -1810,6 +1842,7 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
     String? kind,
     Value<DateTime?> created = const Value.absent(),
     Value<String?> livePhotoGroup = const Value.absent(),
+    Value<String?> folder = const Value.absent(),
     Value<String?> sha256 = const Value.absent(),
     int? transferredBytes,
     Value<String?> tempPath = const Value.absent(),
@@ -1830,6 +1863,7 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
     livePhotoGroup: livePhotoGroup.present
         ? livePhotoGroup.value
         : this.livePhotoGroup,
+    folder: folder.present ? folder.value : this.folder,
     sha256: sha256.present ? sha256.value : this.sha256,
     transferredBytes: transferredBytes ?? this.transferredBytes,
     tempPath: tempPath.present ? tempPath.value : this.tempPath,
@@ -1856,6 +1890,7 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
       livePhotoGroup: data.livePhotoGroup.present
           ? data.livePhotoGroup.value
           : this.livePhotoGroup,
+      folder: data.folder.present ? data.folder.value : this.folder,
       sha256: data.sha256.present ? data.sha256.value : this.sha256,
       transferredBytes: data.transferredBytes.present
           ? data.transferredBytes.value
@@ -1887,6 +1922,7 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
           ..write('kind: $kind, ')
           ..write('created: $created, ')
           ..write('livePhotoGroup: $livePhotoGroup, ')
+          ..write('folder: $folder, ')
           ..write('sha256: $sha256, ')
           ..write('transferredBytes: $transferredBytes, ')
           ..write('tempPath: $tempPath, ')
@@ -1910,6 +1946,7 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
     kind,
     created,
     livePhotoGroup,
+    folder,
     sha256,
     transferredBytes,
     tempPath,
@@ -1932,6 +1969,7 @@ class SessionFileRow extends DataClass implements Insertable<SessionFileRow> {
           other.kind == this.kind &&
           other.created == this.created &&
           other.livePhotoGroup == this.livePhotoGroup &&
+          other.folder == this.folder &&
           other.sha256 == this.sha256 &&
           other.transferredBytes == this.transferredBytes &&
           other.tempPath == this.tempPath &&
@@ -1952,6 +1990,7 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
   final Value<String> kind;
   final Value<DateTime?> created;
   final Value<String?> livePhotoGroup;
+  final Value<String?> folder;
   final Value<String?> sha256;
   final Value<int> transferredBytes;
   final Value<String?> tempPath;
@@ -1971,6 +2010,7 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
     this.kind = const Value.absent(),
     this.created = const Value.absent(),
     this.livePhotoGroup = const Value.absent(),
+    this.folder = const Value.absent(),
     this.sha256 = const Value.absent(),
     this.transferredBytes = const Value.absent(),
     this.tempPath = const Value.absent(),
@@ -1991,6 +2031,7 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
     required String kind,
     this.created = const Value.absent(),
     this.livePhotoGroup = const Value.absent(),
+    this.folder = const Value.absent(),
     this.sha256 = const Value.absent(),
     this.transferredBytes = const Value.absent(),
     this.tempPath = const Value.absent(),
@@ -2017,6 +2058,7 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
     Expression<String>? kind,
     Expression<DateTime>? created,
     Expression<String>? livePhotoGroup,
+    Expression<String>? folder,
     Expression<String>? sha256,
     Expression<int>? transferredBytes,
     Expression<String>? tempPath,
@@ -2037,6 +2079,7 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
       if (kind != null) 'kind': kind,
       if (created != null) 'created': created,
       if (livePhotoGroup != null) 'live_photo_group': livePhotoGroup,
+      if (folder != null) 'folder': folder,
       if (sha256 != null) 'sha256': sha256,
       if (transferredBytes != null) 'transferred_bytes': transferredBytes,
       if (tempPath != null) 'temp_path': tempPath,
@@ -2059,6 +2102,7 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
     Value<String>? kind,
     Value<DateTime?>? created,
     Value<String?>? livePhotoGroup,
+    Value<String?>? folder,
     Value<String?>? sha256,
     Value<int>? transferredBytes,
     Value<String?>? tempPath,
@@ -2079,6 +2123,7 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
       kind: kind ?? this.kind,
       created: created ?? this.created,
       livePhotoGroup: livePhotoGroup ?? this.livePhotoGroup,
+      folder: folder ?? this.folder,
       sha256: sha256 ?? this.sha256,
       transferredBytes: transferredBytes ?? this.transferredBytes,
       tempPath: tempPath ?? this.tempPath,
@@ -2120,6 +2165,9 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
     }
     if (livePhotoGroup.present) {
       map['live_photo_group'] = Variable<String>(livePhotoGroup.value);
+    }
+    if (folder.present) {
+      map['folder'] = Variable<String>(folder.value);
     }
     if (sha256.present) {
       map['sha256'] = Variable<String>(sha256.value);
@@ -2163,6 +2211,7 @@ class SessionFilesCompanion extends UpdateCompanion<SessionFileRow> {
           ..write('kind: $kind, ')
           ..write('created: $created, ')
           ..write('livePhotoGroup: $livePhotoGroup, ')
+          ..write('folder: $folder, ')
           ..write('sha256: $sha256, ')
           ..write('transferredBytes: $transferredBytes, ')
           ..write('tempPath: $tempPath, ')
@@ -3780,6 +3829,7 @@ typedef $$SessionFilesTableCreateCompanionBuilder =
       required String kind,
       Value<DateTime?> created,
       Value<String?> livePhotoGroup,
+      Value<String?> folder,
       Value<String?> sha256,
       Value<int> transferredBytes,
       Value<String?> tempPath,
@@ -3801,6 +3851,7 @@ typedef $$SessionFilesTableUpdateCompanionBuilder =
       Value<String> kind,
       Value<DateTime?> created,
       Value<String?> livePhotoGroup,
+      Value<String?> folder,
       Value<String?> sha256,
       Value<int> transferredBytes,
       Value<String?> tempPath,
@@ -3881,6 +3932,11 @@ class $$SessionFilesTableFilterComposer
 
   ColumnFilters<String> get livePhotoGroup => $composableBuilder(
     column: $table.livePhotoGroup,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get folder => $composableBuilder(
+    column: $table.folder,
     builder: (column) => ColumnFilters(column),
   );
 
@@ -3997,6 +4053,11 @@ class $$SessionFilesTableOrderingComposer
     builder: (column) => ColumnOrderings(column),
   );
 
+  ColumnOrderings<String> get folder => $composableBuilder(
+    column: $table.folder,
+    builder: (column) => ColumnOrderings(column),
+  );
+
   ColumnOrderings<String> get sha256 => $composableBuilder(
     column: $table.sha256,
     builder: (column) => ColumnOrderings(column),
@@ -4096,6 +4157,9 @@ class $$SessionFilesTableAnnotationComposer
     builder: (column) => column,
   );
 
+  GeneratedColumn<String> get folder =>
+      $composableBuilder(column: $table.folder, builder: (column) => column);
+
   GeneratedColumn<String> get sha256 =>
       $composableBuilder(column: $table.sha256, builder: (column) => column);
 
@@ -4189,6 +4253,7 @@ class $$SessionFilesTableTableManager
                 Value<String> kind = const Value.absent(),
                 Value<DateTime?> created = const Value.absent(),
                 Value<String?> livePhotoGroup = const Value.absent(),
+                Value<String?> folder = const Value.absent(),
                 Value<String?> sha256 = const Value.absent(),
                 Value<int> transferredBytes = const Value.absent(),
                 Value<String?> tempPath = const Value.absent(),
@@ -4208,6 +4273,7 @@ class $$SessionFilesTableTableManager
                 kind: kind,
                 created: created,
                 livePhotoGroup: livePhotoGroup,
+                folder: folder,
                 sha256: sha256,
                 transferredBytes: transferredBytes,
                 tempPath: tempPath,
@@ -4229,6 +4295,7 @@ class $$SessionFilesTableTableManager
                 required String kind,
                 Value<DateTime?> created = const Value.absent(),
                 Value<String?> livePhotoGroup = const Value.absent(),
+                Value<String?> folder = const Value.absent(),
                 Value<String?> sha256 = const Value.absent(),
                 Value<int> transferredBytes = const Value.absent(),
                 Value<String?> tempPath = const Value.absent(),
@@ -4248,6 +4315,7 @@ class $$SessionFilesTableTableManager
                 kind: kind,
                 created: created,
                 livePhotoGroup: livePhotoGroup,
+                folder: folder,
                 sha256: sha256,
                 transferredBytes: transferredBytes,
                 tempPath: tempPath,

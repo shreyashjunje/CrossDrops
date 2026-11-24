@@ -21,6 +21,7 @@ abstract interface class MediaStoreApi {
     required String mime,
     required SaveCollection collection,
     DateTime? taken,
+    List<String> folder = const [],
   });
 
   /// A read-write descriptor; `not_found` if the item is gone.
@@ -48,12 +49,14 @@ class ChannelMediaStore implements MediaStoreApi {
     required String mime,
     required SaveCollection collection,
     DateTime? taken,
+    List<String> folder = const [],
   }) async {
     final m = (await _channel.invokeMapMethod<String, Object?>('create', {
       'name': name,
       'mime': mime,
       'collection': collection.name,
       'takenMs': taken?.millisecondsSinceEpoch,
+      if (folder.isNotEmpty) 'folder': folder.join('/'),
     }))!;
     return (uri: m['uri']! as String, fd: (m['fd']! as num).toInt());
   }
@@ -122,9 +125,9 @@ class MediaStoreFileStore implements ReceivedFileStore {
       }
     }
     final safeName = sanitizeFileName(offer.name);
-    final collection = saveCollectionFor(
+    final collection = collectionForOffer(
+      offer,
       safeName: safeName,
-      declaredKind: offer.kind,
       platform: DevicePlatform.android,
     );
     final mime = mimeForName(safeName) ?? 'application/octet-stream';
@@ -135,6 +138,7 @@ class MediaStoreFileStore implements ReceivedFileStore {
         mime: mime,
         collection: collection,
         taken: offer.created,
+        folder: folderOf(offer),
       );
     } on PlatformException catch (e) {
       if (e.code != 'unsupported' || collection == SaveCollection.files) {
@@ -236,9 +240,9 @@ class MediaStoreFileStore implements ReceivedFileStore {
     final refused = _refused.remove(location);
     final collection = refused
         ? SaveCollection.files
-        : saveCollectionFor(
+        : collectionForOffer(
+            offer,
             safeName: sanitizeFileName(offer.name),
-            declaredKind: offer.kind,
             platform: DevicePlatform.android,
           );
     return SaveResult(

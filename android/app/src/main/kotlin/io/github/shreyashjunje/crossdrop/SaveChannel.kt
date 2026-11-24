@@ -54,6 +54,7 @@ class SaveChannel(private val context: Context, messenger: BinaryMessenger) {
                     call.argument<String>("mime")!!,
                     call.argument<String>("collection")!!,
                     call.argument<Number>("takenMs")?.toLong(),
+                    call.argument<String>("folder"),
                 )
             }
             "open" -> background(result) {
@@ -95,8 +96,8 @@ class SaveChannel(private val context: Context, messenger: BinaryMessenger) {
         else -> Environment.DIRECTORY_DOWNLOADS
     } + "/CrossDrop"
 
-    private fun create(name: String, mime: String, collection: String, takenMs: Long?): Map<String, Any> {
-        val uri = insertPending(name, mime, collection, takenMs)
+    private fun create(name: String, mime: String, collection: String, takenMs: Long?, folder: String?): Map<String, Any> {
+        val uri = insertPending(name, mime, collection, takenMs, folder)
         try {
             val pfd = resolver.openFileDescriptor(uri, "rw") ?: throw FileNotFoundException()
             return mapOf("uri" to uri.toString(), "fd" to pfd.detachFd())
@@ -110,11 +111,14 @@ class SaveChannel(private val context: Context, messenger: BinaryMessenger) {
      * A new pending item. Throws [ChannelError] `unsupported` when the
      * collection refuses the MIME type, `io` when the insert fails.
      */
-    internal fun insertPending(name: String, mime: String, collection: String, takenMs: Long?): Uri {
+    internal fun insertPending(name: String, mime: String, collection: String, takenMs: Long?, folder: String? = null): Uri {
+        // A file sent inside a folder (D-075): Dart sanitized each part;
+        // anything that could still climb out is dropped here too.
+        val parts = folder?.split('/')?.filter { it.isNotBlank() && it != "." && it != ".." }.orEmpty()
         val values = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, name)
             put(MediaStore.MediaColumns.MIME_TYPE, mime)
-            put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath(collection))
+            put(MediaStore.MediaColumns.RELATIVE_PATH, (listOf(relativePath(collection)) + parts).joinToString("/"))
             put(MediaStore.MediaColumns.IS_PENDING, 1)
             if (takenMs != null && collection != "files") {
                 put(MediaStore.MediaColumns.DATE_TAKEN, takenMs)

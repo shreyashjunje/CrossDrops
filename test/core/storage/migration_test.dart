@@ -27,6 +27,7 @@ void main() {
       "peer_platform, status, total_bytes, created_at, updated_at) "
       "VALUES ('s1', 'send', 'id', 'n', 'ios', 'paused', 1, 0, 0)",
     );
+    await db.customStatement('ALTER TABLE session_files DROP COLUMN folder');
     await db.customStatement('PRAGMA user_version = 2');
     await db.close();
 
@@ -38,7 +39,7 @@ void main() {
     expect(await TrustRepository(db).all(), isEmpty);
     expect(await SettingsRepository(db).receivingEnabled(), isTrue);
     final version = await db.customSelect('PRAGMA user_version').getSingle();
-    expect(version.read<int>('user_version'), 5);
+    expect(version.read<int>('user_version'), 6);
   });
 
   test(
@@ -62,6 +63,7 @@ void main() {
       await db.customStatement(
         'INSERT INTO settings (slot, receiving_enabled) VALUES (1, 0)',
       );
+      await db.customStatement('ALTER TABLE session_files DROP COLUMN folder');
       await db.customStatement('PRAGMA user_version = 3');
       await db.close();
 
@@ -91,6 +93,7 @@ void main() {
         'INSERT INTO settings (slot, receiving_enabled, convert_heic_to_jpeg) '
         'VALUES (1, 0, 1)',
       );
+      await db.customStatement('ALTER TABLE session_files DROP COLUMN folder');
       await db.customStatement('PRAGMA user_version = 4');
       await db.close();
 
@@ -105,4 +108,29 @@ void main() {
       expect(await settings.receivingEnabled(), isFalse);
     },
   );
+  test('a schema 5 database upgrades to 6: files keep their rows, no folder', () async {
+    final dir = Directory.systemTemp.createTempSync('cd_migrate6');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final file = File(p.join(dir.path, 'db.sqlite'));
+
+    var db = AppDatabase(NativeDatabase(file));
+    await db.customSelect('SELECT 1').get();
+    await db.customStatement('ALTER TABLE session_files DROP COLUMN folder');
+    await db.customStatement(
+      "INSERT INTO sessions (session_id, direction, peer_device_id, peer_name, "
+      "peer_platform, status, total_bytes, created_at, updated_at) "
+      "VALUES ('s1', 'send', 'id', 'n', 'ios', 'paused', 1, 0, 0)",
+    );
+    await db.customStatement(
+      "INSERT INTO session_files (session_row_id, file_id, position, name, "
+      "size, kind, status) VALUES (1, 'f0', 0, 'a.jpg', 1, 'photo', 'pending')",
+    );
+    await db.customStatement('PRAGMA user_version = 5');
+    await db.close();
+
+    db = AppDatabase(NativeDatabase(file));
+    addTearDown(db.close);
+    final row = await (db.select(db.sessionFiles)).getSingle();
+    expect((row.name, row.folder), ('a.jpg', null));
+  });
 }

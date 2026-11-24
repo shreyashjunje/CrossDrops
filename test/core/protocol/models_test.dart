@@ -257,6 +257,34 @@ void main() {
   });
 
   group('FileOffer manifest fields', () {
+    test('folder round-trips; absent stays absent (D-075)', () {
+      const f = FileOffer(
+        fileId: 'f1',
+        name: 'a.jpg',
+        size: 1,
+        folder: 'Trip/Day 1',
+      );
+      expect(FileOffer.fromJson(f.toJson()).folder, 'Trip/Day 1');
+      const plain = FileOffer(fileId: 'f1', name: 'a.jpg', size: 1);
+      expect(plain.toJson().containsKey('folder'), isFalse);
+      expect(FileOffer.fromJson(plain.toJson()).folder, isNull);
+    });
+
+    test('an empty, too long or non-string folder is refused', () {
+      for (final bad in <Object>['', 'x' * (maxFolderPathLength + 1), 7]) {
+        expect(
+          () => FileOffer.fromJson({
+            'fileId': 'f1',
+            'name': 'a.jpg',
+            'size': 1,
+            'folder': bad,
+          }),
+          throwsA(isA<FormatError>()),
+          reason: '$bad',
+        );
+      }
+    });
+
     test('kind, created and livePhotoGroup round-trip', () {
       final f = FileOffer(
         fileId: 'f1',

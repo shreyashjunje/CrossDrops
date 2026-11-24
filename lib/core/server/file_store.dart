@@ -170,9 +170,9 @@ class FolderStore implements ReceivedFileStore {
   @override
   Future<SaveResult> save(String location, FileOffer offer) async {
     final safeName = sanitizeFileName(offer.name);
-    final collection = saveCollectionFor(
+    final collection = collectionForOffer(
+      offer,
       safeName: safeName,
-      declaredKind: offer.kind,
       platform: platform,
     );
     String? fallback;
@@ -203,8 +203,9 @@ class FolderStore implements ReceivedFileStore {
       if (r.noSpace) throw const StoreFull();
       fallback = r.fallback;
     }
-    await Directory(saveDir).create(recursive: true);
-    final dest = await claimPath(saveDir, safeName);
+    final dir = p.joinAll([saveDir, ...folderOf(offer)]);
+    await Directory(dir).create(recursive: true);
+    final dest = await claimPath(dir, safeName);
     try {
       await _move(location, dest);
     } on FileSystemException catch (e) {

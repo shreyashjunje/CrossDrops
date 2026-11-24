@@ -1117,6 +1117,10 @@ class ReceiveServer {
             kind: f.kind,
             created: f.created,
             livePhotoGroup: f.livePhotoGroup,
+            folder: switch (folderOf(f)) {
+              [] => null,
+              final parts => parts.join('/'),
+            },
           ),
       ],
     );

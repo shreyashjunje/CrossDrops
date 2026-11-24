@@ -81,6 +81,9 @@ class SessionFiles extends Table {
   TextColumn get kind => text()();
   DateTimeColumn get created => dateTime().nullable()();
   TextColumn get livePhotoGroup => text().nullable()();
+
+  /// Sent inside a folder: its path there (D-075).
+  TextColumn get folder => text().nullable()();
   TextColumn get sha256 => text().nullable()();
 
   /// Receive: bytes known to be on disk (checkpoint). Send: bytes the
@@ -159,7 +162,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.executor);
 
   @override
-  int get schemaVersion => 5;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -181,6 +184,9 @@ class AppDatabase extends _$AppDatabase {
       }
       if (from >= 3 && from < 5) {
         await m.addColumn(settings, settings.onboardingDone);
+      }
+      if (from >= 2 && from < 6) {
+        await m.addColumn(sessionFiles, sessionFiles.folder);
       }
     },
     beforeOpen: (details) async {

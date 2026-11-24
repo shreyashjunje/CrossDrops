@@ -1,6 +1,7 @@
 import '../protocol/file_type.dart';
 import '../protocol/models.dart';
 import '../security/device_identity.dart';
+import '../storage/file_name_sanitizer.dart';
 
 /// Where a received file goes after it is verified.
 enum SaveCollection {
@@ -14,6 +15,27 @@ enum SaveCollection {
   /// Downloads, `Download/CrossDrop`.
   files,
 }
+
+/// The safe folder of a file received as part of a folder (D-075), or
+/// empty.
+List<String> folderOf(FileOffer offer) {
+  final folder = offer.folder;
+  return folder == null ? const [] : sanitizeFolderPath(folder);
+}
+
+/// [saveCollectionFor], except that a file sent inside a folder stays with
+/// its folder in files, never the gallery (D-075).
+SaveCollection collectionForOffer(
+  FileOffer offer, {
+  required String safeName,
+  required DevicePlatform platform,
+}) => folderOf(offer).isNotEmpty
+    ? SaveCollection.files
+    : saveCollectionFor(
+        safeName: safeName,
+        declaredKind: offer.kind,
+        platform: platform,
+      );
 
 /// Chooses the collection for a received file on [platform].
 ///

@@ -28,6 +28,9 @@ int? negotiateVersion(Iterable<int> theirs) {
 /// single offer can cost the receiver.
 const int maxFilesPerOffer = 10000;
 
+/// Longest [FileOffer.folder] accepted, in characters (D-075).
+const int maxFolderPathLength = 1024;
+
 /// Longest file name accepted in an offer, in UTF-16 code units, before
 /// sanitizing. Longer names are refused rather than silently cut.
 const int maxOfferedNameLength = 1024;
@@ -70,12 +73,19 @@ class FileOffer {
     this.kind = FileKind.file,
     this.created,
     this.livePhotoGroup,
+    this.folder,
   });
 
   final String fileId;
 
   /// As sent by the peer. Sanitize before using it on disk.
   final String name;
+
+  /// The folder the file sits in when a whole folder is sent (D-075):
+  /// `/`-separated, starting with the sent folder's own name ("Trip/Day 1").
+  /// Null for a single file. As sent by the peer: sanitize with
+  /// `sanitizeFolderPath` before using it on disk.
+  final String? folder;
   final int size;
   final String? mime;
 
@@ -94,11 +104,19 @@ class FileOffer {
     'kind': kind,
     if (created != null) 'created': created!.toUtc().toIso8601String(),
     'livePhotoGroup': livePhotoGroup,
+    'folder': ?folder,
   };
 
   factory FileOffer.fromJson(Object? json) {
     if (json is! Map<String, Object?>) {
       throw FormatError('file is not an object');
+    }
+    final folder = json['folder'];
+    if (folder != null &&
+        (folder is! String ||
+            folder.isEmpty ||
+            folder.length > maxFolderPathLength)) {
+      throw FormatError('invalid folder');
     }
     final fileId = json['fileId'];
     final name = json['name'];
@@ -135,6 +153,7 @@ class FileOffer {
       // A date we can't read is metadata, not a reason to refuse the file.
       created: created == null ? null : DateTime.tryParse(created as String),
       livePhotoGroup: group as String?,
+      folder: folder as String?,
     );
   }
 }

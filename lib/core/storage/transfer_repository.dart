@@ -16,6 +16,7 @@ class StoredFile {
     this.mime,
     this.created,
     this.livePhotoGroup,
+    this.folder,
     this.sha256,
     this.transferredBytes = 0,
     this.tempPath,
@@ -37,6 +38,7 @@ class StoredFile {
     kind: f.kind,
     created: f.created,
     livePhotoGroup: f.livePhotoGroup,
+    folder: f.folder,
     status: FileTransferStatus.pending,
     tempPath: tempPath,
     sourcePath: sourcePath,
@@ -49,6 +51,7 @@ class StoredFile {
   final String kind;
   final DateTime? created;
   final String? livePhotoGroup;
+  final String? folder;
   final String? sha256;
   final int transferredBytes;
   final String? tempPath;
@@ -66,6 +69,7 @@ class StoredFile {
     kind: kind,
     created: created,
     livePhotoGroup: livePhotoGroup,
+    folder: folder,
   );
 }
 
@@ -162,6 +166,7 @@ class TransferRepository {
               kind: f.kind,
               created: Value(f.created),
               livePhotoGroup: Value(f.livePhotoGroup),
+              folder: Value(f.folder),
               status: f.status.name,
               transferredBytes: Value(f.transferredBytes),
               tempPath: Value(f.tempPath),
@@ -309,6 +314,7 @@ class TransferRepository {
             kind: f.kind,
             created: f.created,
             livePhotoGroup: f.livePhotoGroup,
+            folder: f.folder,
             sha256: f.sha256,
             transferredBytes: f.transferredBytes,
             tempPath: f.tempPath,

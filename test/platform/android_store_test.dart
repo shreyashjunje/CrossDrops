@@ -43,6 +43,7 @@ void main() {
     int size, {
     String kind = FileKind.photo,
     DateTime? created,
+    String? folder,
   }) async {
     final path = p.join(src.path, name);
     final sha = await writeRandomFile(path, size);
@@ -58,6 +59,7 @@ void main() {
             size: size,
             kind: kind,
             created: created,
+            folder: folder,
           ),
         ],
       ),
@@ -99,6 +101,20 @@ void main() {
     expect(saved.fallback, isNull);
     // No copy was made anywhere else.
     expect(Directory(r.saveDir).existsSync(), isFalse);
+  });
+
+  test('a photo sent in a folder stays with it in Downloads (D-075)', () async {
+    final (t, sha, client) = await offer(
+      'IMG_2.JPG',
+      100,
+      folder: 'Trip/../Day 1/./',
+    );
+    expect(await client.transfer(t), sha);
+    final item = api.items.single;
+    expect(item.collection, SaveCollection.files);
+    // ".." and "." are dropped; nothing climbs out of Download/CrossDrop.
+    expect(item.folder, ['Trip', 'Day 1']);
+    expect(r.saved.single.collection, SaveCollection.files);
   });
 
   test('documents go to Downloads, videos to Movies', () async {
@@ -205,12 +221,20 @@ void main() {
 }
 
 class _Item {
-  _Item(this.uri, this.path, this.collection, this.mime, this.taken);
+  _Item(
+    this.uri,
+    this.path,
+    this.collection,
+    this.mime,
+    this.taken,
+    this.folder,
+  );
   final String uri;
   final String path;
   final SaveCollection collection;
   final String mime;
   final DateTime? taken;
+  final List<String> folder;
   bool published = false;
   bool deleted = false;
 }
@@ -244,6 +268,7 @@ class _FakeMediaStore implements MediaStoreApi {
     required String mime,
     required SaveCollection collection,
     DateTime? taken,
+    List<String> folder = const [],
   }) async {
     if (full) throw PlatformException(code: 'no_space');
     if (refuse.contains(collection)) {
@@ -253,7 +278,7 @@ class _FakeMediaStore implements MediaStoreApi {
         'content://media/external_primary/${collection.name}/${items.length}';
     final path = p.join(dir, '${items.length}-$name');
     File(path).createSync();
-    items.add(_Item(uri, path, collection, mime, taken));
+    items.add(_Item(uri, path, collection, mime, taken, folder));
     return (uri: uri, fd: _fdFor(path));
   }
 

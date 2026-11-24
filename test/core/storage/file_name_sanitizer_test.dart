@@ -124,4 +124,26 @@ void main() {
       expect(got.every((path) => File(path).existsSync()), isTrue);
     });
   });
+
+  group('sanitizeFolderPath (D-075)', () {
+    test('keeps the parts in order', () {
+      expect(sanitizeFolderPath('Trip/Day 1'), ['Trip', 'Day 1']);
+      expect(sanitizeFolderPath(r'Trip\Day 1'), ['Trip', 'Day 1']);
+    });
+
+    test('drops empty, . and .. parts, so nothing climbs out', () {
+      expect(sanitizeFolderPath('../../etc/./x//'), ['etc', 'x']);
+      expect(sanitizeFolderPath('/'), isEmpty);
+      expect(sanitizeFolderPath(' .. '), isEmpty);
+    });
+
+    test('each part is a safe name', () {
+      expect(sanitizeFolderPath('a:b/CON/.hidden'), ['a_b', '_CON', 'hidden']);
+    });
+
+    test('at most maxFolderDepth parts', () {
+      final deep = List.generate(40, (i) => 'd$i').join('/');
+      expect(sanitizeFolderPath(deep), hasLength(maxFolderDepth));
+    });
+  });
 }

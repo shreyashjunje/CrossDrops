@@ -113,6 +113,7 @@ class SendItem {
     this.kind = FileKind.file,
     this.created,
     this.livePhotoGroup,
+    this.folder,
     this.thumb,
   });
 
@@ -128,6 +129,10 @@ class SendItem {
   /// Same value on a Live Photo's still and video (ARCHITECTURE.md,
   /// "Offer manifest").
   final String? livePhotoGroup;
+
+  /// Its folder path when a whole folder is sent (D-075), outermost first,
+  /// `/`-separated.
+  final String? folder;
 
   /// Where the screens get its preview: the library item it came from, or
   /// the file itself. Never sent, never stored.
@@ -321,6 +326,7 @@ class SendSession {
             kind: f.kind,
             created: f.created,
             livePhotoGroup: f.livePhotoGroup,
+            folder: f.folder,
           ),
       ],
       repository: repository,
@@ -622,6 +628,7 @@ class SendSession {
                 kind: f.item.kind,
                 created: f.item.created,
                 livePhotoGroup: f.item.livePhotoGroup,
+                folder: f.item.folder,
               ),
           ],
         ),
@@ -690,6 +697,7 @@ class SendSession {
               kind: f.item.kind,
               created: f.item.created,
               livePhotoGroup: f.item.livePhotoGroup,
+              folder: f.item.folder,
               status: FileTransferStatus.pending,
               sourcePath: f.item.path,
             ),

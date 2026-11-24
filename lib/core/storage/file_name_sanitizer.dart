@@ -58,6 +58,20 @@ String sanitizeFileName(String input) {
   return '$base$ext';
 }
 
+/// Deepest folder kept from a received folder path; deeper parts are
+/// dropped and their files land in the deepest folder kept.
+const int maxFolderDepth = 16;
+
+/// Turns a folder path received from the network (D-075) into safe folder
+/// names, outermost first: each part sanitized like a file name, empty,
+/// `.` and `..` parts dropped, at most [maxFolderDepth] parts. Empty when
+/// nothing usable is left; the file then goes where a single file would.
+List<String> sanitizeFolderPath(String input) => [
+  for (final part in input.split(RegExp(r'[/\\]')))
+    if (part.trim().isNotEmpty && part.trim() != '.' && part.trim() != '..')
+      sanitizeFileName(part),
+].take(maxFolderDepth).toList();
+
 String _truncateUtf8(String s, int maxBytes) {
   if (utf8.encode(s).length <= maxBytes) return s;
   final out = StringBuffer();
