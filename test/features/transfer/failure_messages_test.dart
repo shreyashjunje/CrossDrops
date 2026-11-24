@@ -171,6 +171,23 @@ void main() {
     );
   });
 
+  test('cable connect errors name the cable and the failed step', () {
+    final m = describeConnectError(
+      'network',
+      fromQr: false,
+      cable: true,
+      detail: 'cable: refused',
+    );
+    expect(m.title, 'Could not connect by cable');
+    expect(m.reason, contains('(cable: refused)'));
+    expect(m.next, isNot(contains('Wi-Fi')));
+    expect(m.action, isNot(NextAction.scanQr));
+    expect(
+      describeConnectError('pin_mismatch', fromQr: false, cable: true).title,
+      'Not the expected phone',
+    );
+  });
+
   test('file errors', () {
     expect(describeFileError(ErrorCodes.hashMismatch), contains('damaged'));
     expect(describeFileError(ErrorCodes.tooManyBytes), contains('bigger'));

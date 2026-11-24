@@ -12,6 +12,7 @@ import '../../core/cable/cable_link.dart';
 import '../../core/client/peer_check.dart';
 import '../../core/client/upload_client.dart';
 import '../../core/discovery/peer_list.dart';
+import '../../core/log.dart';
 import '../../core/protocol/connect_payload.dart';
 import '../../core/security/device_identity.dart';
 import '../../platform/haptics.dart';
@@ -73,7 +74,16 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
         setState(() => _addressUnreachable = true);
       }
       ref.read(hapticsProvider).play(HapticMoment.failed);
-      _showError(describeConnectError(e.code, fromQr: fromQr));
+      final cable = lockId == _cableId;
+      if (cable) logEvent('cable', 'check failed: ${e.code} ${e.message}');
+      _showError(
+        describeConnectError(
+          e.code,
+          fromQr: fromQr,
+          cable: cable,
+          detail: cable ? e.message : null,
+        ),
+      );
     } finally {
       if (mounted) {
         setState(() {

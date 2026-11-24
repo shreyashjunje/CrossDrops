@@ -75,6 +75,7 @@ class CableBridge(
                 val pipe = Pipe()
                 val c = if (m == null) null else m.connect(port, CONNECT_TIMEOUT_MS, pipe::fromMux, pipe::muxClosed)
                 if (c == null) {
+                    log("dial out: iPhone port $port did not answer (mux ${if (m == null) "none" else "dead=${m.isDead}"})")
                     done(false)
                     return@execute
                 }
@@ -83,12 +84,14 @@ class CableBridge(
                     local.tcpNoDelay = true
                     local.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), listen), CONNECT_TIMEOUT_MS.toInt())
                 } catch (e: IOException) {
+                    log("dial out: local $listen failed: ${e.javaClass.simpleName}")
                     closeQuietly(local)
                     c.reset()
                     done(false)
                     return@execute
                 }
                 pipe.start(c, local)
+                log("dial out: joined iPhone port $port")
                 done(true)
             }
         } catch (e: java.util.concurrent.RejectedExecutionException) {
@@ -268,6 +271,7 @@ class CableBridge(
             local.tcpNoDelay = true
             local.connect(InetSocketAddress(InetAddress.getLoopbackAddress(), port), CONNECT_TIMEOUT_MS.toInt())
         } catch (e: IOException) {
+            log("dial: receive port $port failed: ${e.javaClass.simpleName}")
             closeQuietly(local)
             fail(listen)
             return
@@ -275,11 +279,13 @@ class CableBridge(
         val pipe = Pipe()
         val c = m.connect(listen, CONNECT_TIMEOUT_MS, pipe::fromMux, pipe::muxClosed)
         if (c == null) {
+            log("dial: iPhone port $listen did not answer (dead=${m.isDead})")
             closeQuietly(local)
             fail(listen)
             return
         }
         pipe.start(c, local)
+        log("dial: joined iPhone port $listen to $port")
     }
 
     /**

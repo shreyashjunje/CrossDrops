@@ -287,8 +287,29 @@ FailureMessage _sendFailed(
 };
 
 /// Connecting from the Nearby screen failed with an [UploadException]
-/// code.
-FailureMessage describeConnectError(String code, {required bool fromQr}) =>
+/// code. [cable]: the phone on the USB cable; [detail] is the exception's
+/// message, shown so a device test can tell which cable step failed.
+FailureMessage describeConnectError(
+  String code, {
+  required bool fromQr,
+  bool cable = false,
+  String? detail,
+}) => switch (code) {
+  'network' when cable => FailureMessage(
+    title: 'Could not connect by cable',
+    reason:
+        'The other phone did not answer through the cable'
+        '${detail == null || detail.isEmpty ? '' : ' (${_short(detail)})'}.',
+    next:
+        'Keep CrossDrop open and unlocked on both phones, unplug the cable '
+        'and plug it in again, then try again.',
+  ),
+  _ => _connectError(code, fromQr: fromQr),
+};
+
+String _short(String s) => s.length <= 80 ? s : '${s.substring(0, 80)}…';
+
+FailureMessage _connectError(String code, {required bool fromQr}) =>
     switch (code) {
       'network' when fromQr => const FailureMessage(
         title: 'Could not connect',
