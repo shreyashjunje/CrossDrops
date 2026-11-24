@@ -4,7 +4,8 @@ CrossDrop is a Flutter app that sends photos, videos and files directly between 
 ## Status
 
 - **Phases 1 to 7** (transfer engine, discovery and QR, security and pairing, media and sharing, UI, hotspot mode, benchmark builds): **built and unit-tested**. `flutter analyze` and `flutter test` run in CI on every push.
-- **Not yet tested on devices.** The only device run so far is one 1.2 MB video from an Android phone to a PC ([docs/TODAY-2026-11-02.md](docs/TODAY-2026-11-02.md)). Every Results table in [docs/DEVICE_TESTS.md](docs/DEVICE_TESTS.md) and [docs/BENCHMARKS.md](docs/BENCHMARKS.md) is still empty, so no phase meets the Definition of done yet ([docs/STATUS.md](docs/STATUS.md)).
+- **Since then:** faster large files (data lanes, tree hash), many files at once, send by USB cable in both directions, whole folders and Select all. Built and unit-tested ([docs/DECISIONS.md](docs/DECISIONS.md), D-068 to D-078).
+- **Almost untested on devices.** The only phone check with a result is the cable test U-11 (passed). Every other Results table in [docs/DEVICE_TESTS.md](docs/DEVICE_TESTS.md) and the phone tables in [docs/BENCHMARKS.md](docs/BENCHMARKS.md) are empty, so no phase meets the Definition of done yet ([docs/STATUS.md](docs/STATUS.md)).
 - The fixes from the code review of 2026-11-03 are in ([docs/CHANGELOG.md](docs/CHANGELOG.md)); the ones that need a phone are listed under "Code review fixes" in DEVICE_TESTS.md.
 
 What works in the code today:

@@ -6,14 +6,16 @@ Full design: `docs/ARCHITECTURE.md`. Read it before doing any work. Follow it. I
 
 ## Scope (v1)
 - iPhone to Android and Android to iPhone only. Both phones nearby, app open in the foreground.
-- Connection modes: same Wi-Fi (Bonjour/mDNS), QR code fallback, Android hotspot, iPhone Personal Hotspot (user enables it manually).
+- Connection modes: same Wi-Fi (Bonjour/mDNS), QR code fallback, Android hotspot, iPhone Personal Hotspot (user enables it manually), USB cable (D-073).
 - Out of scope: accounts, cloud storage, chat, relay servers, receiving while the iPhone app is closed, iPhone-to-iPhone and Android-to-Android testing.
 
 ## Core design (summary of the architecture doc)
 - The receiver runs an HTTPS server. The sender is the client. This holds in every network mode.
 - Protocol: HTTPS + JSON for control, streamed PUT bodies for file bytes, one WebSocket per session for events. All endpoints under `/v1`.
 - Resume: the receiver writes to a `.part` file and reports `receivedBytes`. The sender continues with `PUT ...?offset=N`.
-- Integrity: SHA-256 computed incrementally while streaming, sent in `/complete`, verified before saving.
+- Integrity: SHA-256 computed incrementally while streaming, sent in `/complete`, verified before saving. Large files use a tree hash (SHA-256 over 1 MB leaf hashes) when both sides support it (D-071).
+- Speed: files of 8 MB or more go through data lanes (extra TLS ports on the receiver, upload worker isolates on the sender), and files of 32 MB or more are striped over up to three connections (D-071). Up to six files move at once (D-072).
+- Cable: the same protocol runs over USB through usbmux; the receiver's host is `cable.crossdrop.invalid` (D-073, D-074).
 - Security: each device has its own key and self-signed certificate; the certificate's SHA-256 fingerprint is the device identity. Mutual TLS with pinning. The receiver must tap Accept for any untrusted sender.
 - Discovery: `_crossdrop._tcp` with TXT records `v`, `id`, `n`, `p`, `fp` (fingerprint hint only).
 

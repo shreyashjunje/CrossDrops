@@ -1,59 +1,57 @@
-# Status after Phase 7 (2026-11-03, updated after the code review)
+# Status (2026-11-25)
 
-**Code review of 2026-11-03:** every bug (H1–H4, M1–M6, L1–L8) and every release blocker is fixed in the code and unit-tested; speed items 1–5 are in (item 1 as "Measure this phone", D-066); items 6–10 wait for measurements (D-066). What needs a phone is in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Code review fixes" (R-1 to R-9). Run those with the smoke tests below.
+Everything below is on `main`. `flutter analyze` is clean and `flutter test` passes, on the PC and in CI on every push.
 
-All v1 features in CLAUDE.md are now in the code: transfer engine, discovery, QR, pinned TLS and pairing, media saving, sharing from other apps, UI, Android hotspot, iPhone Personal Hotspot guide, and benchmark builds. CI runs analyze and tests on every push.
+## What is built
 
-**No phase is done yet.** Under the Definition of done, a phase also needs its checks run on one iPhone and one Android phone. Every Results table in [DEVICE_TESTS.md](DEVICE_TESTS.md) and [BENCHMARKS.md](BENCHMARKS.md) is still empty.
+All v1 features in CLAUDE.md are in the code: transfer engine with resume, discovery, QR, pinned TLS and pairing, media saving, sharing from other apps, the Night Signal UI, Android hotspot, the iPhone Personal Hotspot guide and benchmark builds. Built since, each unit-tested on the PC:
 
-**Added 2026-11-08 (D-068):** real file names on iPhone picks, previews of picked, sent and received files, a faster photo picker and preparation, three files at once, and "original quality" with exact byte counts on the Done screen. Unit-tested; device checks N-1 to N-8 in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Send screen fixes". The iOS Swift part (QuickLook previews) has not been compiled yet: the next CI build is its first.
+| Decision | What | Device checks |
+| --- | --- | --- |
+| D-068 | Real file names, previews, faster picking, original quality | N-1 to N-8 |
+| D-069 | Redesign (Night Signal) | "Redesign" |
+| D-070 | Security audit follow-up (S2, S7 to S10, S13) | "Audit follow-up" |
+| D-071 | Data lanes, upload workers, stripes, tree hash (large files) | F-1 to F-6 |
+| D-072 | Many files: export during the send, six lanes, grouped Photos saves | M-1 to M-6 |
+| D-073, D-074 | Send by cable, both directions (usbmux); camera import removed | C-1 onward |
+| D-075 | Send a whole folder; Select all in an album | D-1 to D-6 |
+| D-076 | An offer is kept inside the 4 MB a receiver reads | (unit test) |
+| D-077 | iPhone: a folder on another drive is checked for space before copying | D-7 |
+| D-078 | Android: an empty folder pick gives its grant back | (none visible) |
 
-**Added 2026-11-10 (D-071):** large files use data ports, upload worker isolates, up to three connections per file and a tree hash. Built and unit-tested; a 1 GB loopback transfer on the PC went from about 60 to about 110 to 130 MB/s ([BENCHMARKS.md](BENCHMARKS.md)). Nothing of it has run on a phone: device checks F-1 to F-6 in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Faster transfers". It is on the branch `speed-data-lanes`, not on `main`.
+The Swift parts of D-068, D-072, D-075 and D-077 compile only in CI (no Mac here).
 
-**Added 2026-11-08:** import from an iPhone by cable on Android (D-067, [features/usb-import.md](features/usb-import.md)). Built and unit-tested; device checks U-1 to U-9 in [DEVICE_TESTS.md](DEVICE_TESTS.md), "Cable import".
+## What has run on phones
+
+Only U-11, the cable test (iPhone 17 Pro and Samsung S20 FE, 2026-11-24): it passed. Nothing else has a result in [DEVICE_TESTS.md](DEVICE_TESTS.md), and [BENCHMARKS.md](BENCHMARKS.md) has PC loopback numbers only. **No phase is done** under the Definition of done.
 
 ## What is left
 
 ### 1. Device testing (blocks everything else)
-- About 90 checks from P1-1 to P7-9. None has been run on an iPhone. Android has had one 1.2 MB transfer to a PC (Phase 1).
-- **The Phase 1 and 2 steps are out of date.** P1-1, for example, says to type an IP on the Send screen and to look for the file in the app's own folder. Since then, Phase 5 moved received files to MediaStore and Photos, and Phase 6 replaced the screens. Running them as written would give false failures.
-- P7-5 (in-app hotspot join) needs a paid Apple Developer account. Without one it stays untested, and the Settings route (P7-4) is what v1 uses.
+- About 150 checks. Start with the smoke tests below, then the sections of the decisions above.
+- The Phase 1 and 2 steps are out of date (typing an IP on the Send screen, files in the app's own folder). Bring them up to date before the full pass, or false failures follow.
+- P7-5 (in-app hotspot join) needs a paid Apple Developer account; v1 uses the Settings route (P7-4).
 
-### 2. Benchmarks
-- The speed tables in BENCHMARKS.md are empty: router at 2.4 and 5 GHz, Android hotspot and iPhone hotspot, both directions.
-- These open decisions wait on the numbers:
-  - the speed target (ARCHITECTURE.md, Open decisions);
-  - the best buffer size;
-  - how many files at once (D-068: 3; compare 1 and 3 with many photos and with one large video).
+### 2. Speed numbers
+- M-1 (600 photos, iPhone to Android, same Wi-Fi) with the Android `log.txt`: the owner's "slow" report waits on it (D-072).
+- BENCHMARKS.md on phones: router at 2.4 and 5 GHz, Android hotspot, iPhone hotspot, cable, both directions.
+- Then decide the speed target, the buffer size and the number of lanes.
 
-### 3. Open decisions
-- **LocalSend compatibility:** no for v1 (D-060). Look at it again after v1.
-- **Speed target:** set from the benchmark results (see 2).
-
-### 4. Deferred until device tests show a need
+### 3. Deferred until device tests show a need
 - Guiding users to OEM battery settings on Xiaomi, Oppo, Vivo and OnePlus ([keep-alive.md](features/keep-alive.md)).
+- Keeping small files' TLS off the UI isolate (D-072, "Not done").
 - Fixes for whatever the device tests turn up.
 
-### 5. Before giving it to anyone (after testing)
-- ~~A real bundle id and application id~~: `io.github.shreyashjunje.crossdrop` (D-063).
-- ~~Release signing~~: set up; create the key and add the CI secrets ([RELEASE.md](RELEASE.md)).
+### 4. Before giving it to anyone
 - App icon and an iPhone distribution route (TestFlight needs a paid account).
 - Privacy text (no data leaves the local network) and a store listing, if it goes to the stores.
+- Release signing is set up; create the key and add the CI secrets ([RELEASE.md](RELEASE.md)).
 
 ## What to do next, in order
 
-1. **Start the Build workflow:** github.com > Actions > Build > Run workflow on `main`. Then run it again with **bench** ticked. Download the APK and the IPA. See [Installing the CI builds](DEVICE_TESTS.md#installing-the-ci-builds-no-mac-needed).
-2. **Install both builds:** the APK with `adb install -r`, the IPA with Sideloadly. Fill in the "Build and install" rows of the Phase 7 table. Paste back any errors.
-3. **Smoke test before the full pass.** These four confirm the core works on real phones:
-   - P6-3: iPhone → Android, end to end, untrusted.
-   - P6-4: Android → iPhone.
-   - P4-1: pairing in both directions.
-   - P7-9: benchmark smoke test.
-
-   If one fails, stop and paste back screenshots and `adb logcat -s flutter`. Fixing those first saves running 90 checks against a broken build.
-
-   Then R-1 to R-9 (code review fixes). Uninstall the old `com.example.crossdrop` app first: the new id installs as a separate app.
-4. **Next coding task (for Claude):** bring P1 and P2 up to date with the current screens, and add a short "v1 core pass" list at the top of DEVICE_TESTS.md. The full pass then follows the app as it is today, not as it was in each phase.
-5. **Full device pass:** Phases 3 to 7, then the updated 1 and 2. Write each result in its table with the date, OS versions and commit.
-6. **Benchmarks:** use the bench build and fill in BENCHMARKS.md. Then decide the speed target, the buffer size and D-059.
-7. **Release prep** (section 5 above).
+1. **Build:** github.com > Actions > Build > Run workflow on `main` (and again with **bench** ticked). Download the APK and the IPA ([Installing the CI builds](DEVICE_TESTS.md#installing-the-ci-builds-no-mac-needed)). A failed iOS build means a Swift error: paste the log.
+2. **Install** the APK with `adb install -r` and the IPA with Sideloadly.
+3. **Smoke test:** P6-3 (iPhone to Android), P6-4 (Android to iPhone), P4-1 (pairing both ways), M-1 (many photos), C-1 (cable), D-1 (a folder). If one fails, stop and paste back screenshots and `adb logcat -s flutter`.
+4. **Full device pass**, writing each result in its table with the date, OS versions and commit.
+5. **Benchmarks** on the bench build, then the open speed decisions.
+6. **Release prep** (section 4).
