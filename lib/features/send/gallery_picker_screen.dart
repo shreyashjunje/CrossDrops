@@ -266,7 +266,8 @@ class _GalleryPickerScreenState extends State<GalleryPickerScreen>
       if (mounted) {
         setState(() {
           _selectingAll = false;
-          _selectedAll = added;
+          // Switched albums meanwhile: the new album's button stays Select all.
+          if (album == _album) _selectedAll = added;
         });
       }
     }
