@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
 import '../core/log.dart';
@@ -9,10 +10,55 @@ import '../core/media/prepare.dart';
 import '../core/storage/file_name_sanitizer.dart';
 import 'android_source.dart';
 
-/// The system picker for "any file" (D-041).
+/// The files of a picked folder (D-075), and how many were left out
+/// (iCloud files not on the phone, unreadable files, more than 10,000).
+typedef FolderPick = ({List<PickedFile> files, int skipped});
+
+/// Reads a native `pickFolder` answer; [refKey] names the field that
+/// holds the file's reference (`uri` on Android, `path` on iOS). Entries
+/// missing a field are left out and counted.
+FolderPick parseFolderPick(Map<Object?, Object?>? m, {required String refKey}) {
+  final raw = m?['files'] as List<Object?>? ?? const [];
+  var skipped = (m?['skipped'] as num?)?.toInt() ?? 0;
+  final files = <PickedFile>[];
+  for (final e in raw) {
+    if (e is! Map<Object?, Object?>) {
+      skipped++;
+      continue;
+    }
+    final ref = e[refKey];
+    final name = e['name'];
+    final folder = e['folder'];
+    if (ref is! String || name is! String || folder is! String) {
+      skipped++;
+      continue;
+    }
+    final size = (e['size'] as num?)?.toInt();
+    final modified = (e['modifiedMs'] as num?)?.toInt();
+    files.add(
+      PickedFile(
+        ref: ref,
+        name: name,
+        mime: e['mime'] as String?,
+        size: size == null || size < 0 ? null : size,
+        created: modified == null || modified <= 0
+            ? null
+            : DateTime.fromMillisecondsSinceEpoch(modified, isUtc: true),
+        folder: folder,
+      ),
+    );
+  }
+  return (files: files, skipped: skipped);
+}
+
+/// The system picker for "any file" (D-041), and for a folder (D-075).
 abstract interface class DocumentPicker {
   /// Empty if the user backed out.
   Future<List<PickedFile>> pick();
+
+  /// Every file in a folder the user picks, subfolders included, each with
+  /// its folder path. No files if the user backed out.
+  Future<FolderPick> pickFolder();
 
   /// The picks are no longer needed (sent for good, or cleared): give back
   /// grants and delete copies.
@@ -41,6 +87,10 @@ class AndroidDocumentPicker implements DocumentPicker {
         ),
     ];
   }
+
+  @override
+  Future<FolderPick> pickFolder() async =>
+      parseFolderPick(await _sources.pickFolder(), refKey: 'uri');
 
   @override
   Future<void> release(List<PickedFile> files) => _sources.release([
@@ -94,6 +144,22 @@ class IosDocumentPicker implements DocumentPicker {
     }
     return out;
   }
+
+  /// Cloned into a new staging batch by OpenFileChannel.swift, so the
+  /// folder stays readable after the picker's access ends.
+  @override
+  Future<FolderPick> pickFolder() async {
+    final batch = p.join(stagingRoot, 'doc-${_id()}');
+    await Directory(batch).create(recursive: true);
+    final m = await _channel.invokeMapMethod<Object?, Object?>('pickFolder', {
+      'staging': batch,
+    });
+    final pick = parseFolderPick(m, refKey: 'path');
+    if (pick.files.isEmpty) await deleteStaging(batch);
+    return pick;
+  }
+
+  static const _channel = MethodChannel('crossdrop/open');
 
   @override
   Future<void> release(List<PickedFile> files) async {

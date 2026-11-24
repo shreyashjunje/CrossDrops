@@ -9,6 +9,7 @@ import 'package:crossdrop/core/media/prepare.dart';
 import 'package:crossdrop/core/protocol/models.dart';
 import 'package:crossdrop/features/nearby/nearby_controller.dart';
 import 'package:crossdrop/features/send/send_controller.dart';
+import 'package:crossdrop/platform/document_picker.dart';
 import 'package:crossdrop/platform/keep_alive.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -117,6 +118,52 @@ void main() {
       ['a', 'v', 'n'],
     ], reason: 'one call, only for picks without a name');
   });
+
+  group('a whole folder and big selections (D-075)', () {
+    test('a folder joins the selection; left-out files are counted', () async {
+      final picker = _FolderPicker((
+        files: [
+          const PickedFile(ref: '/s/1', name: 'a.jpg', folder: 'Trip'),
+          const PickedFile(ref: '/s/2', name: 'b.mp4', folder: 'Trip/Day 1'),
+        ],
+        skipped: 2,
+      ));
+      final c = ProviderContainer(
+        overrides: [
+          keepAliveProvider.overrideWithValue(
+            KeepAliveCoordinator(_NoKeepAlive(), pauseInBackground: false),
+          ),
+          documentPickerProvider.overrideWith((ref) async => picker),
+        ],
+      );
+      addTearDown(c.dispose);
+      final ctrl = c.read(sendControllerProvider.notifier);
+      expect(await ctrl.pickFolder(), 2);
+      final picked = c.read(sendControllerProvider).picked.cast<PickedFile>();
+      expect(picked.map((f) => f.folder), ['Trip', 'Trip/Day 1']);
+    });
+
+    test('one send holds at most maxFilesPerOffer items', () {
+      final c = ProviderContainer(
+        overrides: [
+          keepAliveProvider.overrideWithValue(
+            KeepAliveCoordinator(_NoKeepAlive(), pauseInBackground: false),
+          ),
+        ],
+      );
+      addTearDown(c.dispose);
+      final ctrl = c.read(sendControllerProvider.notifier);
+      final dropped = ctrl.addMedia([
+        for (var i = 0; i < maxFilesPerOffer + 5; i++)
+          LibraryAsset(id: 'a$i', kind: FileKind.photo),
+      ]);
+      expect(dropped, 5);
+      expect(
+        c.read(sendControllerProvider).picked,
+        hasLength(maxFilesPerOffer),
+      );
+    });
+  });
 }
 
 class _NamingMedia implements MediaPlatform {
@@ -152,4 +199,18 @@ class _NamingMedia implements MediaPlatform {
     PrepareControl control,
     void Function(double fraction) onProgress,
   ) => throw UnimplementedError();
+}
+
+class _FolderPicker implements DocumentPicker {
+  _FolderPicker(this.result);
+  final FolderPick result;
+
+  @override
+  Future<List<PickedFile>> pick() async => const [];
+
+  @override
+  Future<FolderPick> pickFolder() async => result;
+
+  @override
+  Future<void> release(List<PickedFile> files) async {}
 }

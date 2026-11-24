@@ -39,7 +39,14 @@ import java.util.concurrent.atomic.AtomicBoolean
  *   modifiedMs?, takenMs?}`.
  * - `pickDocuments` -> list of URIs from ACTION_OPEN_DOCUMENT, each with a
  *   persistable read grant so a resume after a restart can read it again.
- * - `release {uris}` gives persistable grants back.
+ * - `pickFolder` -> `{files: [{uri, name, size, mime?, modifiedMs?, folder}],
+ *   skipped}` from ACTION_OPEN_DOCUMENT_TREE (D-075): every file in the
+ *   folder and its subfolders, read in place through the tree's
+ *   persistable grant. `folder` starts with the folder's own name. Hidden
+ *   files are left out; more than [MAX_FOLDER_FILES] are left out and
+ *   counted in `skipped`. An empty list if the user backed out.
+ * - `release {uris}` gives persistable grants back; a file of a picked
+ *   folder gives back the folder's grant.
  * - `copy {uri, dest, id}` -> bytes: streams a provider that cannot seek or
  *   has no size into `dest` (a file in the app's staging folder).
  *   `cancelCopy {id}`. Errors: `no_space`, `not_found`, `permission`,
@@ -51,6 +58,10 @@ import java.util.concurrent.atomic.AtomicBoolean
 class SourceChannel(private val activity: Activity, messenger: BinaryMessenger) {
     companion object {
         const val PICK_REQUEST = 0xCD01
+        const val FOLDER_REQUEST = 0xCD02
+
+        /** The protocol's limit per offer (maxFilesPerOffer). */
+        private const val MAX_FOLDER_FILES = 10000
         private const val BUFFER = 1024 * 1024
     }
 
@@ -72,11 +83,13 @@ class SourceChannel(private val activity: Activity, messenger: BinaryMessenger) 
                 call.argument<List<String>>("uris")!!.map { describe(Uri.parse(it)) }
             }
             "pickDocuments" -> pick(result)
+            "pickFolder" -> pickFolder(result)
             "release" -> background(result) {
-                for (u in call.argument<List<String>>("uris")!!) {
+                val grants = call.argument<List<String>>("uris")!!.map { grantOf(Uri.parse(it)) }.distinct()
+                for (u in grants) {
                     try {
                         resolver.releasePersistableUriPermission(
-                            Uri.parse(u),
+                            u,
                             Intent.FLAG_GRANT_READ_URI_PERMISSION,
                         )
                     } catch (e: SecurityException) {
@@ -220,8 +233,104 @@ class SourceChannel(private val activity: Activity, messenger: BinaryMessenger) 
         }
     }
 
+    private fun pickFolder(result: MethodChannel.Result) {
+        if (pickResult != null) {
+            result.error("busy", "a picker is already open", null)
+            return
+        }
+        pickResult = result
+        try {
+            activity.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT_TREE), FOLDER_REQUEST)
+        } catch (e: Exception) {
+            pickResult = null
+            result.error("no_picker", null, null)
+        }
+    }
+
+    private fun onFolderPicked(result: MethodChannel.Result, resultCode: Int, data: Intent?) {
+        val tree = data?.data
+        if (resultCode != Activity.RESULT_OK || tree == null) {
+            result.success(mapOf("files" to emptyList<Any>(), "skipped" to 0))
+            return
+        }
+        try {
+            resolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (e: SecurityException) {
+            // Still readable while the app runs.
+        }
+        background(result) { walk(tree) }
+    }
+
+    /** Every file under [tree], breadth first, with its folder path. */
+    private fun walk(tree: Uri): Map<String, Any> {
+        val rootId = DocumentsContract.getTreeDocumentId(tree)
+        var rootName = "Folder"
+        query(DocumentsContract.buildDocumentUriUsingTree(tree, rootId), arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME)) { c ->
+            if (!c.isNull(0)) rootName = c.getString(0)
+        }
+        val files = ArrayList<Map<String, Any?>>()
+        var skipped = 0
+        val queue = ArrayDeque<Pair<String, String>>()
+        queue.add(rootId to rootName)
+        val columns = arrayOf(
+            DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+            DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+            DocumentsContract.Document.COLUMN_MIME_TYPE,
+            DocumentsContract.Document.COLUMN_SIZE,
+            DocumentsContract.Document.COLUMN_LAST_MODIFIED,
+        )
+        while (queue.isNotEmpty()) {
+            val (docId, folder) = queue.removeFirst()
+            val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, docId)
+            resolver.query(children, columns, null, null, null)?.use { c ->
+                while (c.moveToNext()) {
+                    val id = c.getString(0) ?: continue
+                    val name = c.getString(1) ?: continue
+                    // Hidden files (.nomedia, .thumbnails, ...) are not the user's.
+                    if (name.startsWith(".")) continue
+                    val mime = c.getString(2)
+                    if (mime == DocumentsContract.Document.MIME_TYPE_DIR) {
+                        queue.add(id to "$folder/$name")
+                        continue
+                    }
+                    if (files.size >= MAX_FOLDER_FILES) {
+                        skipped++
+                        continue
+                    }
+                    files += mapOf(
+                        "uri" to DocumentsContract.buildDocumentUriUsingTree(tree, id).toString(),
+                        "name" to name,
+                        "mime" to mime,
+                        "size" to (if (c.isNull(3)) -1L else c.getLong(3)),
+                        "modifiedMs" to (if (c.isNull(4)) null else c.getLong(4)),
+                        "folder" to folder,
+                    )
+                }
+            }
+        }
+        return mapOf("files" to files, "skipped" to skipped)
+    }
+
+    /** The URI holding the persistable grant: a folder file's tree. */
+    private fun grantOf(uri: Uri): Uri =
+        try {
+            if (DocumentsContract.isTreeUri(uri)) {
+                DocumentsContract.buildTreeDocumentUri(uri.authority, DocumentsContract.getTreeDocumentId(uri))
+            } else {
+                uri
+            }
+        } catch (e: Exception) {
+            uri
+        }
+
     /** Called from MainActivity.onActivityResult. */
     fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
+        if (requestCode == FOLDER_REQUEST) {
+            val result = pickResult ?: return true
+            pickResult = null
+            onFolderPicked(result, resultCode, data)
+            return true
+        }
         if (requestCode != PICK_REQUEST) return false
         val result = pickResult ?: return true
         pickResult = null

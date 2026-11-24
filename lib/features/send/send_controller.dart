@@ -139,18 +139,20 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
   }
 
   /// Adds photos and videos from the gallery picker, without duplicates.
-  void addMedia(List<LibraryAsset> assets) {
-    if (state.isRunning || assets.isEmpty) return;
+  /// Returns how many were left out over [maxFilesPerOffer].
+  int addMedia(List<LibraryAsset> assets) {
+    if (state.isRunning || assets.isEmpty) return 0;
     final have = {
       for (final p in state.picked)
         if (p is PickedAsset) p.asset.id,
     };
-    _setPicked([
+    final dropped = _setPicked([
       ...state.picked,
       for (final a in assets)
         if (have.add(a.id)) PickedAsset(a),
     ]);
     unawaited(_nameAssets());
+    return dropped;
   }
 
   /// iOS: the picker knows only ids; fetch the library's file names for
@@ -191,7 +193,22 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
     _setPicked([...state.picked, ...files]);
   }
 
-  void _setPicked(List<PickedItem> picked) {
+  /// Adds every file of a folder the user picks (D-075). Returns how many
+  /// files were left out, for the screen to say.
+  Future<int> pickFolder() async {
+    if (state.isRunning) return 0;
+    final picker = await ref.read(documentPickerProvider.future);
+    final pick = await picker.pickFolder();
+    if (!ref.mounted || pick.files.isEmpty) return pick.skipped;
+    return pick.skipped + _setPicked([...state.picked, ...pick.files]);
+  }
+
+  /// Returns how many were left out: one offer holds at most
+  /// [maxFilesPerOffer] files.
+  int _setPicked(List<PickedItem> all) {
+    final picked = all.length > maxFilesPerOffer
+        ? all.sublist(0, maxFilesPerOffer)
+        : all;
     // A new selection starts a new send; the last one's files go. A send
     // that could still resume cannot without them, so it is given up
     // rather than left offering a Resume that fails (review L5).
@@ -203,6 +220,7 @@ class SendController extends Notifier<SendState> implements BackgroundAware {
       receiverName: state.receiverName,
       receiverTrusted: state.receiverTrusted,
     );
+    return all.length - picked.length;
   }
 
   /// Takes one item out of the selection.

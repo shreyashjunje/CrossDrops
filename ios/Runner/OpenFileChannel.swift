@@ -3,6 +3,7 @@ import Flutter
 import QuickLook
 import QuickLookThumbnailing
 import UIKit
+import UniformTypeIdentifiers
 
 /// Platform channel `crossdrop/open` (Dart side: lib/platform/open_file.dart).
 ///
@@ -10,9 +11,23 @@ import UIKit
 ///   - `photos:<id>`: opens the Photos app. It cannot jump to one photo.
 ///   - A path: previewed with Quick Look, only if it is inside Documents,
 ///     where received files are saved. Anything else is refused.
-final class OpenFileChannel: NSObject, QLPreviewControllerDataSource {
+/// - `pickFolder {staging}` -> `{files: [{path, name, size, modifiedMs,
+///   folder}], skipped}` or nil if the user backed out (D-075). The folder's
+///   files (subfolders included, hidden files left out) are cloned into
+///   `staging`, which keeps them readable for a resume after a restart and
+///   costs no space on APFS. `folder` starts with the folder's own name.
+///   iCloud files not on the phone, files that fail to copy and files past
+///   10,000 are counted in `skipped`.
+final class OpenFileChannel: NSObject, QLPreviewControllerDataSource,
+  UIDocumentPickerDelegate
+{
   private let channel: FlutterMethodChannel
   private var previewURL: URL?
+  private var folderResult: FlutterResult?
+  private var folderStaging: URL?
+
+  /// The protocol's limit per offer (maxFilesPerOffer).
+  private static let maxFolderFiles = 10000
 
   init(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(name: "crossdrop/open", binaryMessenger: messenger)
@@ -23,6 +38,10 @@ final class OpenFileChannel: NSObject, QLPreviewControllerDataSource {
   }
 
   private func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    if call.method == "pickFolder" {
+      pickFolder(call.arguments as? [String: Any] ?? [:], result: result)
+      return
+    }
     guard call.method == "open" else {
       result(FlutterMethodNotImplemented)
       return
@@ -72,6 +91,109 @@ final class OpenFileChannel: NSObject, QLPreviewControllerDataSource {
     var top = (windows.first { $0.isKeyWindow } ?? windows.first)?.rootViewController
     while let presented = top?.presentedViewController { top = presented }
     return top
+  }
+
+  // MARK: Folder picking (D-075)
+
+  private func pickFolder(_ args: [String: Any], result: @escaping FlutterResult) {
+    guard folderResult == nil else {
+      result(FlutterError(code: "busy", message: nil, details: nil))
+      return
+    }
+    guard let staging = args["staging"] as? String, let top = Self.topViewController() else {
+      result(FlutterError(code: "bad_args", message: nil, details: nil))
+      return
+    }
+    folderResult = result
+    folderStaging = URL(fileURLWithPath: staging, isDirectory: true)
+    let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.folder])
+    picker.delegate = self
+    top.present(picker, animated: true)
+  }
+
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    finishFolder(nil)
+  }
+
+  func documentPicker(
+    _ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]
+  ) {
+    guard let root = urls.first, let staging = folderStaging else {
+      finishFolder(nil)
+      return
+    }
+    DispatchQueue.global(qos: .userInitiated).async {
+      let picked = Self.cloneFolder(root, into: staging)
+      DispatchQueue.main.async { self.finishFolder(picked) }
+    }
+  }
+
+  private func finishFolder(_ value: Any?) {
+    let result = folderResult
+    folderResult = nil
+    folderStaging = nil
+    result?(value)
+  }
+
+  /// Clones every visible file under [root] into [staging], keeping the
+  /// folder structure. Names are never logged (hard rule 7).
+  private static func cloneFolder(_ root: URL, into staging: URL) -> [String: Any] {
+    let scoped = root.startAccessingSecurityScopedResource()
+    defer { if scoped { root.stopAccessingSecurityScopedResource() } }
+    let fm = FileManager.default
+    let rootName = root.lastPathComponent
+    let keys: [URLResourceKey] = [
+      .isRegularFileKey, .isDirectoryKey, .fileSizeKey, .contentModificationDateKey,
+    ]
+    var files: [[String: Any]] = []
+    var skipped = 0
+    var coordinationError: NSError?
+    NSFileCoordinator().coordinate(readingItemAt: root, options: [], error: &coordinationError) {
+      readable in
+      guard
+        let walk = fm.enumerator(
+          at: readable, includingPropertiesForKeys: keys, options: [.skipsPackageDescendants])
+      else { return }
+      let base = readable.standardizedFileURL.pathComponents
+      for case let url as URL in walk {
+        let name = url.lastPathComponent
+        if name.hasPrefix(".") {
+          // An iCloud file not downloaded is a hidden ".name.icloud".
+          if name.hasSuffix(".icloud") { skipped += 1 }
+          if (try? url.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory == true {
+            walk.skipDescendants()
+          }
+          continue
+        }
+        guard let values = try? url.resourceValues(forKeys: Set(keys)),
+          values.isRegularFile == true
+        else { continue }
+        if files.count >= maxFolderFiles {
+          skipped += 1
+          continue
+        }
+        let parts = Array(url.standardizedFileURL.pathComponents.dropFirst(base.count).dropLast())
+        let folder = ([rootName] + parts).joined(separator: "/")
+        let dest = staging.appendingPathComponent("\(files.count)", isDirectory: true)
+          .appendingPathComponent(name)
+        do {
+          try fm.createDirectory(
+            at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+          try fm.copyItem(at: url, to: dest)
+        } catch {
+          skipped += 1
+          continue
+        }
+        var file: [String: Any] = [
+          "path": dest.path, "name": name, "size": values.fileSize ?? -1, "folder": folder,
+        ]
+        if let modified = values.contentModificationDate {
+          file["modifiedMs"] = Int(modified.timeIntervalSince1970 * 1000)
+        }
+        files.append(file)
+      }
+    }
+    return ["files": files, "skipped": skipped]
   }
 
   func numberOfPreviewItems(in controller: QLPreviewController) -> Int {

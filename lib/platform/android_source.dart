@@ -93,6 +93,11 @@ class AndroidSources {
   Future<List<String>> pickDocuments() async =>
       await _channel.invokeListMethod<String>('pickDocuments') ?? const [];
 
+  /// The system folder picker (D-075): `{files, skipped}` as described in
+  /// SourceChannel.kt. Empty files if the user backed out.
+  Future<Map<String, Object?>> pickFolder() async =>
+      await _channel.invokeMapMethod<String, Object?>('pickFolder') ?? const {};
+
   /// Gives back the persistable read grants taken by [pickDocuments].
   Future<void> release(List<String> uris) async {
     if (uris.isEmpty) return;

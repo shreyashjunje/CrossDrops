@@ -58,6 +58,7 @@ final class PickedFile extends PickedItem {
     this.created,
     this.platformKind,
     this.size,
+    this.folder,
   });
 
   /// A file path, or a `content://` URI on Android.
@@ -72,6 +73,10 @@ final class PickedFile extends PickedItem {
   /// For the Send screen's total, when the platform said; the size sent
   /// is measured again when preparing.
   final int? size;
+
+  /// Picked as part of a folder (D-075): its path there, starting with the
+  /// folder's own name ("Trip/Day 1").
+  final String? folder;
 
   @override
   String get label => name;
@@ -449,6 +454,7 @@ class Preparer {
       mime: type.mime,
       kind: type.kind,
       created: picked.created,
+      folder: picked.folder,
       // The original, also when a streaming provider's copy is sent.
       thumb: FileThumb(picked.ref, kind: type.kind),
     );

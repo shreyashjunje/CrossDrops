@@ -53,6 +53,11 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     final controller = ref.read(sendControllerProvider.notifier);
     final busy = state.isRunning;
     void addMedia() => _pickMedia(context, ref);
+    Future<void> addFolder() async {
+      final leftOut = await controller.pickFolder();
+      if (context.mounted) _sayLeftOut(context, leftOut);
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Send'),
@@ -94,6 +99,7 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                       enabled: !busy,
                       onMedia: addMedia,
                       onFiles: controller.pickDocuments,
+                      onFolder: addFolder,
                     )
                   else
                     _PickedGrid(
@@ -104,6 +110,7 @@ class _SendScreenState extends ConsumerState<SendScreen> {
                               context,
                               onMedia: addMedia,
                               onFiles: controller.pickDocuments,
+                              onFolder: addFolder,
                             ),
                       onRemove: busy ? null : controller.removePicked,
                     ),
@@ -122,48 +129,63 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     );
   }
 
-  /// The Add tile: photos or files.
+  /// The Add tile: photos, files or a folder.
   Future<void> _chooseSource(
     BuildContext context, {
     required VoidCallback onMedia,
     required VoidCallback onFiles,
+    required VoidCallback onFolder,
   }) => showModalBottomSheet<void>(
     context: context,
+    // Three sources need more than the default height on small phones.
+    isScrollControlled: true,
     builder: (sheet) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(
-          CdSpace.gutter,
-          0,
-          CdSpace.gutter,
-          16,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text('Add more', style: CdType.h3.copyWith(color: sheet.cd.text)),
-            const SizedBox(height: 16),
-            _SourceTile(
-              icon: Icons.photo_library_outlined,
-              title: 'Photos & videos',
-              subtitle: 'From your library',
-              accent: true,
-              onTap: () {
-                Navigator.of(sheet).pop();
-                onMedia();
-              },
-            ),
-            const SizedBox(height: 12),
-            _SourceTile(
-              icon: Icons.insert_drive_file_outlined,
-              title: 'Files',
-              subtitle: 'PDFs, documents, anything',
-              onTap: () {
-                Navigator.of(sheet).pop();
-                onFiles();
-              },
-            ),
-          ],
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(
+            CdSpace.gutter,
+            0,
+            CdSpace.gutter,
+            16,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('Add more', style: CdType.h3.copyWith(color: sheet.cd.text)),
+              const SizedBox(height: 16),
+              _SourceTile(
+                icon: Icons.photo_library_outlined,
+                title: 'Photos & videos',
+                subtitle: 'From your library',
+                accent: true,
+                onTap: () {
+                  Navigator.of(sheet).pop();
+                  onMedia();
+                },
+              ),
+              const SizedBox(height: 12),
+              _SourceTile(
+                icon: Icons.insert_drive_file_outlined,
+                title: 'Files',
+                subtitle: 'PDFs, documents, anything',
+                onTap: () {
+                  Navigator.of(sheet).pop();
+                  onFiles();
+                },
+              ),
+              const SizedBox(height: 12),
+              _SourceTile(
+                icon: Icons.folder_outlined,
+                title: 'Folder',
+                subtitle: 'Everything inside, as a folder',
+                onTap: () {
+                  Navigator.of(sheet).pop();
+                  onFolder();
+                },
+              ),
+            ],
+          ),
         ),
       ),
     ),
@@ -173,9 +195,20 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     final assets = await Navigator.of(context).push<List<LibraryAsset>>(
       MaterialPageRoute(builder: (_) => const GalleryPickerScreen()),
     );
-    if (assets != null) {
-      ref.read(sendControllerProvider.notifier).addMedia(assets);
+    if (assets != null && context.mounted) {
+      _sayLeftOut(
+        context,
+        ref.read(sendControllerProvider.notifier).addMedia(assets),
+      );
     }
+  }
+
+  /// Files a folder or a big selection could not take along.
+  static void _sayLeftOut(BuildContext context, int n) {
+    if (n <= 0 || !context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(n == 1 ? '1 file left out' : '$n files left out')),
+    );
   }
 
   /// Step 2: choose the phone; then the transfer screen takes over.
@@ -225,11 +258,13 @@ class _Sources extends StatelessWidget {
     required this.enabled,
     required this.onMedia,
     required this.onFiles,
+    required this.onFolder,
   });
 
   final bool enabled;
   final VoidCallback onMedia;
   final VoidCallback onFiles;
+  final VoidCallback onFolder;
 
   @override
   Widget build(BuildContext context) {
@@ -262,6 +297,13 @@ class _Sources extends StatelessWidget {
           title: 'Files',
           subtitle: 'PDFs, documents, anything',
           onTap: enabled ? onFiles : null,
+        ),
+        const SizedBox(height: 12),
+        _SourceTile(
+          icon: Icons.folder_outlined,
+          title: 'Folder',
+          subtitle: 'Everything inside, as a folder',
+          onTap: enabled ? onFolder : null,
         ),
       ],
     );
@@ -381,13 +423,46 @@ class _PickedGrid extends StatelessWidget {
               runSpacing: gap,
               children: [
                 if (onAdd != null) _AddTile(size: size, onTap: onAdd!),
-                for (final item in picked)
+                // A folder or a whole album can be thousands: only the first
+                // tiles are built (and their previews loaded).
+                for (final item in picked.take(maxGridTiles))
                   _PickedTile(item: item, size: size, onRemove: onRemove),
+                if (picked.length > maxGridTiles)
+                  _MoreTile(size: size, count: picked.length - maxGridTiles),
               ],
             );
           },
         ),
       ],
+    );
+  }
+}
+
+/// Tiles shown on the Send screen; the rest is counted on one tile.
+const int maxGridTiles = 60;
+
+class _MoreTile extends StatelessWidget {
+  const _MoreTile({required this.size, required this.count});
+
+  final double size;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = context.cd;
+    return Container(
+      width: size,
+      height: size,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: c.surface2,
+        borderRadius: BorderRadius.circular(CdRadius.tile),
+      ),
+      child: Text(
+        '+$count',
+        style: CdType.titleM.copyWith(color: c.text),
+        semanticsLabel: '$count more',
+      ),
     );
   }
 }

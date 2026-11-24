@@ -31,6 +31,7 @@ void main() {
     expect(find.text('What do you want to send?'), findsOneWidget);
     expect(find.text('Photos & videos'), findsOneWidget);
     expect(find.text('Files'), findsOneWidget);
+    expect(find.text('Folder'), findsOneWidget);
     expect(find.textContaining('Send '), findsNothing);
     semantics.dispose();
   });
@@ -75,6 +76,20 @@ void main() {
     expect(find.text('Add more'), findsOneWidget);
     expect(find.text('Photos & videos'), findsOneWidget);
     expect(find.text('Files'), findsOneWidget);
+    expect(find.text('Folder'), findsOneWidget);
     semantics.dispose();
+  });
+
+  testWidgets('a big selection builds only the first tiles, then "+N"', (
+    tester,
+  ) async {
+    final container = await pump(tester);
+    container.read(sendControllerProvider.notifier).addMedia([
+      for (var i = 0; i < 100; i++)
+        LibraryAsset(id: 'a$i', kind: FileKind.photo, originalName: 'P$i.JPG'),
+    ]);
+    await tester.pump();
+    expect(find.text('Send 100 items'), findsOneWidget);
+    expect(find.text('+${100 - maxGridTiles}'), findsOneWidget);
   });
 }
