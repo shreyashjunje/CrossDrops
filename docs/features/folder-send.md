@@ -53,3 +53,6 @@ Device checks: [DEVICE_TESTS.md](../DEVICE_TESTS.md), section "Folders and Selec
 - A folder shows as its files on the Send screen; there is no single item to remove it in one tap (Clear removes everything).
 - Photos sent inside a folder go to Files on the iPhone, not to Photos.
 - iCloud files that are not on the iPhone are left out and counted.
+- Sending the same folder again adds to the folder already there: files whose names are taken get " (1)" (`IMG_1.jpg` and `IMG_1 (1).jpg`). No new `Trip (1)` folder is made.
+- A file whose folder path is longer than 1,024 characters is left out and counted, so the rest of the folder can still go.
+- Removing one file of a folder from the selection keeps the folder's Android grant until the selection is sent or cleared.
