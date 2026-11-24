@@ -154,32 +154,16 @@ class _SendScreenState extends ConsumerState<SendScreen> {
             children: [
               Text('Add more', style: CdType.h3.copyWith(color: sheet.cd.text)),
               const SizedBox(height: 16),
-              _SourceTile(
-                icon: Icons.photo_library_outlined,
-                title: 'Photos & videos',
-                subtitle: 'From your library',
-                accent: true,
-                onTap: () {
+              _SourceTiles(
+                onMedia: () {
                   Navigator.of(sheet).pop();
                   onMedia();
                 },
-              ),
-              const SizedBox(height: 12),
-              _SourceTile(
-                icon: Icons.insert_drive_file_outlined,
-                title: 'Files',
-                subtitle: 'PDFs, documents, anything',
-                onTap: () {
+                onFiles: () {
                   Navigator.of(sheet).pop();
                   onFiles();
                 },
-              ),
-              const SizedBox(height: 12),
-              _SourceTile(
-                icon: Icons.folder_outlined,
-                title: 'Folder',
-                subtitle: 'Everything inside, as a folder',
-                onTap: () {
+                onFolder: () {
                   Navigator.of(sheet).pop();
                   onFolder();
                 },
@@ -252,7 +236,7 @@ class _Busy extends StatelessWidget {
   );
 }
 
-/// Nothing picked yet: two sources, nothing else to decide.
+/// Nothing picked yet: the sources, nothing else to decide.
 class _Sources extends StatelessWidget {
   const _Sources({
     required this.enabled,
@@ -284,30 +268,56 @@ class _Sources extends StatelessWidget {
           style: CdType.bodyL.copyWith(color: c.text2),
         ),
         const SizedBox(height: 28),
-        _SourceTile(
-          icon: Icons.photo_library_outlined,
-          title: 'Photos & videos',
-          subtitle: 'From your library, Live Photos included',
-          accent: true,
-          onTap: enabled ? onMedia : null,
-        ),
-        const SizedBox(height: 12),
-        _SourceTile(
-          icon: Icons.insert_drive_file_outlined,
-          title: 'Files',
-          subtitle: 'PDFs, documents, anything',
-          onTap: enabled ? onFiles : null,
-        ),
-        const SizedBox(height: 12),
-        _SourceTile(
-          icon: Icons.folder_outlined,
-          title: 'Folder',
-          subtitle: 'Everything inside, as a folder',
-          onTap: enabled ? onFolder : null,
+        _SourceTiles(
+          onMedia: enabled ? onMedia : null,
+          onFiles: enabled ? onFiles : null,
+          onFolder: enabled ? onFolder : null,
         ),
       ],
     );
   }
+}
+
+/// The three sources, on the empty screen and in the Add sheet. A null
+/// callback shows the tile disabled.
+class _SourceTiles extends StatelessWidget {
+  const _SourceTiles({
+    required this.onMedia,
+    required this.onFiles,
+    required this.onFolder,
+  });
+
+  final VoidCallback? onMedia;
+  final VoidCallback? onFiles;
+  final VoidCallback? onFolder;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _SourceTile(
+        icon: Icons.photo_library_outlined,
+        title: 'Photos & videos',
+        subtitle: 'From your library, Live Photos included',
+        accent: true,
+        onTap: onMedia,
+      ),
+      const SizedBox(height: 12),
+      _SourceTile(
+        icon: Icons.insert_drive_file_outlined,
+        title: 'Files',
+        subtitle: 'PDFs, documents, anything',
+        onTap: onFiles,
+      ),
+      const SizedBox(height: 12),
+      _SourceTile(
+        icon: Icons.folder_outlined,
+        title: 'Folder',
+        subtitle: 'Everything inside, as a folder',
+        onTap: onFolder,
+      ),
+    ],
+  );
 }
 
 class _SourceTile extends StatelessWidget {
