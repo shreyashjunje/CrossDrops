@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../core/log.dart';
 import '../core/media/prepare.dart';
+import '../core/protocol/models.dart';
 import '../core/storage/file_name_sanitizer.dart';
 import 'android_source.dart';
 
@@ -16,7 +17,8 @@ typedef FolderPick = ({List<PickedFile> files, int skipped});
 
 /// Reads a native `pickFolder` answer; [refKey] names the field that
 /// holds the file's reference (`uri` on Android, `path` on iOS). Entries
-/// missing a field are left out and counted.
+/// missing a field, or with a folder path over [maxFolderPathLength], are
+/// left out and counted.
 FolderPick parseFolderPick(Map<Object?, Object?>? m, {required String refKey}) {
   final raw = m?['files'] as List<Object?>? ?? const [];
   var skipped = (m?['skipped'] as num?)?.toInt() ?? 0;
@@ -29,7 +31,11 @@ FolderPick parseFolderPick(Map<Object?, Object?>? m, {required String refKey}) {
     final ref = e[refKey];
     final name = e['name'];
     final folder = e['folder'];
-    if (ref is! String || name is! String || folder is! String) {
+    // A path the receiver would refuse would sink the whole offer.
+    if (ref is! String ||
+        name is! String ||
+        folder is! String ||
+        folder.length > maxFolderPathLength) {
       skipped++;
       continue;
     }

@@ -19,6 +19,7 @@ void main() {
         },
         {'uri': 'content://x/3', 'name': 'b.txt', 'size': -1, 'folder': 'Trip'},
         {'uri': 'content://x/4', 'name': 'no folder'},
+        {'uri': 'content://x/5', 'name': 'deep', 'folder': 'a' * 1025},
         'not a map',
       ],
       'skipped': 3,
@@ -37,8 +38,8 @@ void main() {
     );
     expect(a.created, DateTime.utc(2026));
     expect(pick.files.last.size, isNull);
-    // 3 from the platform, 2 unreadable entries here.
-    expect(pick.skipped, 5);
+    // 3 from the platform, 3 unusable entries here.
+    expect(pick.skipped, 6);
   });
 
   test('backing out of the picker is an empty pick', () {
