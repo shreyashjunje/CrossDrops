@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:crossdrop/core/media/prepare.dart';
 import 'package:crossdrop/platform/document_picker.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 
@@ -65,5 +66,39 @@ void main() {
     await picker.release([PickedFile(ref: b.path, name: 'b.jpg')]);
     expect(Directory(p.join(root.path, 'doc-1')).existsSync(), isFalse);
     expect(root.existsSync(), isTrue);
+  });
+
+  group('iOS folder pick errors', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    const channel = MethodChannel('crossdrop/open');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+    Future<Directory> answer(String code) async {
+      final root = await Directory.systemTemp.createTemp('staging');
+      addTearDown(() => root.delete(recursive: true));
+      messenger.setMockMethodCallHandler(
+        channel,
+        (_) async => throw PlatformException(code: code),
+      );
+      return root;
+    }
+
+    test('a folder too big to copy says so (D-077)', () async {
+      final root = await answer('no_space');
+      await expectLater(
+        IosDocumentPicker(root.path).pickFolder(),
+        throwsA(isA<FolderTooLarge>()),
+      );
+      expect(root.listSync(), isEmpty, reason: 'the empty batch is gone');
+    });
+
+    test('another picker error is an empty pick', () async {
+      final root = await answer('busy');
+      final pick = await IosDocumentPicker(root.path).pickFolder();
+      expect(pick.files, isEmpty);
+      expect(root.listSync(), isEmpty);
+    });
   });
 }

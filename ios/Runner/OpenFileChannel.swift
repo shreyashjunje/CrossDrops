@@ -135,9 +135,15 @@ final class OpenFileChannel: NSObject, QLPreviewControllerDataSource,
     result?(value)
   }
 
+  /// Free space kept when copying a folder from another volume.
+  private static let copyReserve: Int64 = 256 * 1024 * 1024
+
   /// Clones every visible file under [root] into [staging], keeping the
-  /// folder structure. Names are never logged (hard rule 7).
-  private static func cloneFolder(_ root: URL, into staging: URL) -> [String: Any] {
+  /// folder structure. A folder on another volume (a USB drive, a file
+  /// server) cannot be cloned: every byte is copied, so such a folder is
+  /// refused with `no_space` when it would not fit, and a copy that runs
+  /// out of space stops (D-077). Names are never logged (hard rule 7).
+  private static func cloneFolder(_ root: URL, into staging: URL) -> Any {
     let scoped = root.startAccessingSecurityScopedResource()
     defer { if scoped { root.stopAccessingSecurityScopedResource() } }
     let fm = FileManager.default
@@ -145,8 +151,10 @@ final class OpenFileChannel: NSObject, QLPreviewControllerDataSource,
     let keys: [URLResourceKey] = [
       .isRegularFileKey, .isDirectoryKey, .fileSizeKey, .contentModificationDateKey,
     ]
+    var found: [(url: URL, values: URLResourceValues, folder: String)] = []
     var files: [[String: Any]] = []
     var skipped = 0
+    var noSpace = false
     var coordinationError: NSError?
     NSFileCoordinator().coordinate(readingItemAt: root, options: [], error: &coordinationError) {
       readable in
@@ -168,32 +176,71 @@ final class OpenFileChannel: NSObject, QLPreviewControllerDataSource,
         guard let values = try? url.resourceValues(forKeys: Set(keys)),
           values.isRegularFile == true
         else { continue }
-        if files.count >= maxFolderFiles {
+        if found.count >= maxFolderFiles {
           skipped += 1
           continue
         }
         let parts = Array(url.standardizedFileURL.pathComponents.dropFirst(base.count).dropLast())
-        let folder = ([rootName] + parts).joined(separator: "/")
+        found.append((url, values, ([rootName] + parts).joined(separator: "/")))
+      }
+      if !sameVolume(readable, staging), let free = freeBytes(staging) {
+        let total = found.reduce(Int64(0)) { $0 + Int64($1.values.fileSize ?? 0) }
+        if total + copyReserve > free {
+          noSpace = true
+          return
+        }
+      }
+      for (i, item) in found.enumerated() {
+        let name = item.url.lastPathComponent
         let dest = staging.appendingPathComponent("\(files.count)", isDirectory: true)
           .appendingPathComponent(name)
         do {
           try fm.createDirectory(
             at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-          try fm.copyItem(at: url, to: dest)
+          try fm.copyItem(at: item.url, to: dest)
         } catch {
+          if isOutOfSpace(error) {
+            // Never fill the phone: the rest is left out.
+            try? fm.removeItem(at: dest)
+            skipped += found.count - i
+            break
+          }
           skipped += 1
           continue
         }
         var file: [String: Any] = [
-          "path": dest.path, "name": name, "size": values.fileSize ?? -1, "folder": folder,
+          "path": dest.path, "name": name, "size": item.values.fileSize ?? -1,
+          "folder": item.folder,
         ]
-        if let modified = values.contentModificationDate {
+        if let modified = item.values.contentModificationDate {
           file["modifiedMs"] = Int(modified.timeIntervalSince1970 * 1000)
         }
         files.append(file)
       }
     }
+    if noSpace { return FlutterError(code: "no_space", message: nil, details: nil) }
     return ["files": files, "skipped": skipped]
+  }
+
+  /// False when either volume is unknown: the size check then runs.
+  private static func sameVolume(_ a: URL, _ b: URL) -> Bool {
+    guard let x = (try? a.resourceValues(forKeys: [.volumeIdentifierKey]))?.volumeIdentifier,
+      let y = (try? b.resourceValues(forKeys: [.volumeIdentifierKey]))?.volumeIdentifier
+    else { return false }
+    return x.isEqual(y)
+  }
+
+  private static func freeBytes(_ url: URL) -> Int64? {
+    (try? url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey]))?
+      .volumeAvailableCapacityForImportantUsage
+  }
+
+  private static func isOutOfSpace(_ error: Error) -> Bool {
+    let e = error as NSError
+    if e.domain == NSCocoaErrorDomain && e.code == NSFileWriteOutOfSpaceError { return true }
+    if e.domain == NSPOSIXErrorDomain && e.code == Int(ENOSPC) { return true }
+    guard let under = e.userInfo[NSUnderlyingErrorKey] as? NSError else { return false }
+    return under.domain == NSPOSIXErrorDomain && under.code == Int(ENOSPC)
   }
 
   func numberOfPreviewItems(in controller: QLPreviewController) -> Int {

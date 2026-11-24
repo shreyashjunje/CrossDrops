@@ -57,6 +57,13 @@ FolderPick parseFolderPick(Map<Object?, Object?>? m, {required String refKey}) {
   return (files: files, skipped: skipped);
 }
 
+/// The picked folder would not fit on this phone: on iOS a folder on
+/// another volume (a USB drive, a file server) is copied before it is
+/// sent, and nothing was copied (D-077).
+class FolderTooLarge implements Exception {
+  const FolderTooLarge();
+}
+
 /// The system picker for "any file" (D-041), and for a folder (D-075).
 abstract interface class DocumentPicker {
   /// Empty if the user backed out.
@@ -157,9 +164,17 @@ class IosDocumentPicker implements DocumentPicker {
   Future<FolderPick> pickFolder() async {
     final batch = p.join(stagingRoot, 'doc-${_id()}');
     await Directory(batch).create(recursive: true);
-    final m = await _channel.invokeMapMethod<Object?, Object?>('pickFolder', {
-      'staging': batch,
-    });
+    final Map<Object?, Object?>? m;
+    try {
+      m = await _channel.invokeMapMethod<Object?, Object?>('pickFolder', {
+        'staging': batch,
+      });
+    } on PlatformException catch (e) {
+      await deleteStaging(batch);
+      if (e.code == 'no_space') throw const FolderTooLarge();
+      logEvent('picker', 'folder pick failed (${e.code})');
+      return (files: const <PickedFile>[], skipped: 0);
+    }
     final pick = parseFolderPick(m, refKey: 'path');
     if (pick.files.isEmpty) await deleteStaging(batch);
     return pick;

@@ -1955,6 +1955,11 @@ Same build on both phones. Any connection works (Wi-Fi, hotspot or cable).
 
 1. During D-3, turn Wi-Fi off on the receiver for 10 s (or unplug the cable). Expected: it resumes and the folder structure is kept.
 
+### D-7: Folder on a USB drive (iPhone, D-077)
+
+1. Plug a USB-C drive into the iPhone with a folder bigger than the iPhone's free space. Send > Folder > pick it. Expected: after a while, "Not enough free space to copy that folder from the drive"; nothing selected; free space unchanged in Settings > General > iPhone Storage.
+2. Pick a small folder on the same drive. Expected: its files are selected and the send completes, byte for byte.
+
 ### Results
 
 | Check | Date | iPhone (model, iOS) | Android (model, version) | Connection | Commit | Result | Notes |
@@ -1965,3 +1970,4 @@ Same build on both phones. Any connection works (Wi-Fi, hotspot or cable).
 | D-4 | | | | | | | |
 | D-5 | | | | | | | |
 | D-6 | | | | | | | |
+| D-7 | | | | | | | |

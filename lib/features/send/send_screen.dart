@@ -10,6 +10,7 @@ import '../../core/client/peer_check.dart';
 import '../../core/media/format_plan.dart';
 import '../../core/media/prepare.dart';
 import '../../core/protocol/models.dart';
+import '../../platform/document_picker.dart';
 import '../nearby/nearby_screen.dart';
 import '../transfer/transfer_format.dart';
 import '../transfer/file_thumbnail.dart';
@@ -54,8 +55,20 @@ class _SendScreenState extends ConsumerState<SendScreen> {
     final busy = state.isRunning;
     void addMedia() => _pickMedia(context, ref);
     Future<void> addFolder() async {
-      final leftOut = await controller.pickFolder();
-      if (context.mounted) _sayLeftOut(context, leftOut);
+      try {
+        final leftOut = await controller.pickFolder();
+        if (context.mounted) _sayLeftOut(context, leftOut);
+      } on FolderTooLarge {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Not enough free space to copy that folder from the drive. '
+              'Free some space or pick a smaller folder.',
+            ),
+          ),
+        );
+      }
     }
 
     return Scaffold(
