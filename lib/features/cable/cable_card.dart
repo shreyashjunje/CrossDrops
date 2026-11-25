@@ -92,7 +92,7 @@ String cableCardText(UsbCableState? cable, {required bool receivingOff}) {
           'Unplug it and plug it in again to be asked again.',
     'no_usbmux' || 'handshake' || 'open_failed' =>
       'The cable link did not start. Unlock the iPhone, unplug it and plug '
-          'it in again.',
+          'it in again. If the iPhone asks "Trust This Computer?", tap Trust.',
     _ =>
       'Open CrossDrop on the iPhone to send photos, videos and files over '
           'this cable, either way. No Wi-Fi needed.',

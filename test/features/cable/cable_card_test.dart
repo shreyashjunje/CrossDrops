@@ -77,7 +77,7 @@ void main() {
         const UsbCableState('stopped', 'handshake'),
         receivingOff: false,
       ),
-      contains('did not start'),
+      allOf(contains('did not start'), contains('tap Trust')),
     );
   });
 }
