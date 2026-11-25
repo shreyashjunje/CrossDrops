@@ -1905,9 +1905,27 @@ The iPhone app sends to the Android over the USB cable only. Same build on both 
 2. Expected: the code on both phones the first time, Accept on the iPhone, everything arrives in Photos, Done says verified. Note MB/s.
 3. Turn Receiving off on the iPhone. Expected: within a few seconds the iPhone disappears from the Android's list; the Android card says "Ready. On the iPhone, open CrossDrop…".
 
+### C-10: Cable while the Android is on a Wi-Fi without internet
+
+1. Android: **mobile data on**, join a Wi-Fi with no internet (as in P7-6), open CrossDrop. Log, expected: `bound to Wi-Fi (no internet there)`. iPhone: Wi-Fi off.
+2. Plug in and send 20 photos iPhone → Android over the cable.
+3. Expected: the card shows **Ready** and every photo arrives. Paste the `crossdrop.cable` lines if a dial fails.
+
+### C-11: Unplug for good, finish on Wi-Fi
+
+1. Both phones on the same Wi-Fi, cable plugged in. Send a large video iPhone → Android by tapping **"Connected by cable"**.
+2. At about 30 %, unplug the cable and leave it out.
+3. Expected: "Connection lost. Trying again…", then it continues over Wi-Fi from where it was (not from 0) and the video verifies.
+
+### C-12: Cable with Local Network off (iPhone)
+
+1. iPhone: Settings > Privacy & Security > Local Network > CrossDrop **off**. Wi-Fi off. Android: Receiving on, cable plugged in.
+2. iPhone: Send > pick a photo > Nearby, wait 10 s.
+3. Expected: **"<name> · Connected by cable"** stays at the top (not the "CrossDrop needs Local Network access" screen); tapping it sends the photo.
+
 ### Not checked on devices
 
-Everything in this section. On the PC: the Android sending through its bridge dialer to a real receiver (82 files, striped videos, byte for byte), the cable host and dialer (pinning, refused and silent dials, workers in other isolates), the iPhone link (hello, takeover, oversized lines, loopback only), 122 files and an unplug with resume through a fake bridge, and the Android controller (start, update, stop, refused permission). Not on the PC at all: `UsbMux.kt` and `CableBridge.kt` (usbmux over real USB), and whether the iPhone takes usbmux connections to sockets bound to 127.0.0.1 only.
+Everything in this section. On the PC: the Android sending through its bridge dialer to a real receiver (82 files, striped videos, byte for byte), the cable host and dialer (pinning, refused and silent dials, workers in other isolates), the iPhone link (hello, takeover, oversized lines, loopback only), 122 files and an unplug with resume through a fake bridge, an unplug for good that finishes at the receiver's other address, and the Android controller (start, update, stop, refused permission). Not on the PC at all: `UsbMux.kt` and `CableBridge.kt` (usbmux over real USB), and whether the iPhone takes usbmux connections to sockets bound to 127.0.0.1 only.
 
 ### Results
 
@@ -1922,6 +1940,9 @@ Everything in this section. On the PC: the Android sending through its bridge di
 | C-7 | | | | | | | |
 | C-8 | | | | | | | |
 | C-9 | | | | | | | |
+| C-10 | | | | | | | |
+| C-11 | | | | | | | |
+| C-12 | | | | | | | |
 
 ## Folders and Select all (D-075)
 
