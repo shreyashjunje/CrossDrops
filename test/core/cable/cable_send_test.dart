@@ -55,20 +55,25 @@ void main() {
     return bridge;
   }
 
-  SendSession session(List<SendItem> items) => SendSession(
-    host: cableHost,
-    port: r.port,
-    sender: testSender,
-    items: items,
-    receiverFingerprint: identity.fingerprint,
-    credentials: me,
-    expectedDeviceId: testDeviceInfo.id,
-    backoff: () => Backoff(
-      steps: const [Duration(milliseconds: 50), Duration(milliseconds: 200)],
-      giveUpAfter: const Duration(seconds: 30),
-    ),
-    pollInterval: const Duration(milliseconds: 50),
-  );
+  SendSession session(List<SendItem> items, {PeerLocator? locate}) =>
+      SendSession(
+        host: cableHost,
+        port: r.port,
+        sender: testSender,
+        items: items,
+        locate: locate,
+        receiverFingerprint: identity.fingerprint,
+        credentials: me,
+        expectedDeviceId: testDeviceInfo.id,
+        backoff: () => Backoff(
+          steps: const [
+            Duration(milliseconds: 50),
+            Duration(milliseconds: 200),
+          ],
+          giveUpAfter: const Duration(seconds: 30),
+        ),
+        pollInterval: const Duration(milliseconds: 50),
+      );
 
   Future<Map<String, String>> makeFiles(
     List<SendItem> items,
@@ -154,6 +159,43 @@ void main() {
       expect(unplugged, isTrue);
       expect(result.phase, SendPhase.done, reason: result.reason);
       await expectSaved(shas, items);
+    },
+    timeout: const Timeout(Duration(minutes: 3)),
+  );
+
+  test(
+    'unplugged for good: it finds the receiver on Wi-Fi and finishes there',
+    () async {
+      final bridge = await plugIn();
+      final items = <SendItem>[];
+      final shas = {
+        ...await makeFiles(items, 'video', 1, 48 * mb),
+        ...await makeFiles(items, 'photo', 20, 200 * 1024),
+      };
+      var plugged = true;
+      // Like SendController._locator: the cable while plugged, else
+      // discovery (here the receiver's loopback address stands in for Wi-Fi).
+      final s = session(
+        items,
+        locate: () async => plugged
+            ? (host: cableHost, port: r.port)
+            : (host: '127.0.0.1', port: r.port),
+      );
+      var dialsAtUnplug = -1;
+      final sub = s.updates.listen((u) {
+        if (plugged && u.phase == SendPhase.sending && u.sentBytes > 8 * mb) {
+          plugged = false;
+          dialsAtUnplug = bridge.dials.length;
+          bridge.unplug();
+        }
+      });
+      final result = await s.run();
+      await sub.cancel();
+      expect(dialsAtUnplug, greaterThan(0));
+      expect(result.phase, SendPhase.done, reason: result.reason);
+      await expectSaved(shas, items);
+      // Nothing more went through the cable after it was pulled.
+      expect(bridge.dials, hasLength(dialsAtUnplug));
     },
     timeout: const Timeout(Duration(minutes: 3)),
   );
