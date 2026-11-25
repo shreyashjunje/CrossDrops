@@ -187,7 +187,8 @@ class _NearbyScreenState extends ConsumerState<NearbyScreen> {
     );
 
     final Widget body;
-    if (state.permissionDenied) {
+    // The cable needs no Local Network access: keep its row reachable.
+    if (state.permissionDenied && cable == null) {
       body = LocalNetworkDeniedView(
         onOpenSettings: () => ref.read(localNetworkProvider).openSettings(),
         onRetry: _controller.refresh,
